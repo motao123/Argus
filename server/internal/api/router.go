@@ -85,6 +85,10 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), s.updateAlert)
 			authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), s.deleteAlert)
 
+			// 离线/上线通知（admin）
+			authed.GET("/offline-notify", s.getOfflineNotify)
+			authed.POST("/offline-notify", s.saveOfflineNotify)
+
 			// 站点设置（admin）
 			authed.GET("/settings", s.getSettings)
 			authed.POST("/settings", s.saveSettings)

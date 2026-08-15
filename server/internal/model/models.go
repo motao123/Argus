@@ -1,7 +1,10 @@
 // Package model 定义 Argus 数据模型。
 package model
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Server 一台被监控服务器（持久化配置）。
 type Server struct {
@@ -36,6 +39,27 @@ type User struct {
 	TwoFASecret  string    `gorm:"size:64;default:''" json:"-"`
 	TwoFAEnabled bool      `gorm:"default:false" json:"two_fa_enabled"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+// OfflineNotify 离线/上线通知配置（借鉴 komari notifier/offline）。
+type OfflineNotify struct {
+	ID           int64     `gorm:"primaryKey" json:"id"`
+	WebhookID    int64     `json:"webhook_id"` // 0 = 不通知
+	OfflineAfter int       `gorm:"default:60" json:"offline_after"` // 离线多少秒后通知
+	Enabled      bool      `gorm:"default:true" json:"enabled"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// OfflineAfterStr 格式化离线时长（秒 → 可读）。
+func (o *OfflineNotify) OfflineAfterStr() string {
+	d := time.Duration(o.OfflineAfter) * time.Second
+	if d >= time.Hour {
+		return fmt.Sprintf("%.0f 小时", d.Hours())
+	}
+	if d >= time.Minute {
+		return fmt.Sprintf("%.0f 分钟", d.Minutes())
+	}
+	return fmt.Sprintf("%d 秒", o.OfflineAfter)
 }
 
 // NotificationGroup 通知分组（多对多扇出，借鉴 nezha）。

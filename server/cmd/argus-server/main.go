@@ -117,6 +117,11 @@ func main() {
 		}
 	}()
 
+	// 离线/上线通知哨兵（借鉴 komari notifier/offline）
+	offlineSentinel := alert.NewOfflineSentinel(gdb, st)
+	go offlineSentinel.Run()
+	defer offlineSentinel.Stop()
+
 	// 服务监控哨兵
 	svcSentinel := sentinel.New(gdb)
 	svcSentinel.NotifyCb = func(svc *model.Service, up bool) {
