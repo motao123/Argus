@@ -43,6 +43,11 @@ func (s *Server) dashboardWS(c *gin.Context) {
 
 	p := principalFromContext(c)
 	isGuest := p == nil
+	if isGuest && s.GetSetting(SettingForceAuth, "0") == "1" {
+		// 私有站点模式：游客 WS 拒绝（防止绕过登录墙）
+		_ = conn.Close()
+		return
+	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {

@@ -138,6 +138,19 @@ func (s *Server) optionalAuthMiddleware() gin.HandlerFunc {
 }
 
 // requireAuth 写操作必须登录（游客 401）。
+// forceAuth 私有站点模式：开启时游客读接口 401（借鉴 komari 私有站点 + nezha force_auth）。
+func (s *Server) forceAuth(c *gin.Context) {
+	if s.GetSetting(SettingForceAuth, "0") == "1" {
+		p := principalFromContext(c)
+		if p == nil {
+			fail(c, http.StatusUnauthorized, "login required (private site)")
+			c.Abort()
+			return
+		}
+	}
+	c.Next()
+}
+
 func requireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		p := principalFromContext(c)

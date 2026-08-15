@@ -52,11 +52,11 @@ func New(s *Server) *gin.Engine {
 		pub := api.Group("", s.optionalAuthMiddleware())
 		{
 			pub.GET("/public/settings", s.getPublicSettings)
-			pub.GET("/servers", s.listServers)
-			pub.GET("/servers/:id/metrics", s.serverMetrics)
-			pub.GET("/servers/:id/transfer", s.serverTransfer)
-			pub.GET("/services", s.listServices)
-			pub.GET("/services/:id/history", s.serviceHistory)
+			pub.GET("/servers", s.forceAuth, s.listServers)
+			pub.GET("/servers/:id/metrics", s.forceAuth, s.serverMetrics)
+			pub.GET("/servers/:id/transfer", s.forceAuth, s.serverTransfer)
+			pub.GET("/services", s.forceAuth, s.listServices)
+			pub.GET("/services/:id/history", s.forceAuth, s.serviceHistory)
 		}
 
 		// 写接口：必须登录
