@@ -15,6 +15,7 @@ import (
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/alert"
 	"github.com/motao123/Argus/server/internal/api"
+	"github.com/motao123/Argus/server/internal/mcp"
 	"github.com/motao123/Argus/server/internal/nat"
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/db"
@@ -96,6 +97,12 @@ func main() {
 	})
 
 	// 7. Agent WebSocket 端点（不经过 JWT，走 secret 鉴权）
+	// MCP 端点（PAT 认证）
+	mcpServer := &mcp.Server{DB: gdb, Peers: agents.Peers, IdentifyPAT: srv.IdentifyPATToken}
+	router.Any("/mcp", func(c *gin.Context) {
+		mcpServer.Handler().ServeHTTP(c.Writer, c.Request)
+	})
+
 	router.GET("/ws/agent", func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {

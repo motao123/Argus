@@ -194,6 +194,15 @@ func (s *Server) identify(raw string) (*principal, error) {
 	return &principal{UserID: user.ID, Username: user.Username, IsAdmin: user.Role == model.RoleAdmin}, nil
 }
 
+// IdentifyPATToken 供 MCP 端点校验 PAT，返回用户 ID（供 mcp.Server 注入）。
+func (s *Server) IdentifyPATToken(raw string) (int64, bool) {
+	p, err := s.identifyPAT(raw)
+	if err != nil {
+		return 0, false
+	}
+	return p.UserID, true
+}
+
 func (s *Server) identifyPAT(raw string) (*principal, error) {
 	hash := sha256.Sum256([]byte(raw))
 	var tok model.APIToken
