@@ -64,14 +64,30 @@ cd ../agent && go build -o argus-agent ./cmd/argus-agent
 cd web && pnpm install && pnpm dev:mock
 ```
 
-## 功能
+## 功能（整合 komari + nezha 生态）
 
+**监控**
 - [x] 实时监控：CPU / 内存 / 磁盘 / 网络速率 / 负载 / 在线状态
-- [x] 历史指标：SQLite 分钟级降采样，Recharts 曲线
-- [x] 报警规则：阈值 + 持续时长，Webhook 通知，失败/恢复双向提醒
-- [x] 定时任务：cron 表达式向指定服务器下发命令
+- [x] 历史指标：SQLite 分钟级降采样 + 聚合查询（1h/24h/7d）
+- [x] 服务监控：HTTP / TCP / Ping 探测，今日可用率 + 30 天色块
 - [x] 网页终端：xterm.js + WebSocket 隧道
-- [x] 服务器管理：注册密钥、分组、备注
+
+**运维**
+- [x] 定时任务：cron 表达式向指定服务器下发命令，手动触发
+- [x] 文件管理器：远端目录浏览 / 上传 / 预览 / 删除
+- [x] 远程执行：管理台直接执行命令并查看输出
+
+**告警**
+- [x] 报警规则：阈值 + 持续时长状态机，触发/恢复双向提醒
+- [x] 通知渠道：webhook / bark / telegram / email / serverchan
+
+**权限**
+- [x] 多用户：admin / user 两级，用户仅见名下服务器
+- [x] PAT 令牌：argus:{resource}:{verb} scope + 白名单 + 吊销
+
+**前端**
+- [x] 总览：统计卡、状态过滤、9 种排序、搜索分组
+- [x] 服务器 / 报警 / 任务 / 服务监控 / 文件 / 访问控制管理页
 - [x] 主题：light / dark
 
 ## 协议
