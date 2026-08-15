@@ -50,6 +50,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.Setting{},
 		&model.ServerGroup{},
 		&model.OfflineNotify{},
+		&model.TrafficReport{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

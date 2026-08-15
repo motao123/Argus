@@ -85,6 +85,10 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), s.updateAlert)
 			authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), s.deleteAlert)
 
+			// 流量报告配置（admin）
+			authed.GET("/traffic-report", s.getTrafficReport)
+			authed.POST("/traffic-report", s.saveTrafficReport)
+
 			// 消息发送测试（admin）
 			authed.POST("/test-message", s.testSendMessage)
 

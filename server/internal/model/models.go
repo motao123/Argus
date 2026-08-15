@@ -41,6 +41,15 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// TrafficReport 流量定时报告配置（借鉴 komari 流量报告通知）。
+type TrafficReport struct {
+	ID           int64     `gorm:"primaryKey" json:"id"`
+	WebhookID    int64     `json:"webhook_id"`
+	Hour         int       `gorm:"default:9" json:"hour"` // 每天几点发送
+	Enabled      bool      `gorm:"default:false" json:"enabled"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 // OfflineNotify 离线/上线通知配置（借鉴 komari notifier/offline）。
 type OfflineNotify struct {
 	ID           int64     `gorm:"primaryKey" json:"id"`

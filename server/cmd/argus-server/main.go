@@ -180,6 +180,21 @@ func main() {
 	}
 	srv.ReloadOAuthConfigs()
 
+	// 每日任务：流量报告 + 到期提醒（借鉴 komari 流量报告/renewal）
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		lastDay := -1
+		for range ticker.C {
+			if time.Now().Day() == lastDay {
+				continue
+			}
+			lastDay = time.Now().Day()
+			srv.RunTrafficReport()
+			srv.RunExpireCheck()
+		}
+	}()
+
 	// 周期流量落库（每小时消费差值队列，借鉴 nezha Transfer）
 	go func() {
 		ticker := time.NewTicker(time.Hour)
