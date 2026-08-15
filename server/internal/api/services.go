@@ -238,6 +238,37 @@ func (s *Server) serviceHistory(c *gin.Context) {
 	ok(c, gin.H{"period": period, "points": out})
 }
 
+// serviceStats 服务统计汇总（最近 24h：可用率/平均延迟/最大延迟/丢包率）。
+func (s *Server) serviceStats(c *gin.Context) {
+	id := mustID(c)
+	from := time.Now().Add(-24 * time.Hour).Unix()
+	var agg struct {
+		Up, Total int64
+		DelaySum  int64
+		MaxDelay  int64
+	}
+	s.DB.Model(&model.ServiceHistory{}).
+		Select(`COALESCE(SUM(up_count),0) as up, COALESCE(SUM(total),0) as total,
+		        COALESCE(SUM(delay_sum),0) as delay_sum, COALESCE(MAX(delay_sum/total),0) as max_delay`).
+		Where("service_id = ? AND ts >= ?", id, from).
+		Scan(&agg)
+	upRate := 0.0
+	lossRate := 0.0
+	avgDelay := 0
+	if agg.Total > 0 {
+		upRate = float64(agg.Up) / float64(agg.Total) * 100
+		lossRate = 100 - upRate
+		avgDelay = int(agg.DelaySum / agg.Total)
+	}
+	ok(c, gin.H{
+		"up_rate":    round2(upRate),
+		"loss_rate":  round2(lossRate),
+		"avg_delay":  avgDelay,
+		"max_delay":  int(agg.MaxDelay),
+		"total_probes": agg.Total,
+	})
+}
+
 // canManage 检查当前身份能否管理 owner 的资源。
 func (s *Server) canManage(ownerID *int64, c *gin.Context) bool {
 	p := principalFromContext(c)

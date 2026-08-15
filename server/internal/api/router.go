@@ -57,6 +57,7 @@ func New(s *Server) *gin.Engine {
 			pub.GET("/servers/:id/transfer", s.forceAuth, s.serverTransfer)
 			pub.GET("/services", s.forceAuth, s.listServices)
 			pub.GET("/services/:id/history", s.forceAuth, s.serviceHistory)
+			pub.GET("/services/:id/stats", s.forceAuth, s.serviceStats)
 		}
 
 		// 写接口：必须登录
