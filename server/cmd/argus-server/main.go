@@ -1,12 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/nat"
 	"github.com/motao123/Argus/server/internal/oauth"
+	"github.com/motao123/Argus/server/internal/plugin"
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/db"
 	"github.com/motao123/Argus/server/internal/geoip"
@@ -87,6 +89,18 @@ func main() {
 	}()
 	defer natProxy.Close()
 
+	// 插件管理器（data/plugins 目录）
+	plugins := plugin.New(filepath.Join(filepath.Dir(cfg.DBPath), "plugins"))
+	_ = plugins.Load()
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = plugins.Load() // 增量扫描新插件
+			plugins.RunScheduled()
+		}
+	}()
+
 	// 5. API 路由
 	geoipSvc := geoip.New()
 	if ep := os.Getenv("ARGUS_GEOIP_ENDPOINT"); ep != "" {
@@ -101,6 +115,7 @@ func main() {
 		Scheduler: sched,
 		OAuth:     oauth.NewClient(),
 		GeoIP:     geoipSvc,
+		Plugins:   plugins,
 	}
 	srv.ReloadOAuthConfigs()
 

@@ -14,6 +14,7 @@ import (
 	"github.com/motao123/Argus/server/internal/geoip"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/oauth"
+	"github.com/motao123/Argus/server/internal/plugin"
 	"github.com/motao123/Argus/server/internal/scheduler"
 	"github.com/motao123/Argus/server/internal/store"
 )
@@ -29,6 +30,7 @@ type Server struct {
 	Scheduler *scheduler.Scheduler
 	OAuth     *oauth.Client
 	GeoIP     *geoip.Service
+	Plugins   *plugin.Manager
 }
 
 // New 构建 gin 引擎并注册全部路由。
@@ -81,6 +83,12 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/alerts", requireScope(ScopeAlertWrite), s.createAlert)
 			authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), s.updateAlert)
 			authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), s.deleteAlert)
+
+			// 插件管理
+			authed.GET("/plugins", s.listPlugins)
+			authed.POST("/plugins/:name/toggle", s.togglePlugin)
+			authed.POST("/plugins/:name/run", s.runPluginNow)
+			authed.DELETE("/plugins/:name", s.deletePlugin)
 
 			// 通知分组
 			authed.GET("/notification-groups", s.listNotificationGroups)
