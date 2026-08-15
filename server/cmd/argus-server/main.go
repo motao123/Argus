@@ -60,6 +60,16 @@ func main() {
 	// 3. Agent 连接中心
 	agents := agent.NewHub(gdb, st, batcher)
 
+	// 预加载 DB 服务器到内存 Hub（前台 WS 快照依赖内存态，
+	// 否则重启后未连接 agent 的服务器会从前台消失）
+	var allServers []model.Server
+	if err := gdb.Find(&allServers).Error; err == nil {
+		for i := range allServers {
+			st.Upsert(&allServers[i])
+		}
+		log.Printf("preloaded %d servers into memory hub", len(allServers))
+	}
+
 	// 4. 定时调度器 + 报警引擎（触发任务联动）
 	sched := scheduler.New(gdb, agents)
 	sched.Start()

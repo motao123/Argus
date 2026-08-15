@@ -20,7 +20,7 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      if (!getToken()) return;
+      // 游客也可连接（后端 WS 公开快照）；有 token 时带 token 看完整视图
       ws = new WebSocket(wsUrl("/api/v1/ws"));
       ws.onmessage = (e) => {
         retries.current = 0;
