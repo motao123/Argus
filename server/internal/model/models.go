@@ -95,6 +95,7 @@ type Alert struct {
 	WebhookID int64     `json:"webhook_id"`          // 单渠道（兼容）
 	GroupID   int64     `json:"group_id"`            // 通知分组（0=无）
 	TriggerCronID int64 `json:"trigger_cron_id"`     // 触发时执行的任务（0=无）
+	TriggerRatio  *int  `json:"trigger_ratio"`       // 采样达标比例（1-100，如 70=70% 采样超限才触发；nil=全部采样）
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 }

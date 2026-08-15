@@ -36,6 +36,9 @@ type violation struct {
 	triggeredAt time.Time
 	notified    bool
 	recovering  bool // 已恢复但通知未发（下一轮发恢复通知）
+	// 达标比例采样窗口（借鉴 komari LoadNotification）
+	sampleCount int
+	violateCount int
 }
 
 func NewEngine(db *gorm.DB, st *store.Hub) *Engine {
@@ -88,8 +91,38 @@ func (e *Engine) checkOnce() {
 			v := e.state[key]
 			e.mu.Unlock()
 
+			// 达标比例采样（借鉴 komari LoadNotification：N% 采样超限才触发）
+			ratio := 100
+			if a.TriggerRatio != nil && *a.TriggerRatio > 0 && *a.TriggerRatio <= 100 {
+				ratio = *a.TriggerRatio
+			}
 			fired := e.inRange(&a, value)
 			now := time.Now()
+
+			if ratio < 100 {
+				if v == nil {
+					v = &violation{triggeredAt: now}
+					e.mu.Lock()
+					e.state[key] = v
+					e.mu.Unlock()
+				}
+				v.sampleCount++
+				if fired {
+					v.violateCount++
+				}
+				// 每 10 次采样判定一次（约 30s 窗口）
+				if v.sampleCount >= 10 {
+					passRatio := v.violateCount * 100 / v.sampleCount
+					fired = passRatio >= ratio
+					v.sampleCount, v.violateCount = 0, 0
+					if !fired {
+						// 比例不达标视为未触发，重置开始时间
+						v.triggeredAt = now
+					}
+				} else {
+					fired = false // 采样窗口内不判定
+				}
+			}
 
 			if fired {
 				if v == nil {
