@@ -53,7 +53,7 @@ func (s *Server) deleteGroup(c *gin.Context) {
 		return
 	}
 	// 组内服务器移出分组（map 更新避免空字符串零值被忽略）
-	s.DB.Model(&model.Server{}).Where("group = ?", g.Name).
+	s.DB.Model(&model.Server{}).Where("group_name = ?", g.Name).
 		Updates(map[string]any{"group": ""})
 	s.DB.Delete(&model.ServerGroup{}, id)
 	ok(c, gin.H{"ok": true})

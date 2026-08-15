@@ -8,7 +8,7 @@ type Server struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
 	Name      string    `gorm:"size:64;not null" json:"name"`
 	Secret    string    `gorm:"size:64;not null;uniqueIndex" json:"-"`
-	Group     string    `gorm:"size:64;default:''" json:"group"`
+	Group     string    `gorm:"column:group_name;size:64;default:''" json:"group"` // group 是 SQL 保留字
 	Note      string    `gorm:"size:255;default:''" json:"note"`
 	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有
 	// 计费信息（借鉴 komari，VPS 售卖场景）
