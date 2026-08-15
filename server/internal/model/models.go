@@ -89,11 +89,12 @@ type Cron struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// Metric 分钟级降采样指标。
+// Metric 降采样指标（granularity: 60=分钟 / 300=5分钟 / 3600=小时）。
 type Metric struct {
 	ID         int64     `gorm:"primaryKey" json:"-"`
 	ServerID   int64     `gorm:"index:idx_metric_server_ts" json:"server_id"`
-	TS         int64     `gorm:"index:idx_metric_server_ts" json:"ts"` // unix 秒（整分钟）
+	TS         int64     `gorm:"index:idx_metric_server_ts" json:"ts"` // unix 秒（整周期）
+	Granularity int      `gorm:"index:idx_metric_gran" json:"-"`       // 60/300/3600
 	CPU        float64   `json:"cpu"`
 	MemUsed    uint64    `json:"mem_used"`
 	MemTotal   uint64    `json:"mem_total"`

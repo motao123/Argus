@@ -192,19 +192,19 @@ func (s *Server) serverMetrics(c *gin.Context) {
 	period := c.DefaultQuery("period", "1h")
 	now := time.Now()
 
-	seconds, step := 3600, int64(60)
+	seconds, step, gran := 3600, int64(60), 60
 	switch period {
 	case "24h":
-		seconds, step = 24*3600, 300
+		seconds, step, gran = 24*3600, 300, 300
 	case "7d":
-		seconds, step = 7*24*3600, 3600
+		seconds, step, gran = 7*24*3600, 3600, 3600
 	default:
 		period = "1h"
 	}
 
 	from := now.Add(-time.Duration(seconds) * time.Second).Unix()
 	var rows []model.Metric
-	if err := s.DB.Where("server_id = ? AND ts >= ?", id, from).
+	if err := s.DB.Where("server_id = ? AND ts >= ? AND granularity = ?", id, from, gran).
 		Order("ts").Find(&rows).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return

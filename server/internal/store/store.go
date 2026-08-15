@@ -249,6 +249,7 @@ func (b *bucket) toRow() *metricRow {
 	return &metricRow{
 		ServerID:    b.serverID,
 		TS:          b.ts,
+		Granularity: 60,
 		CPU:         b.cpuSum / n,
 		MemUsed:     b.memUsed,
 		MemTotal:    b.memTotal,

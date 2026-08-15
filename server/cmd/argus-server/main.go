@@ -18,6 +18,7 @@ import (
 	"github.com/motao123/Argus/server/internal/alert"
 	"github.com/motao123/Argus/server/internal/api"
 	"github.com/motao123/Argus/server/internal/mcp"
+	"github.com/motao123/Argus/server/internal/metric"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/nat"
 	"github.com/motao123/Argus/server/internal/oauth"
@@ -73,6 +74,24 @@ func main() {
 	}
 	go engine.Run()
 	defer engine.Stop()
+
+	// 指标 rollup 聚合与保留清理（借鉴 komari 分层 rollup）
+	rollup := metric.New(gdb)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			rollup.Aggregate5m()
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			rollup.AggregateHour()
+			rollup.Cleanup()
+		}
+	}()
 
 	// 服务监控哨兵
 	svcSentinel := sentinel.New(gdb)
