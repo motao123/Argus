@@ -153,3 +153,18 @@ type NAT struct {
 	Enabled    bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt  time.Time `json:"created_at"`
 }
+
+// OAuthConfig 持久化的 OAuth2 provider 配置（JSON）。
+type OAuthConfig struct {
+	ID           int64     `gorm:"primaryKey" json:"id"`
+	Name         string    `gorm:"size:32;not null;uniqueIndex" json:"name"`
+	ClientID     string    `gorm:"size:256;not null" json:"-"`
+	ClientSecret string    `gorm:"size:256;not null" json:"-"`
+	AuthURL      string    `gorm:"size:512" json:"-"`
+	TokenURL     string    `gorm:"size:512" json:"-"`
+	UserInfoURL  string    `gorm:"size:512" json:"-"`
+	UsernameField string   `gorm:"size:64;default:'login'" json:"-"`
+	AdminLogins  string    `gorm:"size:512;default:''" json:"-"`
+	Enabled      bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt    time.Time `json:"created_at"`
+}

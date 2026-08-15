@@ -17,6 +17,7 @@ import (
 	"github.com/motao123/Argus/server/internal/api"
 	"github.com/motao123/Argus/server/internal/mcp"
 	"github.com/motao123/Argus/server/internal/nat"
+	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/db"
 	"github.com/motao123/Argus/server/internal/scheduler"
@@ -83,7 +84,10 @@ func main() {
 		Store:     st,
 		Agents:    agents,
 		Scheduler: sched,
+		OAuth:     oauth.NewClient(),
 	}
+	srv.ReloadOAuthConfigs()
+
 	agents.TermDataCb = srv.HandleAgentTermData
 	// DDNS：服务器 IP 变化时更新解析记录
 	agents.IPChangeCb = srv.HandleServerIPChange

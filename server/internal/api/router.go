@@ -12,6 +12,7 @@ import (
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/scheduler"
 	"github.com/motao123/Argus/server/internal/store"
 )
@@ -25,6 +26,7 @@ type Server struct {
 	Store     *store.Hub
 	Agents    *agent.Hub
 	Scheduler *scheduler.Scheduler
+	OAuth     *oauth.Client
 }
 
 // New 构建 gin 引擎并注册全部路由。
@@ -35,6 +37,8 @@ func New(s *Server) *gin.Engine {
 	api := r.Group("/api/v1")
 	{
 		api.POST("/auth/login", s.login)
+		api.GET("/auth/oauth/:provider", s.oauthRedirect)
+		api.GET("/auth/oauth/:provider/callback", s.oauthCallback)
 		api.GET("/auth/2fa/setup", s.authMiddleware(), s.twoFASetup)
 		api.GET("/auth/2fa/qrcode", s.authMiddleware(), s.twoFAQRCode)
 		api.POST("/auth/2fa/enable", s.authMiddleware(), s.twoFAEnable)
@@ -105,6 +109,11 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/ddns/:id", s.updateDDNS)
 			authed.DELETE("/ddns/:id", s.deleteDDNS)
 			authed.POST("/ddns/:id/test", s.testDDNS)
+
+			// OAuth provider 配置（admin）
+			authed.GET("/oauth/providers", s.listOAuthConfigs)
+			authed.POST("/oauth/providers", s.saveOAuthConfig)
+			authed.DELETE("/oauth/providers/:name", s.deleteOAuthConfig)
 
 			// NAT 内网穿透
 			authed.GET("/nats", s.listNAT)
