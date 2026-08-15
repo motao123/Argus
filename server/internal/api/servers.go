@@ -121,9 +121,13 @@ func (s *Server) createServer(c *gin.Context) {
 func (s *Server) updateServer(c *gin.Context) {
 	id := mustID(c)
 	var req struct {
-		Name  string `json:"name"`
-		Group string `json:"group"`
-		Note  string `json:"note"`
+		Name      string `json:"name"`
+		Group     string `json:"group"`
+		Note      string `json:"note"`
+		Price     *float64 `json:"price"`
+		CycleDays *int     `json:"cycle_days"`
+		ExpireAt  *string  `json:"expire_at"` // RFC3339 或空
+		AutoRenew *bool    `json:"auto_renew"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -134,13 +138,30 @@ func (s *Server) updateServer(c *gin.Context) {
 		fail(c, http.StatusNotFound, "not found")
 		return
 	}
-	srv.Name = req.Name
-	srv.Group = req.Group
-	srv.Note = req.Note
-	if err := s.DB.Save(&srv).Error; err != nil {
+	updates := map[string]any{
+		"name": req.Name, "group": req.Group, "note": req.Note,
+	}
+	if req.Price != nil {
+		updates["price"] = *req.Price
+	}
+	if req.CycleDays != nil {
+		updates["cycle_days"] = *req.CycleDays
+	}
+	if req.AutoRenew != nil {
+		updates["auto_renew"] = *req.AutoRenew
+	}
+	if req.ExpireAt != nil {
+		if *req.ExpireAt == "" {
+			updates["expire_at"] = nil
+		} else if t, err := time.Parse(time.RFC3339, *req.ExpireAt); err == nil {
+			updates["expire_at"] = t
+		}
+	}
+	if err := s.DB.Model(&srv).Updates(updates).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.DB.First(&srv, id)
 	s.Store.Upsert(&srv)
 	s.auditLog(c, "server.update", srv.Name)
 	ok(c, srv)

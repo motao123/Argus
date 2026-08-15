@@ -11,6 +11,11 @@ type Server struct {
 	Group     string    `gorm:"size:64;default:''" json:"group"`
 	Note      string    `gorm:"size:255;default:''" json:"note"`
 	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有
+	// 计费信息（借鉴 komari，VPS 售卖场景）
+	Price      float64   `gorm:"default:0" json:"price"`
+	CycleDays  int       `gorm:"default:0" json:"cycle_days"` // 计费周期（天），0 = 无
+	ExpireAt   *time.Time `json:"expire_at"`
+	AutoRenew  bool      `gorm:"default:false" json:"auto_renew"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -188,6 +193,15 @@ type Session struct {
 	IP        string    `gorm:"size:64;default:''" json:"ip"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// Clipboard 剪贴板条目（借鉴 komari CloudClipboard）。
+type Clipboard struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	UserID    int64     `gorm:"index" json:"user_id"`
+	Title     string    `gorm:"size:128" json:"title"`
+	Content   string    `gorm:"size:8192" json:"content"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Transfer 周期流量打点（小时级，借鉴 nezha Transfer）。

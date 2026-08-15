@@ -90,6 +90,11 @@ func New(s *Server) *gin.Engine {
 			authed.GET("/admin/db/size", s.dbSize)
 			authed.POST("/admin/db/vacuum", s.dbVacuum)
 
+			// 剪贴板
+			authed.GET("/clipboard", s.listClipboard)
+			authed.POST("/clipboard", s.createClipboard)
+			authed.DELETE("/clipboard/:id", s.deleteClipboard)
+
 			// 审计日志（admin）
 			authed.GET("/admin/logs", s.listAuditLogs)
 
