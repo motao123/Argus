@@ -75,6 +75,13 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/crons/:id", requireScope(ScopeCronWrite), s.updateCron)
 			authed.DELETE("/crons/:id", requireScope(ScopeCronDelete), s.deleteCron)
 			authed.POST("/crons/:id/run", requireScope(ScopeCronWrite), s.runCron)
+
+			// 服务监控
+			authed.GET("/services", requireScope(ScopeServiceRead), s.listServices)
+			authed.POST("/services", requireScope(ScopeServiceWrite), s.createService)
+			authed.PUT("/services/:id", requireScope(ScopeServiceWrite), s.updateService)
+			authed.DELETE("/services/:id", requireScope(ScopeServiceDelete), s.deleteService)
+			authed.GET("/services/:id/history", requireScope(ScopeServiceRead), s.serviceHistory)
 		}
 		// 仪表盘实时推送（带鉴权 Query 参数，便于浏览器 WS 连接）
 		api.GET("/ws", s.authWS, s.dashboardWS)

@@ -49,10 +49,11 @@ const (
 	MethodReport   = "agent.report"
 
 	// Server → Agent
-	MethodExec      = "agent.exec"
-	MethodTerminal  = "agent.terminal"
-	MethodTermData  = "agent.terminal.data"
-	MethodTermClose = "agent.terminal.close"
+	MethodExec        = "agent.exec"
+	MethodTerminal    = "agent.terminal"
+	MethodTermData    = "agent.terminal.data"
+	MethodTermClose   = "agent.terminal.close"
+	MethodServiceCheck = "agent.service.check"
 )
 
 // ---- 上报结构 ----
@@ -130,4 +131,20 @@ type TerminalParams struct {
 type TerminalData struct {
 	SessionID string `json:"session_id"`
 	Data      []byte `json:"data"`
+}
+
+// ---- 服务监控 ----
+
+// ServiceCheckParams 服务探测参数（server → agent）。
+type ServiceCheckParams struct {
+	Type    string `json:"type"`    // http / tcp / ping
+	Target  string `json:"target"`  // URL / host:port / host
+	Timeout int    `json:"timeout"` // 秒
+}
+
+// ServiceCheckResult 服务探测结果（agent → server）。
+type ServiceCheckResult struct {
+	Up      bool   `json:"up"`
+	DelayMs int    `json:"delay_ms"`
+	Error   string `json:"error,omitempty"`
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/db"
 	"github.com/motao123/Argus/server/internal/scheduler"
+	"github.com/motao123/Argus/server/internal/sentinel"
 	"github.com/motao123/Argus/server/internal/store"
 )
 
@@ -57,6 +58,11 @@ func main() {
 	sched := scheduler.New(gdb, agents)
 	sched.Start()
 	defer sched.Stop()
+
+	// 服务监控哨兵
+	svcSentinel := sentinel.New(gdb)
+	go svcSentinel.Run(agents.Peers)
+	defer svcSentinel.Stop()
 
 	// 5. API 路由
 	srv := &api.Server{

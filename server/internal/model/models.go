@@ -97,3 +97,27 @@ type APIToken struct {
 	Revoked   bool      `gorm:"default:false" json:"revoked"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// Service 服务监控定义（HTTP/TCP/Ping 探测，借鉴 nezha ServiceSentinel）。
+type Service struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
+	ServerID  int64     `gorm:"index;not null" json:"server_id"` // 由哪个 agent 执行探测
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	Type      string    `gorm:"size:16;not null" json:"type"` // http / tcp / ping
+	Target    string    `gorm:"size:512;not null" json:"target"`
+	Interval  int       `gorm:"default:60" json:"interval"` // 秒
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ServiceHistory 探测历史（分钟级聚合，保留 30 天）。
+type ServiceHistory struct {
+	ID        int64 `gorm:"primaryKey" json:"-"`
+	ServiceID int64 `gorm:"index:idx_svc_hist" json:"service_id"`
+	Ts        int64 `gorm:"index:idx_svc_hist" json:"ts"`
+	UpCount   int   `json:"up_count"`
+	Total     int   `json:"total"`
+	DelaySum  int64 `json:"delay_sum"`
+}

@@ -55,9 +55,26 @@ func (h *Handler) Handle(method string, params json.RawMessage) (any, *protocol.
 	case protocol.MethodTermClose:
 		h.handleTermClose(params)
 		return nil, nil
+	case protocol.MethodServiceCheck:
+		return h.handleServiceCheck(params)
 	default:
 		return nil, protocol.NewError(protocol.ErrMethod, "unknown method: "+method)
 	}
+}
+
+// ---- 服务监控探测 ----
+
+func (h *Handler) handleServiceCheck(params json.RawMessage) (any, *protocol.RPCError) {
+	var p protocol.ServiceCheckParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, protocol.NewError(protocol.ErrParams, err.Error())
+	}
+	timeout := time.Duration(p.Timeout) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	result := probeService(p.Type, p.Target, timeout)
+	return result, nil
 }
 
 // ---- exec ----
