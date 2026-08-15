@@ -35,6 +35,10 @@ func New(s *Server) *gin.Engine {
 	api := r.Group("/api/v1")
 	{
 		api.POST("/auth/login", s.login)
+		api.GET("/auth/2fa/setup", s.authMiddleware(), s.twoFASetup)
+		api.GET("/auth/2fa/qrcode", s.authMiddleware(), s.twoFAQRCode)
+		api.POST("/auth/2fa/enable", s.authMiddleware(), s.twoFAEnable)
+		api.POST("/auth/2fa/disable", s.authMiddleware(), s.twoFADisable)
 
 		// 读接口：可选认证（游客可访问公开视图，借鉴 nezha optionalAuth）
 		pub := api.Group("", s.optionalAuthMiddleware())

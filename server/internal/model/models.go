@@ -28,6 +28,8 @@ type User struct {
 	PasswordHash string    `gorm:"size:128;not null" json:"-"`
 	Role         string    `gorm:"size:16;default:'user'" json:"role"`
 	AgentSecret  string    `gorm:"size:64;default:''" json:"-"` // 用户专属 Agent 注册密钥
+	TwoFASecret  string    `gorm:"size:64;default:''" json:"-"`
+	TwoFAEnabled bool      `gorm:"default:false" json:"two_fa_enabled"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 

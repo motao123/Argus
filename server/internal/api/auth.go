@@ -14,6 +14,7 @@ func (s *Server) login(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		TwoFACode string `json:"two_fa_code"` // 启用 2FA 后必填
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -26,6 +27,10 @@ func (s *Server) login(c *gin.Context) {
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
 		fail(c, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	if !verifyTwoFA(&user, req.TwoFACode) {
+		fail(c, http.StatusUnauthorized, "invalid 2fa code")
 		return
 	}
 	token, err := s.issueToken(&user)
