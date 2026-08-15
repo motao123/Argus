@@ -36,6 +36,19 @@ func main() {
 	defer stop()
 
 	cfgFile := filepath.Join(*configDir, "argus-agent.json")
+	task.ApplyConfigPath = cfgFile
+	// 读取已下发的配置（重启生效）
+	if data, err := os.ReadFile(cfgFile); err == nil {
+		var applied map[string]any
+		if json.Unmarshal(data, &applied) == nil {
+			if u, ok := applied["server_url"].(string); ok && u != "" {
+				*serverURL = u
+			}
+			if iv, ok := applied["interval"].(float64); ok && iv > 0 {
+				*interval = time.Duration(iv) * time.Second
+			}
+		}
+	}
 	if *secret == "" {
 		if s, err := loadSecret(cfgFile); err == nil && s != "" {
 			*secret = s

@@ -4,6 +4,7 @@
 package mcp
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -89,6 +90,12 @@ func (s *Server) dispatch(method string, params json.RawMessage, userID int64) (
 		return s.serverExec(params, userID)
 	case "fs.list":
 		return s.fsList(params, userID)
+	case "fs.read":
+		return s.fsRead(params, userID)
+	case "fs.write":
+		return s.fsWrite(params, userID)
+	case "fs.delete":
+		return s.fsDelete(params, userID)
 	case "meta.whoami":
 		return map[string]any{"user_id": userID}, nil
 	default:
@@ -181,6 +188,87 @@ func (s *Server) fsList(params json.RawMessage, userID int64) (any, *rpcErr) {
 	raw, _ := json.Marshal(resp.Result)
 	_ = json.Unmarshal(raw, &result)
 	return map[string]any{"path": result.Path, "entries": result.Entries}, nil
+}
+
+func (s *Server) fsRead(params json.RawMessage, userID int64) (any, *rpcErr) {
+	var p struct {
+		ID     int64  `json:"id"`
+		Path   string `json:"path"`
+		Offset int64  `json:"offset"`
+		Limit  int    `json:"limit"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 {
+		return nil, &rpcErr{-32602, "id and path required"}
+	}
+	peer := s.Peers()[p.ID]
+	if peer == nil {
+		return nil, &rpcErr{-32002, "server offline"}
+	}
+	resp, err := peer.Call(protocol.MethodFsRead, protocol.FsReadParams{Path: p.Path, Offset: p.Offset, Limit: p.Limit}, 30*time.Second)
+	if err != nil {
+		return nil, &rpcErr{-32603, err.Error()}
+	}
+	if resp.Error != nil {
+		return nil, &rpcErr{-32003, resp.Error.Message}
+	}
+	var result protocol.FsReadResult
+	raw, _ := json.Marshal(resp.Result)
+	_ = json.Unmarshal(raw, &result)
+	return map[string]any{"data": base64.StdEncoding.EncodeToString(result.Data), "eof": result.EOF, "size": result.Size}, nil
+}
+
+func (s *Server) fsWrite(params json.RawMessage, userID int64) (any, *rpcErr) {
+	var p struct {
+		ID     int64  `json:"id"`
+		Path   string `json:"path"`
+		Data   string `json:"data"` // base64
+		Append bool   `json:"append"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 || p.Path == "" {
+		return nil, &rpcErr{-32602, "id/path/data required"}
+	}
+	data, err := base64.StdEncoding.DecodeString(p.Data)
+	if err != nil {
+		return nil, &rpcErr{-32602, "invalid base64"}
+	}
+	peer := s.Peers()[p.ID]
+	if peer == nil {
+		return nil, &rpcErr{-32002, "server offline"}
+	}
+	resp, err := peer.Call(protocol.MethodFsWrite, protocol.FsWriteParams{Path: p.Path, Data: data, Append: p.Append}, 30*time.Second)
+	if err != nil {
+		return nil, &rpcErr{-32603, err.Error()}
+	}
+	if resp.Error != nil {
+		return nil, &rpcErr{-32003, resp.Error.Message}
+	}
+	var result protocol.FsWriteResult
+	raw, _ := json.Marshal(resp.Result)
+	_ = json.Unmarshal(raw, &result)
+	return map[string]any{"bytes": result.Bytes}, nil
+}
+
+func (s *Server) fsDelete(params json.RawMessage, userID int64) (any, *rpcErr) {
+	var p struct {
+		ID        int64  `json:"id"`
+		Path      string `json:"path"`
+		Recursive bool   `json:"recursive"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 || p.Path == "" {
+		return nil, &rpcErr{-32602, "id and path required"}
+	}
+	peer := s.Peers()[p.ID]
+	if peer == nil {
+		return nil, &rpcErr{-32002, "server offline"}
+	}
+	resp, err := peer.Call(protocol.MethodFsDelete, protocol.FsDeleteParams{Path: p.Path, Recursive: p.Recursive}, 30*time.Second)
+	if err != nil {
+		return nil, &rpcErr{-32603, err.Error()}
+	}
+	if resp.Error != nil {
+		return nil, &rpcErr{-32003, resp.Error.Message}
+	}
+	return map[string]any{"ok": true}, nil
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

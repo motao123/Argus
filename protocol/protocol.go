@@ -61,7 +61,15 @@ const (
 	MethodNATConnect   = "agent.nat.connect"
 	MethodNATData      = "agent.nat.data"
 	MethodNATClose     = "agent.nat.close"
+	MethodApplyConfig  = "agent.apply_config"
 )
+
+// AgentConfig 服务端下发的 Agent 运行配置（借鉴 nezha ApplyConfig）。
+type AgentConfig struct {
+	ServerURL string `json:"server_url,omitempty"` // WS 地址
+	Interval  int    `json:"interval,omitempty"`   // 上报间隔（秒）
+	Secret    string `json:"secret,omitempty"`     // 新密钥
+}
 
 // ---- 上报结构 ----
 

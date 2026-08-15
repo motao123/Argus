@@ -160,6 +160,9 @@ func New(s *Server) *gin.Engine {
 			authed.DELETE("/sessions/:id", s.revokeSession)
 			authed.DELETE("/sessions", s.revokeAllSessions)
 
+			// Agent 配置下发（admin）
+			authed.POST("/servers/:id/config", s.serverApplyConfig)
+
 			// 批量操作（admin）
 			authed.POST("/batch-delete/servers", s.batchDeleteServers)
 			authed.POST("/batch-move/servers", s.batchMoveServers)

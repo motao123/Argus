@@ -73,6 +73,8 @@ func (h *Handler) Handle(method string, params json.RawMessage) (any, *protocol.
 	case protocol.MethodNATClose:
 		h.handleNATClose(params)
 		return nil, nil
+	case protocol.MethodApplyConfig:
+		return h.handleApplyConfig(params)
 	default:
 		return nil, protocol.NewError(protocol.ErrMethod, "unknown method: "+method)
 	}

@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-
+	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/model"
 )
@@ -257,6 +257,38 @@ func (s *Server) serverMetrics(c *gin.Context) {
 		})
 	}
 	ok(c, gin.H{"period": period, "points": out})
+}
+
+// serverApplyConfig 下发 Agent 配置（借鉴 nezha ApplyConfig）。
+func (s *Server) serverApplyConfig(c *gin.Context) {
+	id := mustID(c)
+	var req struct {
+		ServerURL string `json:"server_url"`
+		Interval  int    `json:"interval"`
+		Secret    string `json:"secret"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	peer := s.Agents.Peer(id)
+	if peer == nil {
+		fail(c, http.StatusConflict, "server offline")
+		return
+	}
+	resp, err := peer.Call(protocol.MethodApplyConfig, protocol.AgentConfig{
+		ServerURL: req.ServerURL, Interval: req.Interval, Secret: req.Secret,
+	}, 15*time.Second)
+	if err != nil {
+		fail(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	if resp.Error != nil {
+		fail(c, http.StatusBadGateway, resp.Error.Message)
+		return
+	}
+	s.auditLog(c, "server.apply_config", "")
+	ok(c, gin.H{"ok": true})
 }
 
 // serverExec 立即在指定服务器执行命令（管理台调试用）。
