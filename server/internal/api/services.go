@@ -75,6 +75,8 @@ func (s *Server) createService(c *gin.Context) {
 		Type     string `json:"type"`
 		Target   string `json:"target"`
 		Interval int    `json:"interval"`
+		Notify   bool   `json:"notify"`
+		NotifyWebhookID int64 `json:"notify_webhook_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -97,6 +99,8 @@ func (s *Server) createService(c *gin.Context) {
 		Target:   req.Target,
 		Interval: req.Interval,
 		Enabled:  true,
+		Notify:   req.Notify,
+		NotifyWebhookID: req.NotifyWebhookID,
 	}
 	if err := s.DB.Create(&svc).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
@@ -123,6 +127,8 @@ func (s *Server) updateService(c *gin.Context) {
 		Target   *string `json:"target"`
 		Interval *int    `json:"interval"`
 		Enabled  *bool   `json:"enabled"`
+		Notify   *bool   `json:"notify"`
+		NotifyWebhookID *int64 `json:"notify_webhook_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -146,6 +152,12 @@ func (s *Server) updateService(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
+	}
+	if req.Notify != nil {
+		updates["notify"] = *req.Notify
+	}
+	if req.NotifyWebhookID != nil {
+		updates["notify_webhook_id"] = *req.NotifyWebhookID
 	}
 	if err := s.DB.Model(&svc).Updates(updates).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())

@@ -22,10 +22,37 @@ type Sentinel struct {
 	mu   sync.Mutex
 	stop chan struct{}
 	done chan struct{}
+
+	// 故障状态：serviceID → 连续失败次数
+	failCount map[int64]int
+	// NotifyCb 故障/恢复通知回调（main 注入）。
+	NotifyCb func(svc *model.Service, up bool)
+}
+
+// failNotify 通知故障/恢复（防抖：连续失败计数）。
+func (s *Sentinel) failNotify(svc *model.Service, up bool) {
+	if !svc.Notify || svc.NotifyWebhookID <= 0 || s.NotifyCb == nil {
+		return
+	}
+	s.mu.Lock()
+	if up {
+		if s.failCount[svc.ID] >= 3 {
+			s.NotifyCb(svc, true) // 恢复
+		}
+		s.failCount[svc.ID] = 0
+		s.mu.Unlock()
+		return
+	}
+	s.failCount[svc.ID]++
+	count := s.failCount[svc.ID]
+	s.mu.Unlock()
+	if count == 3 {
+		s.NotifyCb(svc, false) // 连续 3 次失败才告警（防抖）
+	}
 }
 
 func New(db *gorm.DB) *Sentinel {
-	return &Sentinel{db: db, stop: make(chan struct{}), done: make(chan struct{})}
+	return &Sentinel{db: db, stop: make(chan struct{}), done: make(chan struct{}), failCount: make(map[int64]int)}
 }
 
 // Run 每 5s 扫描一次，到期（距上次探测 >= interval）的服务触发探测。
@@ -106,6 +133,7 @@ func (s *Sentinel) probe(svc *model.Service, peer *rpc.Peer) {
 		return
 	}
 	s.record(svc.ID, result.Up, result.DelayMs)
+	s.failNotify(svc, result.Up)
 }
 
 // record 写入探测历史（分钟级桶聚合，每 5s 一次探测直接落库一条）。

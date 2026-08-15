@@ -129,6 +129,9 @@ type Service struct {
 	Target    string    `gorm:"size:512;not null" json:"target"`
 	Interval  int       `gorm:"default:60" json:"interval"` // 秒
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	// 故障通知（借鉴 nezha 服务故障通知到通知组）
+	Notify       bool  `gorm:"default:false" json:"notify"`
+	NotifyWebhookID int64 `json:"notify_webhook_id"` // 0 = 无
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

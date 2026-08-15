@@ -22,6 +22,7 @@ import (
 	"github.com/motao123/Argus/server/internal/metric"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/nat"
+	"github.com/motao123/Argus/server/internal/notifier"
 	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/plugin"
 	"github.com/motao123/Argus/server/internal/config"
@@ -106,6 +107,19 @@ func main() {
 
 	// 服务监控哨兵
 	svcSentinel := sentinel.New(gdb)
+	svcSentinel.NotifyCb = func(svc *model.Service, up bool) {
+		var n model.Notification
+		if err := gdb.First(&n, svc.NotifyWebhookID).Error; err != nil {
+			return
+		}
+		kind := "恢复"
+		if !up {
+			kind = "故障"
+		}
+		title := fmt.Sprintf("[Argus] 服务%s %s", kind, svc.Name)
+		content := fmt.Sprintf("%s (%s) %s", svc.Name, svc.Type, svc.Target)
+		go notifier.Send(&n, title, content)
+	}
 	go svcSentinel.Run(agents.Peers)
 	defer svcSentinel.Stop()
 
