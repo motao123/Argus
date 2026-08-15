@@ -4,24 +4,37 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type ServiceItem } from "../lib/api";
 import { useServers } from "../context/servers";
 
-// 最近 30 天可用率色块（借鉴 dash-v2 ServiceTracker）
-function UptimeBlocks({ upRate }: { upRate: number }) {
-  const days = 30;
-  const blocks = Array.from({ length: days }, (_, i) => {
-    // 未来日期留空
-    if (i >= days - 1) return null;
-    return Math.random() < upRate / 100;
+// 最近 30 天可用率色块（真实数据，借鉴 dash-v2 ServiceTracker）
+function UptimeBlocks({ svcId }: { svcId: number }) {
+  const { data } = useQuery({
+    queryKey: ["svc-history", svcId, "30d"],
+    queryFn: () => api.serviceHistory(svcId, "30d"),
+    staleTime: 5 * 60 * 1000,
   });
+  const points = data?.points ?? [];
+  // 按天聚合（6h 步长 → 每天 4 块）
+  const byDay = new Map<number, { up: number; total: number }>();
+  for (const p of points) {
+    const day = Math.floor(p.ts / 86400);
+    const e = byDay.get(day) ?? { up: 0, total: 0 };
+    e.total += 1;
+    if (p.up_rate >= 90) e.up += 1;
+    byDay.set(day, e);
+  }
+  const days = Array.from(byDay.values()).slice(-30);
   return (
-    <div className="flex gap-[2px]" title={`今日可用率 ${upRate.toFixed(1)}%`}>
-      {blocks.map((up, i) => (
-        <span
-          key={i}
-          className={`h-3.5 w-1.5 rounded-sm ${
-            up === null ? "bg-black/10 dark:bg-white/10" : up ? "bg-ok/70" : "bg-err/70"
-          }`}
-        />
-      ))}
+    <div className="flex gap-[2px]" title="最近 30 天可用率">
+      {days.map((d, i) => {
+        const rate = d.total ? (d.up / d.total) * 100 : 0;
+        return (
+          <span
+            key={i}
+            className={`h-3.5 w-1.5 rounded-sm ${
+              rate >= 99 ? "bg-ok/80" : rate >= 90 ? "bg-warn/80" : "bg-err/80"
+            }`}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -157,7 +170,7 @@ export default function Services() {
                 <span className={`tabular rounded-full px-2 py-0.5 text-xs ${svc.today_up_rate >= 99 ? "bg-ok/15 text-ok" : svc.today_up_rate >= 90 ? "bg-warn/15 text-warn" : "bg-err/15 text-err"}`}>
                   今日 {svc.today_up_rate.toFixed(1)}%
                 </span>
-                <UptimeBlocks upRate={svc.today_up_rate} />
+                <UptimeBlocks svcId={svc.id} />
                 <button onClick={() => setForm({ ...svc })} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
                   <Pencil className="h-4 w-4" />
                 </button>

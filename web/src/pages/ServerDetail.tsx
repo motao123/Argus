@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
@@ -68,7 +69,28 @@ export default function ServerDetail() {
     queryFn: () => api.metrics(serverId, period),
     refetchInterval: period === "1h" ? 30000 : 120000,
   });
-  const points = data?.points ?? [];
+  // 实时段拼接：1h 周期时把 WS 快照追加为最新点（借鉴 dash-v2 use-chart-history）
+  const points = useMemo(() => {
+    const base = data?.points ?? [];
+    if (period !== "1h" || !server) return base;
+    const last = base.length > 0 ? base[base.length - 1].ts : 0;
+    const nowTs = Math.floor(Date.now() / 1000);
+    if (nowTs - last < 30) return base; // 历史已含近期点
+    return [
+      ...base,
+      {
+        ts: nowTs,
+        cpu: server.cpu,
+        net_in: server.net_in_speed,
+        net_out: server.net_out_speed,
+        load1: server.load1,
+        mem_used: server.mem_used,
+        mem_total: server.mem_total,
+        disk_used: server.disk_used,
+        disk_total: server.disk_total,
+      },
+    ];
+  }, [data, period, server]);
 
   if (!server) {
     return <div className="text-sm text-muted">服务器不存在或已删除</div>;
