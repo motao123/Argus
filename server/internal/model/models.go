@@ -45,14 +45,17 @@ type Alert struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Notification 通知渠道（Webhook）。
+// Notification 通知渠道（借鉴 komari 多渠道设计 + nezha 模板）。
+// Type: webhook / bark / telegram / email / serverchan
 type Notification struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
 	Name      string    `gorm:"size:64;not null" json:"name"`
+	Type      string    `gorm:"size:16;default:'webhook'" json:"type"`
 	URL       string    `gorm:"size:512;not null" json:"url"`
 	Method    string    `gorm:"size:8;default:'POST'" json:"method"`
 	Headers   string    `gorm:"size:2048;default:'{}'" json:"headers"` // JSON 对象
 	Body      string    `gorm:"size:2048;default:'{}'" json:"body"`    // 支持 {{title}} {{content}} 模板
+	ChatID    string    `gorm:"size:64;default:''" json:"chat_id"`     // telegram/email 目标
 	CreatedAt time.Time `json:"created_at"`
 }
 

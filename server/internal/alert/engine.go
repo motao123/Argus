@@ -4,12 +4,8 @@
 package alert
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +13,7 @@ import (
 
 	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/notifier"
 	"github.com/motao123/Argus/server/internal/store"
 )
 
@@ -172,7 +169,7 @@ func (e *Engine) inRange(a *model.Alert, v float64) bool {
 	return false
 }
 
-// notify 发送通知（Webhook）。
+// notify 发送通知（多渠道）。
 func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind string) {
 	if !a.Notify {
 		return
@@ -188,49 +185,8 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 	if kind == "recovered" {
 		content = fmt.Sprintf("%s: %s back to normal", serverName, a.Name)
 	}
-	go sendWebhook(&n, title, content)
+	go notifier.Send(&n, title, content)
 	log.Printf("alert %s (%s): %s", a.Name, kind, content)
-}
-
-// sendWebhook 按通知配置发送 HTTP 请求，Body 支持 {{title}}/{{content}} 模板。
-func sendWebhook(n *model.Notification, title, content string) {
-	method := n.Method
-	if method == "" {
-		method = "POST"
-	}
-
-	// Headers 与 Body 均为 JSON 字符串
-	headers := map[string]string{}
-	_ = json.Unmarshal([]byte(n.Headers), &headers)
-
-	body := n.Body
-	if strings.TrimSpace(body) == "" {
-		body = `{"title":"{{title}}","content":"{{content}}"}`
-	}
-	body = strings.ReplaceAll(body, "{{title}}", escapeJSON(title))
-	body = strings.ReplaceAll(body, "{{content}}", escapeJSON(content))
-
-	req, err := http.NewRequest(method, n.URL, bytes.NewBufferString(body))
-	if err != nil {
-		log.Printf("webhook build failed: %v", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("webhook send failed: %v", err)
-		return
-	}
-	_ = resp.Body.Close()
-}
-
-func escapeJSON(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
 }
 
 var _ = protocol.MethodReport
