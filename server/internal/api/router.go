@@ -36,7 +36,7 @@ type Server struct {
 // New 构建 gin 引擎并注册全部路由。
 func New(s *Server) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(gin.Logger(), gin.Recovery(), wafMiddleware())
 
 	api := r.Group("/api/v1")
 	{

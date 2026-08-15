@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -174,6 +175,34 @@ func requireScope(scope string) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		c.Next()
+	}
+}
+
+// ---- 全局爆破防护（借鉴 nezha WAF 简化版）----
+
+var (
+	wafMu     sync.Mutex
+	wafCounts = map[string]int{}     // IP → 请求数
+	wafBlock  = map[string]time.Time{} // IP → 封禁截止
+)
+
+// wafMiddleware 每 IP 每分钟限 300 请求，超限封禁 10 分钟。
+func wafMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+		wafMu.Lock()
+		if until, ok := wafBlock[ip]; ok && time.Now().Before(until) {
+			wafMu.Unlock()
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"success": false, "error": "ip temporarily blocked"})
+			return
+		}
+		wafCounts[ip]++
+		if wafCounts[ip] > 300 {
+			wafBlock[ip] = time.Now().Add(10 * time.Minute)
+			delete(wafCounts, ip)
+		}
+		wafMu.Unlock()
 		c.Next()
 	}
 }
