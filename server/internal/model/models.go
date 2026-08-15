@@ -43,6 +43,7 @@ type Alert struct {
 	Duration  int       `json:"duration"`                       // 持续秒数
 	Notify    bool      `gorm:"default:true" json:"notify"`
 	WebhookID int64     `json:"webhook_id"`
+	TriggerCronID int64 `json:"trigger_cron_id"` // 触发时执行的任务（0=无）
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 }

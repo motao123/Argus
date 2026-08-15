@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"flag"
 	"log"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/motao123/Argus/server/internal/alert"
 	"github.com/motao123/Argus/server/internal/api"
 	"github.com/motao123/Argus/server/internal/mcp"
+	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/nat"
 	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/config"
@@ -53,14 +55,21 @@ func main() {
 	// 3. Agent 连接中心
 	agents := agent.NewHub(gdb, st, batcher)
 
-	// 4. 报警引擎 + 定时调度器
-	engine := alert.NewEngine(gdb, st)
-	go engine.Run()
-	defer engine.Stop()
-
+	// 4. 定时调度器 + 报警引擎（触发任务联动）
 	sched := scheduler.New(gdb, agents)
 	sched.Start()
 	defer sched.Stop()
+
+	engine := alert.NewEngine(gdb, st)
+	engine.Trigger = func(cron *model.Cron, serverID int64) {
+		// 只对目标服务器执行（借鉴 nezha 触发任务按服务器分发）
+		old := cron.ServerIDs
+		cron.ServerIDs = fmt.Sprintf("%d", serverID)
+		sched.RunOnce(cron)
+		cron.ServerIDs = old
+	}
+	go engine.Run()
+	defer engine.Stop()
 
 	// 服务监控哨兵
 	svcSentinel := sentinel.New(gdb)

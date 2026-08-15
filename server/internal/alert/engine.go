@@ -21,6 +21,8 @@ import (
 type Engine struct {
 	db    *gorm.DB
 	store *store.Hub
+	// Trigger 联动任务执行器（由 main 注入 scheduler.RunOnce 封装）。
+	Trigger func(cron *model.Cron, serverID int64)
 
 	mu    sync.Mutex
 	state map[string]*violation // key: alertID:serverID
@@ -171,6 +173,13 @@ func (e *Engine) inRange(a *model.Alert, v float64) bool {
 
 // notify 发送通知（多渠道）。
 func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind string) {
+	// 触发任务联动与通知解耦（借鉴 nezha 报警失败/恢复触发任务）
+	if a.TriggerCronID > 0 && e.Trigger != nil {
+		var cron model.Cron
+		if err := e.db.First(&cron, a.TriggerCronID).Error; err == nil {
+			go e.Trigger(&cron, st.Server.ID)
+		}
+	}
 	if !a.Notify {
 		return
 	}
