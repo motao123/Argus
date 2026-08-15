@@ -41,12 +41,22 @@ func (s *Server) dashboardWS(c *gin.Context) {
 	}
 	defer conn.Close()
 
+	p := principalFromContext(c)
+	isGuest := p == nil
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			snap := s.Store.Snapshot()
+			if isGuest {
+				// 游客不推送隐藏服务器（借鉴 nezha HideForGuest）
+				for id, st := range snap {
+					if st.Server != nil && st.Server.Hidden {
+						delete(snap, id)
+					}
+				}
+			}
 			out := make([]serverView, 0, len(snap))
 			for _, st := range snap {
 				if st.Server == nil {

@@ -19,6 +19,10 @@ type Server struct {
 	CycleDays  int       `gorm:"default:0" json:"cycle_days"` // 计费周期（天），0 = 无
 	ExpireAt   *time.Time `json:"expire_at"`
 	AutoRenew  bool      `gorm:"default:false" json:"auto_renew"`
+	// 标签与展示（借鉴 komari 标签 + nezha 排序/隐藏）
+	Tags      string `gorm:"size:512;default:''" json:"tags"` // 逗号分隔
+	SortOrder int    `gorm:"default:0" json:"sort_order"`
+	Hidden    bool   `gorm:"default:false" json:"hidden"` // guest 不可见
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

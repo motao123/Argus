@@ -48,7 +48,11 @@ type hostView struct {
 // 多用户：admin 看全部，普通用户只看自己名下（owner_id 匹配）。
 func (s *Server) listServers(c *gin.Context) {
 	p := principalFromContext(c)
-	q := s.DB.Model(&model.Server{}).Order("id")
+	q := s.DB.Model(&model.Server{}).Order("sort_order, id")
+	if p == nil || (!p.IsAdmin && !p.IsPAT) {
+		// 游客或普通用户：隐藏服务器不可见（借鉴 nezha HideForGuest）
+		q = q.Where("hidden = ?", false)
+	}
 	if p != nil && !p.IsAdmin && !p.IsPAT {
 		q = q.Where("owner_id = ?", p.UserID)
 	}
@@ -135,6 +139,9 @@ func (s *Server) updateServer(c *gin.Context) {
 		CycleDays *int     `json:"cycle_days"`
 		ExpireAt  *string  `json:"expire_at"` // RFC3339 或空
 		AutoRenew *bool    `json:"auto_renew"`
+		Tags      *string  `json:"tags"`
+		SortOrder *int     `json:"sort_order"`
+		Hidden    *bool    `json:"hidden"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -156,6 +163,15 @@ func (s *Server) updateServer(c *gin.Context) {
 	}
 	if req.AutoRenew != nil {
 		updates["auto_renew"] = *req.AutoRenew
+	}
+	if req.Tags != nil {
+		updates["tags"] = *req.Tags
+	}
+	if req.SortOrder != nil {
+		updates["sort_order"] = *req.SortOrder
+	}
+	if req.Hidden != nil {
+		updates["hidden"] = *req.Hidden
 	}
 	if req.ExpireAt != nil {
 		if *req.ExpireAt == "" {
