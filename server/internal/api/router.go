@@ -84,6 +84,12 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), s.updateAlert)
 			authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), s.deleteAlert)
 
+			// 备份与数据库工具（admin）
+			authed.GET("/admin/backup", s.backupDownload)
+			authed.POST("/admin/backup/restore", s.backupRestore)
+			authed.GET("/admin/db/size", s.dbSize)
+			authed.POST("/admin/db/vacuum", s.dbVacuum)
+
 			// 插件管理
 			authed.GET("/plugins", s.listPlugins)
 			authed.POST("/plugins/:name/toggle", s.togglePlugin)
