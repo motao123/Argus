@@ -34,6 +34,18 @@ import (
 )
 
 func main() {
+	// 运维子命令：argus-server <server|chpasswd|disable-2fa>
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "chpasswd", "disable-2fa":
+			// 重排参数：把子命令放到 flag.Args()[0]
+			os.Args = append([]string{os.Args[0], os.Args[1]}, os.Args[2:]...)
+			flag.Parse()
+			runOps()
+			return
+		}
+	}
+
 	listen := flag.String("l", "", "HTTP 监听地址（默认取环境变量 ARGUS_LISTEN）")
 	dbPath := flag.String("d", "", "SQLite 数据库路径（默认取环境变量 ARGUS_DB）")
 	flag.Parse()
