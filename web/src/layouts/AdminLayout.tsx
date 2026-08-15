@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
 import { setToken } from "../lib/api";
+import CommandPalette from "../components/CommandPalette";
 
 function useTheme() {
   const [theme, setTheme] = useState<"light" | "dark">(() =>
@@ -76,6 +77,7 @@ export default function Layout() {
           </button>
         </div>
       </aside>
+      <CommandPalette />
       <main className="ml-52 flex-1 p-6">
         <Outlet />
       </main>

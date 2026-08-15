@@ -4,6 +4,7 @@ import { Outlet, Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
 import { getToken, setToken } from "../lib/api";
+import CommandPalette from "../components/CommandPalette";
 
 function useTheme() {
   const [theme, setTheme] = useState<"light" | "dark">(() =>
@@ -90,6 +91,7 @@ export default function PublicLayout() {
         </div>
       </header>
 
+      <CommandPalette />
       {/* 主体 */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         <Outlet />
