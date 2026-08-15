@@ -7,6 +7,8 @@ export interface HostInfo {
   cpu_model: string;
   cpu_cores: number;
   agent_version: string;
+  ip: string;
+  country_code: string;
 }
 
 export interface Server {
@@ -236,4 +238,10 @@ export const api = {
 export function wsUrl(path: string): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host}${path}?token=${encodeURIComponent(token || "")}`;
+}
+
+// countryCodeToFlag 国家码 → 国旗 emoji（US → 🇺🇸）
+export function countryFlag(code: string): string {
+  if (!code || code.length !== 2) return "";
+  return String.fromCodePoint(...[...code.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 }

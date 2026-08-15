@@ -38,6 +38,8 @@ type hostView struct {
 	CPUModel        string `json:"cpu_model"`
 	CPUCores        int    `json:"cpu_cores"`
 	AgentVersion    string `json:"agent_version"`
+	IP              string `json:"ip"`
+	CountryCode     string `json:"country_code"`
 }
 
 // listServers 返回全部服务器（配置 + 实时状态）。
@@ -73,6 +75,10 @@ func (s *Server) listServers(c *gin.Context) {
 			v.Online = st.Online
 			v.LastSeen = st.LastSeen
 			if st.Host.Hostname != "" {
+				country := ""
+				if s.GeoIP != nil && st.Host.IP != "" {
+					country = s.GeoIP.CountryCode(st.Host.IP)
+				}
 				v.Host = &hostView{
 					Hostname:        st.Host.Hostname,
 					Platform:        st.Host.Platform,
@@ -80,6 +86,8 @@ func (s *Server) listServers(c *gin.Context) {
 					CPUModel:        st.Host.CPUModel,
 					CPUCores:        st.Host.CPUCores,
 					AgentVersion:    st.Host.AgentVersion,
+					IP:              st.Host.IP,
+					CountryCode:     country,
 				}
 			}
 		}

@@ -3,6 +3,7 @@ package collector
 
 import (
 	"context"
+	stdnet "net"
 	"os"
 	"runtime"
 	"time"
@@ -63,6 +64,39 @@ func (c *Collector) initStatic() {
 	}
 }
 
+// LocalIP 采集本机非回环 IPv4（优先公网地址）。
+func LocalIP() string {
+	ifaces, err := stdnet.Interfaces()
+	if err != nil {
+		return ""
+	}
+	best := ""
+	for _, iface := range ifaces {
+		if iface.Flags&stdnet.FlagUp == 0 || iface.Flags&stdnet.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*stdnet.IPNet)
+			if !ok || ipnet.IP.To4() == nil {
+				continue
+			}
+			ip := ipnet.IP.String()
+			if ipnet.IP.IsPrivate() || ipnet.IP.IsLoopback() {
+				if best == "" {
+					best = ip // 保底内网 IP
+				}
+				continue
+			}
+			return ip // 公网 IP 优先
+		}
+	}
+	return best
+}
+
 // HostInfo 返回静态主机信息（用于上报）。
 func (c *Collector) HostInfo() protocol.HostInfo {
 	return protocol.HostInfo{
@@ -73,6 +107,7 @@ func (c *Collector) HostInfo() protocol.HostInfo {
 		CPUCores:        c.cpuCores,
 		MemTotal:        c.memTotal,
 		AgentVersion:    c.agentVersion,
+		IP:              LocalIP(),
 	}
 }
 

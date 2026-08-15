@@ -22,6 +22,7 @@ import (
 	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/db"
+	"github.com/motao123/Argus/server/internal/geoip"
 	"github.com/motao123/Argus/server/internal/scheduler"
 	"github.com/motao123/Argus/server/internal/sentinel"
 	"github.com/motao123/Argus/server/internal/store"
@@ -87,6 +88,11 @@ func main() {
 	defer natProxy.Close()
 
 	// 5. API 路由
+	geoipSvc := geoip.New()
+	if ep := os.Getenv("ARGUS_GEOIP_ENDPOINT"); ep != "" {
+		geoipSvc.SetProvider(&geoip.HTTPProvider{Endpoint: ep})
+		log.Printf("GeoIP provider: %s", ep)
+	}
 	srv := &api.Server{
 		DB:        gdb,
 		Cfg:       cfg,
@@ -94,6 +100,7 @@ func main() {
 		Agents:    agents,
 		Scheduler: sched,
 		OAuth:     oauth.NewClient(),
+		GeoIP:     geoipSvc,
 	}
 	srv.ReloadOAuthConfigs()
 

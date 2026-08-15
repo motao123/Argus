@@ -11,6 +11,7 @@ import (
 
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/config"
+	"github.com/motao123/Argus/server/internal/geoip"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/scheduler"
@@ -27,6 +28,7 @@ type Server struct {
 	Agents    *agent.Hub
 	Scheduler *scheduler.Scheduler
 	OAuth     *oauth.Client
+	GeoIP     *geoip.Service
 }
 
 // New 构建 gin 引擎并注册全部路由。

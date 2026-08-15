@@ -49,6 +49,10 @@ func (s *Server) dashboardWS(c *gin.Context) {
 				v.Online = st.Online
 				v.LastSeen = st.LastSeen
 				if st.Host.Hostname != "" {
+					country := ""
+					if s.GeoIP != nil && st.Host.IP != "" {
+						country = s.GeoIP.CountryCode(st.Host.IP)
+					}
 					v.Host = &hostView{
 						Hostname:        st.Host.Hostname,
 						Platform:        st.Host.Platform,
@@ -56,6 +60,8 @@ func (s *Server) dashboardWS(c *gin.Context) {
 						CPUModel:        st.Host.CPUModel,
 						CPUCores:        st.Host.CPUCores,
 						AgentVersion:    st.Host.AgentVersion,
+						IP:              st.Host.IP,
+						CountryCode:     country,
 					}
 				}
 				out = append(out, v)

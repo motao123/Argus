@@ -1,7 +1,7 @@
 // 进度条与服务器卡片
 import { Link } from "react-router-dom";
 import { Cpu, HardDrive, MemoryStick, Network } from "lucide-react";
-import type { Server } from "../lib/api";
+import { countryFlag, type Server } from "../lib/api";
 import { fmtPercent, fmtSpeed, fmtUptime } from "../lib/format";
 
 export function Bar({ value, color = "bg-accent" }: { value: number; color?: string }) {
@@ -43,6 +43,9 @@ export default function ServerCard({ server }: { server: Server }) {
           <div className="text-xs text-muted">
             {server.host?.platform ?? "未上报"}
             {server.host?.cpu_cores ? ` · ${server.host.cpu_cores} 核` : ""}
+          </div>
+          <div className="mt-0.5 text-xs text-muted">
+            {server.host?.country_code ? <span title={server.host.ip}>{countryFlag(server.host.country_code)} {server.host.country_code}</span> : null}
           </div>
         </div>
         <span
