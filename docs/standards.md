@@ -8,12 +8,12 @@
 ### 1. 路由分层（统一为 /api/v1）
 | 层 | 路径前缀 | 认证 | 说明 |
 |---|---|---|---|
-| 公开 | `/api/v1/public/*` | 无 | 站点公开设置、版本信息 |
-| 认证 | `/api/v1/auth/login` | 无 | JWT 登录（borrowing komari 的 session + nezha 的 JWT） |
-| 用户 | `/api/v1/*` | JWT | 普通用户资源（只读为主） |
-| 管理 | `/api/v1/admin/*` | JWT + admin | 管理员资源（CRUD/执行） |
-| Agent | `/api/v1/agent/*` | Secret | Agent 注册/上报（借鉴 komari 的 secret + nezha 的 agent_secret） |
-| 实时 | `/api/v1/ws` | JWT | WebSocket 推送（dashboard / terminal） |
+| 读接口 | `/api/v1/servers\|services\|metrics\|history` | optionalAuth | 游客可读公开视图（借鉴 nezha optionalAuth） |
+| 写接口 | `/api/v1/*`（POST/PUT/DELETE） | JWT/PAT 强制 | 游客一律 401 |
+| 登录 | `/api/v1/auth/login` | 无 | JWT 登录 |
+| Agent | `/ws/agent` | Secret | Agent 注册/上报/exec/terminal/service/fs |
+| 实时 | `/api/v1/ws` | optionalAuth | 游客可连（公开快照，借鉴 komari 公开节点列表） |
+| 终端 | `/api/v1/terminal/:id` | JWT 强制 | 敏感操作需登录 |
 
 ### 2. 响应格式（统一 JSON 信封）
 ```json
@@ -41,15 +41,17 @@
 
 ## 二、前端开发指引
 
-### 1. 页面路由（统一双前台）
+### 1. 页面路由（前台公开 + 后台登录）
 ```
-/                     用户前台：服务器总览（卡片+分组+搜索+排序）
-/server/:id           服务器详情：实时指标 + 历史图表 + 终端入口
-/terminal/:id         网页终端（xterm.js）
-/services             服务监控（HTTP/TCP/Ping，借鉴 nezha）
-/admin/*              管理后台：服务器/用户/报警/通知/任务/设置
-/login
+/                     前台总览（公开）：顶栏布局 + 统计卡 + 服务状态条 + 卡片墙
+/server/:id           前台详情（公开）：实时指标 + 历史图表（终端入口按登录态显示）
+/login                登录
+/admin/overview       后台总览（登录后）
+/admin/servers|alerts|crons|services|files|access   后台管理
+/admin/terminal/:id   网页终端（登录后）
 ```
+- 前台布局：顶栏式（Logo/实时时钟/在线徽标/主题/登录按钮/页脚），借鉴 komari 前台
+- 后台布局：侧边栏式（导航 + 在线统计 + 主题 + 前台入口），登录保护
 - SPA 路由回退：服务端未匹配路径返回 index.html（借鉴 komari 主题 SPA 规范）
 - `/admin` 与 `/terminal` 保留路径，不与主题路由冲突
 
