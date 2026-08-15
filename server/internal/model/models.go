@@ -233,3 +233,11 @@ type AuditLog struct {
 	IP        string    `gorm:"size:64" json:"ip"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// ServerGroup 服务器分组（借鉴 nezha server-group）。
+type ServerGroup struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
