@@ -15,6 +15,7 @@ import (
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/alert"
 	"github.com/motao123/Argus/server/internal/api"
+	"github.com/motao123/Argus/server/internal/nat"
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/db"
 	"github.com/motao123/Argus/server/internal/scheduler"
@@ -63,6 +64,16 @@ func main() {
 	svcSentinel := sentinel.New(gdb)
 	go svcSentinel.Run(agents.Peers)
 	defer svcSentinel.Stop()
+
+	// NAT 内网穿透反向代理（默认 :9090）
+	natProxy := nat.New(gdb, agents.Peers)
+	agents.NATDataCb = natProxy.DataSink
+	go func() {
+		if err := natProxy.Start(os.Getenv("ARGUS_NAT_LISTEN")); err != nil && err != http.ErrServerClosed {
+			log.Printf("nat proxy: %v", err)
+		}
+	}()
+	defer natProxy.Close()
 
 	// 5. API 路由
 	srv := &api.Server{

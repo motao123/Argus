@@ -140,3 +140,14 @@ type DDNSProfile struct {
 	Enabled      bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt    time.Time `json:"created_at"`
 }
+
+// NAT 内网穿透配置（借鉴 nezha NAT）：域名 → 服务器上的内网服务。
+type NAT struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	OwnerID    int64     `gorm:"index;default:0" json:"owner_id"`
+	ServerID   int64     `gorm:"index" json:"server_id"`
+	Domain     string    `gorm:"size:256;not null;uniqueIndex" json:"domain"`
+	TargetAddr string    `gorm:"size:256;not null" json:"target_addr"` // 内网 host:port
+	Enabled    bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+}

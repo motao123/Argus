@@ -40,6 +40,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.APIToken{},
 		&model.Service{}, &model.ServiceHistory{},
 		&model.DDNSProfile{},
+		&model.NAT{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

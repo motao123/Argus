@@ -101,6 +101,12 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/ddns/:id", s.updateDDNS)
 			authed.DELETE("/ddns/:id", s.deleteDDNS)
 			authed.POST("/ddns/:id/test", s.testDDNS)
+
+			// NAT 内网穿透
+			authed.GET("/nats", s.listNAT)
+			authed.POST("/nats", s.createNAT)
+			authed.PUT("/nats/:id", s.updateNAT)
+			authed.DELETE("/nats/:id", s.deleteNAT)
 		}
 		// 仪表盘实时推送（游客可连，借鉴 komari 公开节点列表）
 		api.GET("/ws", s.optionalAuthMiddleware(), s.dashboardWS)

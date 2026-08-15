@@ -29,6 +29,8 @@ type Hub struct {
 	TermDataCb func(serverID int64, data protocol.TerminalData)
 	// IPChangeCb 服务器公网 IP 变化回调（DDNS 触发用）。
 	IPChangeCb func(serverID int64, newIP string)
+	// NATDataCb Agent 回传 NAT 隧道数据（server 侧注册到 NAT Proxy）。
+	NATDataCb func(sessionID string, data []byte)
 
 	mu      sync.RWMutex
 	conns   map[int64]*rpc.Peer // serverID → 连接
@@ -118,6 +120,15 @@ func (ch *connHandler) Handle(method string, params json.RawMessage) (any, *prot
 		return nil, nil
 	case protocol.MethodTermClose:
 		// Agent 会话结束通知（无需处理，浏览器侧由连接关闭感知）
+		return nil, nil
+	case protocol.MethodNATData:
+		var d protocol.TerminalData
+		if err := json.Unmarshal(params, &d); err != nil {
+			return nil, protocol.NewError(protocol.ErrParams, err.Error())
+		}
+		if ch.hub.NATDataCb != nil {
+			ch.hub.NATDataCb(d.SessionID, d.Data)
+		}
 		return nil, nil
 	default:
 		return nil, protocol.NewError(protocol.ErrMethod, "unknown method: "+method)

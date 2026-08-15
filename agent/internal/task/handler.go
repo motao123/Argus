@@ -65,6 +65,14 @@ func (h *Handler) Handle(method string, params json.RawMessage) (any, *protocol.
 		return h.handleFsWrite(params)
 	case protocol.MethodFsDelete:
 		return h.handleFsDelete(params)
+	case protocol.MethodNATConnect:
+		return h.handleNATConnect(params)
+	case protocol.MethodNATData:
+		h.handleNATData(params)
+		return nil, nil
+	case protocol.MethodNATClose:
+		h.handleNATClose(params)
+		return nil, nil
 	default:
 		return nil, protocol.NewError(protocol.ErrMethod, "unknown method: "+method)
 	}

@@ -58,6 +58,9 @@ const (
 	MethodFsRead       = "agent.fs.read"
 	MethodFsWrite      = "agent.fs.write"
 	MethodFsDelete     = "agent.fs.delete"
+	MethodNATConnect   = "agent.nat.connect"
+	MethodNATData      = "agent.nat.data"
+	MethodNATClose     = "agent.nat.close"
 )
 
 // ---- 上报结构 ----
@@ -203,6 +206,12 @@ type FsWriteParams struct {
 type FsWriteResult struct {
 	Bytes int    `json:"bytes"`
 	Error string `json:"error,omitempty"`
+}
+
+// NATConnectParams 内网穿透隧道参数（server → agent）。
+type NATConnectParams struct {
+	SessionID string `json:"session_id"`
+	Target    string `json:"target"` // host:port
 }
 
 // FsDeleteParams 删除参数。
