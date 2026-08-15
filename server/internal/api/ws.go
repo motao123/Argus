@@ -1,9 +1,11 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -14,7 +16,21 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true }, // 本地部署默认放行
+	// 校验 Origin/Referer 与 Host 一致（防跨站 WS 劫持）
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = r.Header.Get("Referer")
+		}
+		if origin == "" {
+			return true // 非浏览器客户端
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == r.Host
+	},
 }
 
 // dashboardWS 每 2s 向所有前端推送服务器快照（单一 JSON 序列化后广播）。
@@ -145,13 +161,10 @@ func (s *Server) HandleAgentTermData(serverID int64, data protocol.TerminalData)
 	_ = conn.WriteMessage(websocket.BinaryMessage, data.Data)
 }
 
-var sessionSeq uint64
-
+// newSessionID 生成随机会话 ID（防猜测，借鉴 nezha idcodec 混淆思路）。
 func newSessionID() string {
-	termMu.Lock()
-	sessionSeq++
-	id := fmt.Sprintf("%s-%d", time.Now().Format("20060102T150405"), sessionSeq)
-	termMu.Unlock()
-	return id
+	buf := make([]byte, 16)
+	_, _ = rand.Read(buf)
+	return hex.EncodeToString(buf)
 }
 

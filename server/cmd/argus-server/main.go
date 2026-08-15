@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"net/url"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -198,7 +199,21 @@ func main() {
 }
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	// 校验 Origin/Referer 与 Host 一致（防跨站 WS 劫持）
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = r.Header.Get("Referer")
+		}
+		if origin == "" {
+			return true // 非浏览器客户端（agent/脚本）
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == r.Host
+	},
 }
 
 func displayAddr(l string) string {
