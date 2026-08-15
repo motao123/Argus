@@ -80,3 +80,12 @@
 7 步任务全部执行完毕：三项目解压与环境齐备、两 wiki 规范研读、全量资产盘点、
 四个完整参考实例对比、整合项目前后台分离开发（15 提交）、34/34 回归与浏览器实测通过、
 双仓库一致推送。整合项目覆盖 komari + nezha 生态核心能力，本地生产形态稳定运行。
+
+## 功能演示素材（docs/screenshots/，2026-08-15 补充）
+
+| 文件 | 内容 |
+|---|---|
+| argus-front.png | Argus 整合版前台（顶栏 + 统计卡 + 服务状态条 + 卡片墙） |
+| argus-admin.png | Argus 整合版后台总览（侧边栏导航） |
+| komari-admin.png | komari 管理后台（参考对比） |
+| nezha-official-user.png | nezha 官方用户端 dash-v2（含 agent 实时数据，参考对比） |
