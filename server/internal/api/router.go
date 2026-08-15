@@ -94,12 +94,12 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
+			fail(c, http.StatusUnauthorized, "missing token")
 			c.Abort()
 			return
 		}
 		if _, err := s.parseToken(strings.TrimPrefix(auth, "Bearer ")); err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			fail(c, http.StatusUnauthorized, "invalid token")
 			c.Abort()
 			return
 		}
@@ -115,7 +115,7 @@ func (s *Server) authWS(c *gin.Context) {
 		token = strings.TrimPrefix(token, "Bearer ")
 	}
 	if _, err := s.parseToken(token); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		fail(c, http.StatusUnauthorized, "invalid token")
 		c.Abort()
 		return
 	}

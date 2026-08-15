@@ -16,22 +16,22 @@ func (s *Server) login(c *gin.Context) {
 		Password string `json:"password"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
 	var user model.User
 	if err := s.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		fail(c, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		fail(c, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 	token, err := s.issueToken(user.Username)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "issue token"})
+		fail(c, http.StatusInternalServerError, "issue token")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"token": token, "username": user.Username})
+	ok(c, gin.H{"token": token, "username": user.Username})
 }

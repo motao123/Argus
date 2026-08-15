@@ -83,6 +83,14 @@ export function getToken() {
   return token;
 }
 
+// 统一响应壳（对齐 nezha 风格）：{"success":true,"data":...,"pagination":...}
+interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  error?: string;
+  pagination?: { offset: number; limit: number; total: number };
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -92,11 +100,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     window.location.href = "/login";
     throw new Error("unauthorized");
   }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
+  const body = (await res.json().catch(() => ({}))) as ApiResponse<T>;
+  if (!res.ok || body.success === false) {
+    throw new Error(body.error || `HTTP ${res.status}`);
   }
-  return res.json() as Promise<T>;
+  return body.data;
 }
 
 export const api = {
@@ -104,7 +112,7 @@ export const api = {
     request<{ token: string; username: string }>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    }),
+    }).then((r) => r),
 
   servers: () => request<{ servers: Server[] }>("/api/v1/servers"),
   createServer: (s: { name: string; group: string; note: string }) =>

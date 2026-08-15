@@ -44,7 +44,7 @@ type hostView struct {
 func (s *Server) listServers(c *gin.Context) {
 	var servers []model.Server
 	if err := s.DB.Order("id").Find(&servers).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	snap := s.Store.Snapshot()
@@ -76,7 +76,7 @@ func (s *Server) listServers(c *gin.Context) {
 		}
 		out = append(out, v)
 	}
-	c.JSON(http.StatusOK, gin.H{"servers": out})
+	ok(c, gin.H{"servers": out})
 }
 
 // createServer 手动创建服务器（返回密钥，用于 Agent 配置）。
@@ -87,17 +87,17 @@ func (s *Server) createServer(c *gin.Context) {
 		Note  string `json:"note"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
 	srv := model.Server{Name: req.Name, Group: req.Group, Note: req.Note, Secret: agent.GenSecret()}
 	if err := s.DB.Create(&srv).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.Store.Upsert(&srv)
 	// 密钥仅在创建时返回一次（Agent 配置用）
-	c.JSON(http.StatusOK, gin.H{"server": srv, "secret": srv.Secret})
+	ok(c, gin.H{"server": srv, "secret": srv.Secret})
 }
 
 func (s *Server) updateServer(c *gin.Context) {
@@ -108,36 +108,36 @@ func (s *Server) updateServer(c *gin.Context) {
 		Note  string `json:"note"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
 	var srv model.Server
 	if err := s.DB.First(&srv, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		fail(c, http.StatusNotFound, "not found")
 		return
 	}
 	srv.Name = req.Name
 	srv.Group = req.Group
 	srv.Note = req.Note
 	if err := s.DB.Save(&srv).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.Store.Upsert(&srv)
-	c.JSON(http.StatusOK, srv)
+	ok(c, srv)
 }
 
 func (s *Server) deleteServer(c *gin.Context) {
 	id := mustID(c)
 	if err := s.DB.Delete(&model.Server{}, id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if peer := s.Agents.Peer(id); peer != nil {
 		_ = peer.Close()
 	}
 	s.Store.Remove(id)
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	ok(c, gin.H{"ok": true})
 }
 
 // serverMetrics 查询历史指标。
@@ -161,7 +161,7 @@ func (s *Server) serverMetrics(c *gin.Context) {
 	var rows []model.Metric
 	if err := s.DB.Where("server_id = ? AND ts >= ?", id, from).
 		Order("ts").Find(&rows).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -208,7 +208,7 @@ func (s *Server) serverMetrics(c *gin.Context) {
 			"disk_total": a.diskTotal,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"period": period, "points": out})
+	ok(c, gin.H{"period": period, "points": out})
 }
 
 // serverExec 立即在指定服务器执行命令（管理台调试用）。
@@ -219,7 +219,7 @@ func (s *Server) serverExec(c *gin.Context) {
 		Timeout int    `json:"timeout"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
 	result, err := s.Agents.Exec(id, req.Command, req.Timeout)
@@ -228,10 +228,10 @@ func (s *Server) serverExec(c *gin.Context) {
 		if err == agent.ErrOffline {
 			code = http.StatusConflict
 		}
-		c.JSON(code, gin.H{"error": err.Error()})
+		fail(c, code, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	ok(c, result)
 }
 
 func mustID(c *gin.Context) int64 {

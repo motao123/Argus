@@ -87,7 +87,7 @@ var (
 func (s *Server) terminalWS(c *gin.Context) {
 	serverID := mustIDParam(c, "serverId")
 	if s.Agents.Peer(serverID) == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "server offline"})
+		fail(c, http.StatusConflict, "server offline")
 		return
 	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
