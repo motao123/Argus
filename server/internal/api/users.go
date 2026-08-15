@@ -1,0 +1,151 @@
+package api
+
+import (
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/motao123/Argus/server/internal/agent"
+	"github.com/motao123/Argus/server/internal/model"
+)
+
+// listUsers 用户列表（仅 admin）。
+func (s *Server) listUsers(c *gin.Context) {
+	p := principalFromContext(c)
+	if !p.IsAdmin {
+		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	var users []model.User
+	if err := s.DB.Order("id").Find(&users).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok(c, gin.H{"users": users})
+}
+
+// createUser 创建用户（仅 admin），返回用户专属 Agent 密钥。
+func (s *Server) createUser(c *gin.Context) {
+	p := principalFromContext(c)
+	if !p.IsAdmin {
+		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" || len(req.Password) < 6 {
+		fail(c, http.StatusBadRequest, "username required, password >= 6 chars")
+		return
+	}
+	if req.Role != model.RoleAdmin && req.Role != model.RoleUser {
+		req.Role = model.RoleUser
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "hash password")
+		return
+	}
+	u := model.User{
+		Username:     req.Username,
+		PasswordHash: string(hash),
+		Role:         req.Role,
+		AgentSecret:  agent.GenSecret(),
+	}
+	if err := s.DB.Create(&u).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok(c, gin.H{"user": u, "agent_secret": u.AgentSecret})
+}
+
+// deleteUser 删除用户（仅 admin）。其名下服务器联动删除（借鉴 nezha）。
+func (s *Server) deleteUser(c *gin.Context) {
+	p := principalFromContext(c)
+	if !p.IsAdmin {
+		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	id := mustID(c)
+	if id == p.UserID {
+		fail(c, http.StatusBadRequest, "cannot delete yourself")
+		return
+	}
+	// 级联：先删用户，再删其名下服务器
+	var servers []model.Server
+	s.DB.Where("owner_id = ?", id).Find(&servers)
+	for i := range servers {
+		if peer := s.Agents.Peer(servers[i].ID); peer != nil {
+			_ = peer.Close()
+		}
+		s.Store.Remove(servers[i].ID)
+	}
+	if err := s.DB.Where("owner_id = ?", id).Delete(&model.Server{}).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.DB.Delete(&model.User{}, id).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok(c, gin.H{"ok": true, "deleted_servers": len(servers)})
+}
+
+// updateUser 修改用户（admin 改角色；用户自己改密码）。
+func (s *Server) updateUser(c *gin.Context) {
+	p := principalFromContext(c)
+	id := mustID(c)
+	var req struct {
+		Password *string `json:"password"`
+		Role     *string `json:"role"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	var u model.User
+	if err := s.DB.First(&u, id).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	updates := map[string]any{}
+	if req.Password != nil && *req.Password != "" {
+		if id != p.UserID && !p.IsAdmin {
+			fail(c, http.StatusForbidden, "not your account")
+			return
+		}
+		if len(*req.Password) < 6 {
+			fail(c, http.StatusBadRequest, "password >= 6 chars")
+			return
+		}
+		hash, _ := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+		updates["password_hash"] = string(hash)
+	}
+	if req.Role != nil {
+		if !p.IsAdmin {
+			fail(c, http.StatusForbidden, "admin only")
+			return
+		}
+		if *req.Role != model.RoleAdmin && *req.Role != model.RoleUser {
+			fail(c, http.StatusBadRequest, "invalid role")
+			return
+		}
+		updates["role"] = *req.Role
+	}
+	if len(updates) > 0 {
+		if err := s.DB.Model(&u).Updates(updates).Error; err != nil {
+			fail(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	ok(c, gin.H{"ok": true})
+}

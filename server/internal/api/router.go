@@ -3,8 +3,6 @@ package api
 
 import (
 	"errors"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +11,7 @@ import (
 
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/config"
+	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/scheduler"
 	"github.com/motao123/Argus/server/internal/store"
 )
@@ -39,28 +38,43 @@ func New(s *Server) *gin.Engine {
 
 		authed := api.Group("", s.authMiddleware())
 		{
-			authed.GET("/servers", s.listServers)
-			authed.POST("/servers", s.createServer)
-			authed.PUT("/servers/:id", s.updateServer)
-			authed.DELETE("/servers/:id", s.deleteServer)
-			authed.GET("/servers/:id/metrics", s.serverMetrics)
-			authed.POST("/servers/:id/exec", s.serverExec)
+			// 用户管理（admin）
+			authed.GET("/users", s.listUsers)
+			authed.POST("/users", s.createUser)
+			authed.PUT("/users/:id", s.updateUser)
+			authed.DELETE("/users/:id", s.deleteUser)
 
-			authed.GET("/alerts", s.listAlerts)
-			authed.POST("/alerts", s.createAlert)
-			authed.PUT("/alerts/:id", s.updateAlert)
-			authed.DELETE("/alerts/:id", s.deleteAlert)
+			// PAT 令牌管理（仅 JWT）
+			authed.GET("/tokens", s.listTokens)
+			authed.POST("/tokens", s.createToken)
+			authed.DELETE("/tokens/:id", s.revokeToken)
 
-			authed.GET("/notifications", s.listNotifications)
-			authed.POST("/notifications", s.createNotification)
-			authed.PUT("/notifications/:id", s.updateNotification)
-			authed.DELETE("/notifications/:id", s.deleteNotification)
+			// 服务器（PAT 需 scope + 白名单）
+			authed.GET("/servers", requireScope(ScopeServerRead), s.listServers)
+			authed.POST("/servers", requireScope(ScopeServerWrite), s.createServer)
+			authed.PUT("/servers/:id", requireScope(ScopeServerWrite), s.updateServer)
+			authed.DELETE("/servers/:id", requireScope(ScopeServerDelete), s.deleteServer)
+			authed.GET("/servers/:id/metrics", requireScope(ScopeServerRead), s.serverMetrics)
+			authed.POST("/servers/:id/exec", requireScope(ScopeServerExec), s.serverExec)
 
-			authed.GET("/crons", s.listCrons)
-			authed.POST("/crons", s.createCron)
-			authed.PUT("/crons/:id", s.updateCron)
-			authed.DELETE("/crons/:id", s.deleteCron)
-			authed.POST("/crons/:id/run", s.runCron)
+			// 报警
+			authed.GET("/alerts", requireScope(ScopeAlertRead), s.listAlerts)
+			authed.POST("/alerts", requireScope(ScopeAlertWrite), s.createAlert)
+			authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), s.updateAlert)
+			authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), s.deleteAlert)
+
+			// 通知
+			authed.GET("/notifications", requireScope(ScopeNotificationRead), s.listNotifications)
+			authed.POST("/notifications", requireScope(ScopeNotificationWrite), s.createNotification)
+			authed.PUT("/notifications/:id", requireScope(ScopeNotificationWrite), s.updateNotification)
+			authed.DELETE("/notifications/:id", requireScope(ScopeNotificationDelete), s.deleteNotification)
+
+			// 定时任务
+			authed.GET("/crons", requireScope(ScopeCronRead), s.listCrons)
+			authed.POST("/crons", requireScope(ScopeCronWrite), s.createCron)
+			authed.PUT("/crons/:id", requireScope(ScopeCronWrite), s.updateCron)
+			authed.DELETE("/crons/:id", requireScope(ScopeCronDelete), s.deleteCron)
+			authed.POST("/crons/:id/run", requireScope(ScopeCronWrite), s.runCron)
 		}
 		// 仪表盘实时推送（带鉴权 Query 参数，便于浏览器 WS 连接）
 		api.GET("/ws", s.authWS, s.dashboardWS)
@@ -74,52 +88,22 @@ func New(s *Server) *gin.Engine {
 type claims struct {
 	UserID   int64  `json:"uid"`
 	Username string `json:"username"`
+	Role     string `json:"role"`
 	jwt.RegisteredClaims
 }
 
-// issueToken 签发 JWT（30 天）。
-func (s *Server) issueToken(username string) (string, error) {
+// issueToken 签发 JWT（30 天），携带用户 ID 与角色。
+func (s *Server) issueToken(u *model.User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{
-		Username: username,
+		UserID:   u.ID,
+		Username: u.Username,
+		Role:     u.Role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * 24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	})
 	return token.SignedString([]byte(s.Cfg.JWTSecret))
-}
-
-// authMiddleware 校验 Authorization: Bearer <token>。
-func (s *Server) authMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		auth := c.GetHeader("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
-			fail(c, http.StatusUnauthorized, "missing token")
-			c.Abort()
-			return
-		}
-		if _, err := s.parseToken(strings.TrimPrefix(auth, "Bearer ")); err != nil {
-			fail(c, http.StatusUnauthorized, "invalid token")
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
-}
-
-// authWS 供 WebSocket 端点校验 token（Query 参数形式）。
-func (s *Server) authWS(c *gin.Context) {
-	token := c.Query("token")
-	if token == "" {
-		token = c.GetHeader("Authorization")
-		token = strings.TrimPrefix(token, "Bearer ")
-	}
-	if _, err := s.parseToken(token); err != nil {
-		fail(c, http.StatusUnauthorized, "invalid token")
-		c.Abort()
-		return
-	}
-	c.Next()
 }
 
 func (s *Server) parseToken(token string) (*claims, error) {

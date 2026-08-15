@@ -37,6 +37,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 	if err := gdb.AutoMigrate(
 		&model.Server{}, &model.User{}, &model.Alert{},
 		&model.Notification{}, &model.Cron{}, &model.Metric{},
+		&model.APIToken{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -49,7 +50,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		if err != nil {
 			return nil, err
 		}
-		u := &model.User{Username: adminUser, PasswordHash: string(hash)}
+		u := &model.User{Username: adminUser, PasswordHash: string(hash), Role: model.RoleAdmin}
 		if err := gdb.Create(u).Error; err != nil {
 			return nil, fmt.Errorf("create admin: %w", err)
 		}

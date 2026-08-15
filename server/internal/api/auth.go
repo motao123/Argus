@@ -28,7 +28,7 @@ func (s *Server) login(c *gin.Context) {
 		fail(c, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	token, err := s.issueToken(user.Username)
+	token, err := s.issueToken(&user)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "issue token")
 		return

@@ -41,15 +41,24 @@ type hostView struct {
 }
 
 // listServers 返回全部服务器（配置 + 实时状态）。
+// 多用户：admin 看全部，普通用户只看自己名下（owner_id 匹配）。
 func (s *Server) listServers(c *gin.Context) {
+	p := principalFromContext(c)
+	q := s.DB.Order("id")
+	if p != nil && !p.IsAdmin && !p.IsPAT {
+		q = q.Where("owner_id = ?", p.UserID)
+	}
 	var servers []model.Server
-	if err := s.DB.Order("id").Find(&servers).Error; err != nil {
+	if err := q.Find(&servers).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	snap := s.Store.Snapshot()
 	out := make([]serverView, 0, len(servers))
 	for i := range servers {
+		if p != nil && p.IsPAT && !p.canAccessServer(servers[i].ID) {
+			continue // PAT 白名单外服务器不可见
+		}
 		v := serverView{Server: servers[i]}
 		if st, ok := snap[servers[i].ID]; ok {
 			v.CPU = st.Last.CPU

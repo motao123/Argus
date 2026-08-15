@@ -10,15 +10,24 @@ type Server struct {
 	Secret    string    `gorm:"size:64;not null;uniqueIndex" json:"-"`
 	Group     string    `gorm:"size:64;default:''" json:"group"`
 	Note      string    `gorm:"size:255;default:''" json:"note"`
+	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// User 管理员账号。
+// 用户角色
+const (
+	RoleAdmin = "admin"
+	RoleUser  = "user"
+)
+
+// User 用户账号（多用户：admin 全部权限，user 仅自己名下服务器）。
 type User struct {
 	ID           int64     `gorm:"primaryKey" json:"id"`
 	Username     string    `gorm:"size:32;not null;uniqueIndex" json:"username"`
 	PasswordHash string    `gorm:"size:128;not null" json:"-"`
+	Role         string    `gorm:"size:16;default:'user'" json:"role"`
+	AgentSecret  string    `gorm:"size:64;default:''" json:"-"` // 用户专属 Agent 注册密钥
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -74,4 +83,17 @@ type Metric struct {
 	NetOutSpeed float64  `json:"net_out_speed"`
 	Load1      float64   `json:"load1"`
 	CreatedAt  time.Time `json:"-"`
+}
+
+// APIToken 个人访问令牌（PAT），借鉴 nezha 的 scope + 白名单设计。
+type APIToken struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	UserID    int64     `gorm:"index" json:"user_id"`
+	Name      string    `gorm:"size:128;not null" json:"name"`
+	TokenHash string    `gorm:"size:64;not null" json:"-"`
+	Scopes    string    `gorm:"size:1024;not null" json:"scopes"`   // 逗号分隔，如 argus:server:read,argus:server:exec
+	ServerIDs string    `gorm:"size:2048;default:''" json:"server_ids"` // 逗号分隔；空 = 全部
+	ExpiresAt *time.Time `json:"expires_at"`
+	Revoked   bool      `gorm:"default:false" json:"revoked"`
+	CreatedAt time.Time `json:"created_at"`
 }
