@@ -199,6 +199,12 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// Setting 站点设置键值（借鉴 komari DB 存储配置）。
+type Setting struct {
+	Key   string `gorm:"primaryKey;size:64" json:"key"`
+	Value string `gorm:"size:1024" json:"value"`
+}
+
 // Clipboard 剪贴板条目（借鉴 komari CloudClipboard）。
 type Clipboard struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`

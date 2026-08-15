@@ -47,6 +47,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.Transfer{},
 		&model.AuditLog{},
 		&model.Clipboard{},
+		&model.Setting{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

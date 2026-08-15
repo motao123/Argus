@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
 import { getToken, setToken } from "../lib/api";
 import { getLang, setLang, t } from "../lib/i18n";
+import { useQuery } from "@tanstack/react-query";
 import CommandPalette from "../components/CommandPalette";
 
 function useTheme() {
@@ -38,6 +39,13 @@ export default function PublicLayout() {
   const navigate = useNavigate();
   const loggedIn = !!getToken();
   const [lang, setLangState] = useState<"zh-CN" | "en">(getLang());
+  const { data: pub } = useQuery({
+    queryKey: ["public-settings"],
+    queryFn: () => fetch("/api/v1/public/settings").then((r) => r.json()).then((d) => d.data),
+    staleTime: 60000,
+  });
+  const siteName = pub?.site_name || "Argus";
+  const siteDesc = pub?.site_desc || "轻量自托管服务器监控";
 
   return (
     <div className="flex min-h-screen flex-col bg-bg">
@@ -46,7 +54,7 @@ export default function PublicLayout() {
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-2 text-lg font-bold">
             <Activity className="h-5 w-5 text-accent" />
-            Argus
+            {siteName}
           </Link>
           <div className="flex items-center gap-4">
             <Clock />
@@ -113,7 +121,7 @@ export default function PublicLayout() {
 
       {/* 页脚 */}
       <footer className="border-t border-border py-4 text-center text-xs text-muted">
-        Powered by <span className="font-medium">Argus</span> — {t("common.poweredBy")}
+        Powered by <span className="font-medium">{siteName}</span> — {siteDesc}
       </footer>
     </div>
   );

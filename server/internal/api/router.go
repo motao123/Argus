@@ -51,6 +51,7 @@ func New(s *Server) *gin.Engine {
 		// 读接口：可选认证（游客可访问公开视图，借鉴 nezha optionalAuth）
 		pub := api.Group("", s.optionalAuthMiddleware())
 		{
+			pub.GET("/public/settings", s.getPublicSettings)
 			pub.GET("/servers", s.listServers)
 			pub.GET("/servers/:id/metrics", s.serverMetrics)
 			pub.GET("/servers/:id/transfer", s.serverTransfer)
@@ -83,6 +84,10 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/alerts", requireScope(ScopeAlertWrite), s.createAlert)
 			authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), s.updateAlert)
 			authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), s.deleteAlert)
+
+			// 站点设置（admin）
+			authed.GET("/settings", s.getSettings)
+			authed.POST("/settings", s.saveSettings)
 
 			// 备份与数据库工具（admin）
 			authed.GET("/admin/backup", s.backupDownload)
