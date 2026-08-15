@@ -103,6 +103,9 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/files/:serverId/write", requireScope(ScopeServerWrite), s.writeFile)
 			authed.POST("/files/:serverId/delete", requireScope(ScopeServerWrite), s.deleteFile)
 
+			// 服务器过户（admin）
+			authed.POST("/servers/:id/transfer", s.transferServer)
+
 			// DDNS
 			authed.GET("/ddns", s.listDDNS)
 			authed.POST("/ddns", s.createDDNS)
