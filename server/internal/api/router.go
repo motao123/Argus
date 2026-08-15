@@ -94,6 +94,13 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/files/:serverId/read", requireScope(ScopeServerRead), s.readFile)
 			authed.POST("/files/:serverId/write", requireScope(ScopeServerWrite), s.writeFile)
 			authed.POST("/files/:serverId/delete", requireScope(ScopeServerWrite), s.deleteFile)
+
+			// DDNS
+			authed.GET("/ddns", s.listDDNS)
+			authed.POST("/ddns", s.createDDNS)
+			authed.PUT("/ddns/:id", s.updateDDNS)
+			authed.DELETE("/ddns/:id", s.deleteDDNS)
+			authed.POST("/ddns/:id/test", s.testDDNS)
 		}
 		// 仪表盘实时推送（游客可连，借鉴 komari 公开节点列表）
 		api.GET("/ws", s.optionalAuthMiddleware(), s.dashboardWS)

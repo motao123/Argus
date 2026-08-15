@@ -73,6 +73,8 @@ func main() {
 		Scheduler: sched,
 	}
 	agents.TermDataCb = srv.HandleAgentTermData
+	// DDNS：服务器 IP 变化时更新解析记录
+	agents.IPChangeCb = srv.HandleServerIPChange
 	router := api.New(srv)
 
 	// 6. 静态资源（内嵌前端，构建时注入；目录不存在则跳过）

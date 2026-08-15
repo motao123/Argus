@@ -124,3 +124,19 @@ type ServiceHistory struct {
 	Total     int   `json:"total"`
 	DelaySum  int64 `json:"delay_sum"`
 }
+
+// DDNSProfile 动态解析配置（借鉴 nezha DDNS）。
+type DDNSProfile struct {
+	ID           int64     `gorm:"primaryKey" json:"id"`
+	OwnerID      int64     `gorm:"index;default:0" json:"owner_id"`
+	ServerID     int64     `gorm:"index" json:"server_id"` // 监听该服务器 IP 变化
+	Name         string    `gorm:"size:64;not null" json:"name"`
+	Provider     string    `gorm:"size:32;default:'webhook'" json:"provider"` // webhook / cloudflare
+	AccessKey    string    `gorm:"size:256;default:''" json:"-"`              // API Token
+	Domains      string    `gorm:"size:1024;not null" json:"domains"`         // 逗号分隔域名
+	WebhookURL   string    `gorm:"size:512;default:''" json:"webhook_url"`    // 含 {ip} 占位符
+	LastIP       string    `gorm:"size:64;default:''" json:"last_ip"`
+	LastUpdated  time.Time `json:"last_updated"`
+	Enabled      bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt    time.Time `json:"created_at"`
+}

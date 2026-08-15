@@ -27,9 +27,12 @@ type Hub struct {
 
 	// TermDataCb Agent 终端输出回调（由 API 层注册，转发给浏览器）。
 	TermDataCb func(serverID int64, data protocol.TerminalData)
+	// IPChangeCb 服务器公网 IP 变化回调（DDNS 触发用）。
+	IPChangeCb func(serverID int64, newIP string)
 
-	mu    sync.RWMutex
-	conns map[int64]*rpc.Peer // serverID → 连接
+	mu      sync.RWMutex
+	conns   map[int64]*rpc.Peer // serverID → 连接
+	ipCache map[int64]string    // serverID → 最近 IP
 }
 
 func NewHub(db *gorm.DB, st *store.Hub, batcher *store.MetricBatcher) *Hub {
@@ -39,6 +42,25 @@ func NewHub(db *gorm.DB, st *store.Hub, batcher *store.MetricBatcher) *Hub {
 		batcher: batcher,
 		conns:   make(map[int64]*rpc.Peer),
 	}
+}
+
+// ipCache 最近上报 IP（serverID → IP），用于 DDNS 变更检测。
+func (h *Hub) lastIP(serverID int64) string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.ipCache == nil {
+		return ""
+	}
+	return h.ipCache[serverID]
+}
+
+func (h *Hub) setLastIP(serverID int64, ip string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.ipCache == nil {
+		h.ipCache = make(map[int64]string)
+	}
+	h.ipCache[serverID] = ip
 }
 
 // Peers 返回全部在线连接（供调度器/报警器下发）。
@@ -145,6 +167,13 @@ func (ch *connHandler) handleReport(params json.RawMessage) (any, *protocol.RPCE
 		if err := ch.hub.db.First(&srv, id).Error; err == nil && srv.Name == "Server" {
 			srv.Name = p.Host.Hostname
 			ch.hub.db.Model(&srv).Update("name", srv.Name)
+		}
+		// IP 变化触发 DDNS 回调（每 30s 至多一次，避免频繁）
+		if ch.hub.IPChangeCb != nil && p.Host.IP != "" {
+			if lastIP := ch.hub.lastIP(id); lastIP != p.Host.IP {
+				ch.hub.setLastIP(id, p.Host.IP)
+				go ch.hub.IPChangeCb(id, p.Host.IP)
+			}
 		}
 	}
 	ch.hub.store.SetReport(id, p.Host, &p)
