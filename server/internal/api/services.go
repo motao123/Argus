@@ -26,8 +26,11 @@ func (s *Server) listServices(c *gin.Context) {
 	if p != nil && !p.IsAdmin && !p.IsPAT {
 		q = q.Where("owner_id = ?", p.UserID)
 	}
+	offset, limit := pagination(c)
+	var total int64
+	q.Count(&total)
 	var services []model.Service
-	if err := q.Find(&services).Error; err != nil {
+	if err := q.Offset(offset).Limit(limit).Find(&services).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -54,7 +57,7 @@ func (s *Server) listServices(c *gin.Context) {
 		}
 		out = append(out, v)
 	}
-	ok(c, gin.H{"services": out})
+	okPage(c, gin.H{"services": out}, total, offset, limit)
 }
 
 func max64(a, b int64) int64 {

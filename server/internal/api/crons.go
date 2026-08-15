@@ -13,12 +13,15 @@ import (
 // ---- Crons ----
 
 func (s *Server) listCrons(c *gin.Context) {
+	offset, limit := pagination(c)
+	var total int64
+	s.DB.Model(&model.Cron{}).Count(&total)
 	var crons []model.Cron
-	if err := s.DB.Order("id").Find(&crons).Error; err != nil {
+	if err := s.DB.Order("id").Offset(offset).Limit(limit).Find(&crons).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok(c, gin.H{"crons": crons})
+	okPage(c, gin.H{"crons": crons}, total, offset, limit)
 }
 
 func (s *Server) createCron(c *gin.Context) {

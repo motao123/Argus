@@ -52,8 +52,11 @@ func (s *Server) listServers(c *gin.Context) {
 	if p != nil && !p.IsAdmin && !p.IsPAT {
 		q = q.Where("owner_id = ?", p.UserID)
 	}
+	offset, limit := pagination(c)
+	var total int64
+	q.Count(&total)
 	var servers []model.Server
-	if err := q.Find(&servers).Error; err != nil {
+	if err := q.Offset(offset).Limit(limit).Find(&servers).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -97,7 +100,7 @@ func (s *Server) listServers(c *gin.Context) {
 		}
 		out = append(out, v)
 	}
-	ok(c, gin.H{"servers": out})
+	okPage(c, gin.H{"servers": out}, total, offset, limit)
 }
 
 // createServer 手动创建服务器（返回密钥，用于 Agent 配置）。

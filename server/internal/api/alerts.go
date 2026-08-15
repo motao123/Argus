@@ -11,12 +11,15 @@ import (
 // ---- Alerts ----
 
 func (s *Server) listAlerts(c *gin.Context) {
+	offset, limit := pagination(c)
+	var total int64
+	s.DB.Model(&model.Alert{}).Count(&total)
 	var alerts []model.Alert
-	if err := s.DB.Order("id").Find(&alerts).Error; err != nil {
+	if err := s.DB.Order("id").Offset(offset).Limit(limit).Find(&alerts).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok(c, gin.H{"alerts": alerts})
+	okPage(c, gin.H{"alerts": alerts}, total, offset, limit)
 }
 
 func (s *Server) createAlert(c *gin.Context) {
@@ -63,12 +66,15 @@ func (s *Server) deleteAlert(c *gin.Context) {
 // ---- Notifications ----
 
 func (s *Server) listNotifications(c *gin.Context) {
+	offset, limit := pagination(c)
+	var total int64
+	s.DB.Model(&model.Notification{}).Count(&total)
 	var ns []model.Notification
-	if err := s.DB.Order("id").Find(&ns).Error; err != nil {
+	if err := s.DB.Order("id").Offset(offset).Limit(limit).Find(&ns).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok(c, gin.H{"notifications": ns})
+	okPage(c, gin.H{"notifications": ns}, total, offset, limit)
 }
 
 func (s *Server) createNotification(c *gin.Context) {
