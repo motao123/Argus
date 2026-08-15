@@ -49,6 +49,7 @@ func New(s *Server) *gin.Engine {
 		{
 			pub.GET("/servers", s.listServers)
 			pub.GET("/servers/:id/metrics", s.serverMetrics)
+			pub.GET("/servers/:id/transfer", s.serverTransfer)
 			pub.GET("/services", s.listServices)
 			pub.GET("/services/:id/history", s.serviceHistory)
 		}
@@ -115,7 +116,7 @@ func New(s *Server) *gin.Engine {
 			authed.DELETE("/sessions", s.revokeAllSessions)
 
 			// 服务器过户（admin）
-			authed.POST("/servers/:id/transfer", s.transferServer)
+			authed.POST("/servers/:id/transfer", s.serverTransfer)
 
 			// DDNS
 			authed.GET("/ddns", s.listDDNS)

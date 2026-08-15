@@ -44,6 +44,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.OAuthConfig{},
 		&model.Session{},
 		&model.NotificationGroup{},
+		&model.Transfer{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

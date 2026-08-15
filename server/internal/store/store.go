@@ -26,10 +26,29 @@ type State struct {
 type Hub struct {
 	mu      sync.RWMutex
 	servers map[int64]*State
+	// 流量打点：serverID → (小时桶, 累计入, 累计出)
+	lastTransferIn    map[int64]uint64
+	lastTransferOut   map[int64]uint64
+	lastTransferHour  map[int64]int64
+	transferQueue     []TransferDelta
+}
+
+// TakeTransferQueue 取走待落库的流量差值（由调度器定期消费）。
+func (h *Hub) TakeTransferQueue() []TransferDelta {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	q := h.transferQueue
+	h.transferQueue = nil
+	return q
 }
 
 func NewHub() *Hub {
-	return &Hub{servers: make(map[int64]*State)}
+	return &Hub{
+		servers:          make(map[int64]*State),
+		lastTransferIn:   make(map[int64]uint64),
+		lastTransferOut:  make(map[int64]uint64),
+		lastTransferHour: make(map[int64]int64),
+	}
 }
 
 // Upsert 注册或更新服务器配置（Agent 注册时调用）。
@@ -73,6 +92,26 @@ func (h *Hub) SetReport(id int64, host protocol.HostInfo, r *protocol.ReportPara
 	st.Last = *r
 	st.Online = true
 	st.LastSeen = time.Now()
+
+	// 流量打点：小时桶差值（借鉴 nezha Transfer）
+	hour := r.Timestamp / 3600 * 3600
+	prevIn, seen := h.lastTransferIn[id]
+	prevOut := h.lastTransferOut[id]
+	prevHour := h.lastTransferHour[id]
+	if seen && prevHour > 0 && prevHour != hour {
+		// 小时切换：上一小时差值入队列（计数器回绕则跳过）
+		if r.NetInTransfer >= prevIn && r.NetOutTransfer >= prevOut {
+			h.transferQueue = append(h.transferQueue, TransferDelta{
+				ServerID: id,
+				Ts:       prevHour,
+				In:       r.NetInTransfer - prevIn,
+				Out:      r.NetOutTransfer - prevOut,
+			})
+		}
+	}
+	h.lastTransferIn[id] = r.NetInTransfer
+	h.lastTransferOut[id] = r.NetOutTransfer
+	h.lastTransferHour[id] = hour
 }
 
 // MarkOffline 标记服务器离线（检测到连接断开时调用）。
@@ -108,6 +147,14 @@ func (h *Hub) Snapshot() map[int64]State {
 		out[id] = cp
 	}
 	return out
+}
+
+// TransferDelta 小时流量差值（导出供 API 层消费）。
+type TransferDelta struct {
+	ServerID int64
+	Ts       int64
+	In       uint64
+	Out      uint64
 }
 
 // ---- 指标降采样 ----

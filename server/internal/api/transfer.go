@@ -2,61 +2,73 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/motao123/Argus/server/internal/model"
 )
 
-// ---- 服务器过户转移（借鉴 nezha ServerTransfer）----
+// FlushTransfers 消费流量差值队列并落库（由 main 定期调用，每小时一次）。
+func (s *Server) FlushTransfers() {
+	for _, d := range s.Store.TakeTransferQueue() {
+		var existing model.Transfer
+		err := s.DB.Where("server_id = ? AND ts = ?", d.ServerID, d.Ts).First(&existing).Error
+		if err == nil {
+			s.DB.Model(&existing).Updates(map[string]any{
+				"in":  existing.In + d.In,
+				"out": existing.Out + d.Out,
+			})
+		} else {
+			s.DB.Create(&model.Transfer{ServerID: d.ServerID, Ts: d.Ts, In: d.In, Out: d.Out})
+		}
+	}
+}
 
-// transferServer 将服务器过户给目标用户：改 owner + 轮换密钥。
-// 仅 admin 可执行（简化版：不做 nezha 的双向确认状态机）。
-func (s *Server) transferServer(c *gin.Context) {
-	p := principalFromContext(c)
-	if !p.IsAdmin {
-		fail(c, http.StatusForbidden, "admin only")
-		return
-	}
-	var req struct {
-		ServerID    int64 `json:"server_id"`
-		TargetUserID int64 `json:"target_user_id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "bad request")
-		return
-	}
-	var srv model.Server
-	if err := s.DB.First(&srv, req.ServerID).Error; err != nil {
-		fail(c, http.StatusNotFound, "server not found")
-		return
-	}
-	var target model.User
-	if err := s.DB.First(&target, req.TargetUserID).Error; err != nil {
-		fail(c, http.StatusNotFound, "target user not found")
-		return
+// serverTransfer 查询服务器周期流量。
+// period: day（24 点）/ month（30 点）/ year（12 点）。
+func (s *Server) serverTransfer(c *gin.Context) {
+	id := mustID(c)
+	period := c.DefaultQuery("period", "day")
+	now := time.Now()
+
+	var step, points int64
+	switch period {
+	case "month":
+		step, points = 24*3600, 30
+	case "year":
+		step, points = 30*24*3600, 12
+	default:
+		period = "day"
+		step, points = 3600, 24
 	}
 
-	// 轮换密钥：旧 agent 连接踢下线，新密钥需要 agent 重新注册
-	newSecret := agentGenSecret()
-	if err := s.DB.Model(&srv).Updates(map[string]any{
-		"owner_id": target.ID,
-		"secret":   newSecret,
-	}).Error; err != nil {
+	from := now.Add(-time.Duration(points) * time.Duration(step) * time.Second).Unix()
+	var rows []model.Transfer
+	if err := s.DB.Where("server_id = ? AND ts >= ?", id, from).Order("ts").Find(&rows).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if peer := s.Agents.Peer(srv.ID); peer != nil {
-		_ = peer.Close()
-	}
-	s.Store.Upsert(&srv)
-	s.Store.MarkOffline(srv.ID)
 
-	ok(c, gin.H{
-		"ok":           true,
-		"server_id":    srv.ID,
-		"new_owner":    target.Username,
-		"new_secret":   newSecret, // 新密钥仅此一次返回
-		"note":         "agent 需用新密钥重新注册",
-	})
+	// 聚合到步长
+	type agg struct{ in, out uint64 }
+	buckets := map[int64]*agg{}
+	var order []int64
+	for _, r := range rows {
+		bts := r.Ts / step * step
+		a, ok := buckets[bts]
+		if !ok {
+			a = &agg{}
+			buckets[bts] = a
+			order = append(order, bts)
+		}
+		a.in += r.In
+		a.out += r.Out
+	}
+	out := make([]gin.H, 0, len(order))
+	for _, bts := range order {
+		a := buckets[bts]
+		out = append(out, gin.H{"ts": bts, "in": a.in, "out": a.out})
+	}
+	ok(c, gin.H{"period": period, "points": out})
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 )
 
 func TestBatcher(t *testing.T) {
+	_ = os.Remove("/tmp/batcher-test/test.db")
 	gdb, err := gorm.Open(sqlite.Open("/tmp/batcher-test/test.db"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)

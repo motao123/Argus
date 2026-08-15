@@ -189,3 +189,12 @@ type Session struct {
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
+
+// Transfer 周期流量打点（小时级，借鉴 nezha Transfer）。
+type Transfer struct {
+	ID       int64 `gorm:"primaryKey" json:"-"`
+	ServerID int64 `gorm:"index:idx_transfer" json:"server_id"`
+	Ts       int64 `gorm:"index:idx_transfer" json:"ts"` // 小时（unix/3600*3600）
+	In       uint64 `json:"in"`
+	Out      uint64 `json:"out"`
+}

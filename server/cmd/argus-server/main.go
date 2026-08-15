@@ -97,6 +97,15 @@ func main() {
 	}
 	srv.ReloadOAuthConfigs()
 
+	// 周期流量落库（每小时消费差值队列，借鉴 nezha Transfer）
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			srv.FlushTransfers()
+		}
+	}()
+
 	agents.TermDataCb = srv.HandleAgentTermData
 	// DDNS：服务器 IP 变化时更新解析记录
 	agents.IPChangeCb = srv.HandleServerIPChange
