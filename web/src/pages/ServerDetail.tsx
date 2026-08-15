@@ -1,6 +1,7 @@
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, TerminalSquare } from "lucide-react";
+import { ArrowLeft, Lock, TerminalSquare } from "lucide-react";
+import { getToken } from "../lib/api";
 import {
   CartesianGrid,
   Line,
@@ -92,13 +93,24 @@ export default function ServerDetail() {
             </p>
           </div>
         </div>
-        <Link
-          to={`/terminal/${server.id}`}
-          className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90"
-        >
-          <TerminalSquare className="h-4 w-4" />
-          网页终端
-        </Link>
+        {getToken() ? (
+          <Link
+            to={`/admin/terminal/${server.id}`}
+            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90"
+          >
+            <TerminalSquare className="h-4 w-4" />
+            网页终端
+          </Link>
+        ) : (
+          <Link
+            to="/login"
+            className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-muted hover:text-fg"
+            title="登录后可使用网页终端"
+          >
+            <Lock className="h-4 w-4" />
+            登录后使用终端
+          </Link>
+        )}
       </div>
 
       {/* 实时指标 */}

@@ -122,6 +122,33 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 	}
 }
 
+// optionalAuthMiddleware 可选认证：有 token 识别身份，无 token 视为游客（guest）。
+// 借鉴 nezha 的 optionalAuth：读接口游客可访问，写接口由 requireAuth 拦截。
+func (s *Server) optionalAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		auth := c.GetHeader("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			if p, err := s.identify(strings.TrimPrefix(auth, "Bearer ")); err == nil {
+				c.Set("principal", p)
+			}
+		}
+		c.Next()
+	}
+}
+
+// requireAuth 写操作必须登录（游客 401）。
+func requireAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p := principalFromContext(c)
+		if p == nil {
+			fail(c, http.StatusUnauthorized, "login required")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // authWS WebSocket 端点 token 校验（Query 或 Header）。
 func (s *Server) authWS(c *gin.Context) {
 	token := c.Query("token")

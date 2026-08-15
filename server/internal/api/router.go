@@ -36,6 +36,16 @@ func New(s *Server) *gin.Engine {
 	{
 		api.POST("/auth/login", s.login)
 
+		// 读接口：可选认证（游客可访问公开视图，借鉴 nezha optionalAuth）
+		pub := api.Group("", s.optionalAuthMiddleware())
+		{
+			pub.GET("/servers", s.listServers)
+			pub.GET("/servers/:id/metrics", s.serverMetrics)
+			pub.GET("/services", s.listServices)
+			pub.GET("/services/:id/history", s.serviceHistory)
+		}
+
+		// 写接口：必须登录
 		authed := api.Group("", s.authMiddleware())
 		{
 			// 用户管理（admin）
@@ -50,11 +60,9 @@ func New(s *Server) *gin.Engine {
 			authed.DELETE("/tokens/:id", s.revokeToken)
 
 			// 服务器（PAT 需 scope + 白名单）
-			authed.GET("/servers", requireScope(ScopeServerRead), s.listServers)
 			authed.POST("/servers", requireScope(ScopeServerWrite), s.createServer)
 			authed.PUT("/servers/:id", requireScope(ScopeServerWrite), s.updateServer)
 			authed.DELETE("/servers/:id", requireScope(ScopeServerDelete), s.deleteServer)
-			authed.GET("/servers/:id/metrics", requireScope(ScopeServerRead), s.serverMetrics)
 			authed.POST("/servers/:id/exec", requireScope(ScopeServerExec), s.serverExec)
 
 			// 报警
@@ -76,12 +84,10 @@ func New(s *Server) *gin.Engine {
 			authed.DELETE("/crons/:id", requireScope(ScopeCronDelete), s.deleteCron)
 			authed.POST("/crons/:id/run", requireScope(ScopeCronWrite), s.runCron)
 
-			// 服务监控
-			authed.GET("/services", requireScope(ScopeServiceRead), s.listServices)
+			// 服务监控（管理）
 			authed.POST("/services", requireScope(ScopeServiceWrite), s.createService)
 			authed.PUT("/services/:id", requireScope(ScopeServiceWrite), s.updateService)
 			authed.DELETE("/services/:id", requireScope(ScopeServiceDelete), s.deleteService)
-			authed.GET("/services/:id/history", requireScope(ScopeServiceRead), s.serviceHistory)
 
 			// 文件管理（借用 server 资源 scope）
 			authed.GET("/files/:serverId", requireScope(ScopeServerRead), s.listFiles)
@@ -89,8 +95,8 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/files/:serverId/write", requireScope(ScopeServerWrite), s.writeFile)
 			authed.POST("/files/:serverId/delete", requireScope(ScopeServerWrite), s.deleteFile)
 		}
-		// 仪表盘实时推送（带鉴权 Query 参数，便于浏览器 WS 连接）
-		api.GET("/ws", s.authWS, s.dashboardWS)
+		// 仪表盘实时推送（游客可连，借鉴 komari 公开节点列表）
+		api.GET("/ws", s.optionalAuthMiddleware(), s.dashboardWS)
 		api.GET("/terminal/:serverId", s.authWS, s.terminalWS)
 	}
 	return r
