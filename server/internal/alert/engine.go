@@ -6,6 +6,7 @@ package alert
 import (
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,19 +184,46 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 	if !a.Notify {
 		return
 	}
-	var n model.Notification
-	if err := e.db.First(&n, a.WebhookID).Error; err != nil {
-		log.Printf("alert %s: notification #%d not found", a.Name, a.WebhookID)
-		return
-	}
 	serverName := st.Server.Name
 	title := fmt.Sprintf("[Argus] %s %s", serverName, kind)
 	content := fmt.Sprintf("%s: %s = %.2f", a.Name, a.Metric, value)
 	if kind == "recovered" {
 		content = fmt.Sprintf("%s: %s back to normal", serverName, a.Name)
 	}
-	go notifier.Send(&n, title, content)
+	// 分组扇出（借鉴 nezha NotificationGroup）或单渠道
+	targets := make([]model.Notification, 0)
+	if a.GroupID > 0 {
+		var group model.NotificationGroup
+		if err := e.db.First(&group, a.GroupID).Error; err == nil {
+			for _, idStr := range strings.Split(group.MemberIDs, ",") {
+				var n model.Notification
+				if err := e.db.First(&n, parseInt64(strings.TrimSpace(idStr))).Error; err == nil {
+					targets = append(targets, n)
+				}
+			}
+		}
+	} else if a.WebhookID > 0 {
+		var n model.Notification
+		if err := e.db.First(&n, a.WebhookID).Error; err == nil {
+			targets = append(targets, n)
+		}
+	}
+	for i := range targets {
+		n := targets[i]
+		go notifier.Send(&n, title, content)
+	}
 	log.Printf("alert %s (%s): %s", a.Name, kind, content)
 }
 
 var _ = protocol.MethodReport
+
+func parseInt64(str string) int64 {
+	var n int64
+	for _, ch := range str {
+		if ch < '0' || ch > '9' {
+			return 0
+		}
+		n = n*10 + int64(ch-'0')
+	}
+	return n
+}

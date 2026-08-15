@@ -33,6 +33,14 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// NotificationGroup 通知分组（多对多扇出，借鉴 nezha）。
+type NotificationGroup struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	MemberIDs string    `gorm:"size:1024;default:''" json:"member_ids"` // 逗号分隔的 Notification ID
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Alert 报警规则。
 type Alert struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
@@ -42,8 +50,9 @@ type Alert struct {
 	Max       *float64  `json:"max"`                            // 上限（nil 不检查）
 	Duration  int       `json:"duration"`                       // 持续秒数
 	Notify    bool      `gorm:"default:true" json:"notify"`
-	WebhookID int64     `json:"webhook_id"`
-	TriggerCronID int64 `json:"trigger_cron_id"` // 触发时执行的任务（0=无）
+	WebhookID int64     `json:"webhook_id"`          // 单渠道（兼容）
+	GroupID   int64     `json:"group_id"`            // 通知分组（0=无）
+	TriggerCronID int64 `json:"trigger_cron_id"`     // 触发时执行的任务（0=无）
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 }

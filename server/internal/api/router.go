@@ -79,6 +79,12 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), s.updateAlert)
 			authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), s.deleteAlert)
 
+			// 通知分组
+			authed.GET("/notification-groups", s.listNotificationGroups)
+			authed.POST("/notification-groups", s.saveNotificationGroup)
+			authed.PUT("/notification-groups/:id", s.saveNotificationGroup)
+			authed.DELETE("/notification-groups/:id", s.deleteNotificationGroup)
+
 			// 通知
 			authed.GET("/notifications", requireScope(ScopeNotificationRead), s.listNotifications)
 			authed.POST("/notifications", requireScope(ScopeNotificationWrite), s.createNotification)

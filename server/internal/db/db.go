@@ -43,6 +43,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.NAT{},
 		&model.OAuthConfig{},
 		&model.Session{},
+		&model.NotificationGroup{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
