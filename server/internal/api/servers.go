@@ -48,7 +48,7 @@ type hostView struct {
 // 多用户：admin 看全部，普通用户只看自己名下（owner_id 匹配）。
 func (s *Server) listServers(c *gin.Context) {
 	p := principalFromContext(c)
-	q := s.DB.Order("id")
+	q := s.DB.Model(&model.Server{}).Order("id")
 	if p != nil && !p.IsAdmin && !p.IsPAT {
 		q = q.Where("owner_id = ?", p.UserID)
 	}

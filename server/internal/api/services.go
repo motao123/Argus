@@ -22,7 +22,7 @@ type serviceView struct {
 // listServices 服务监控列表。
 func (s *Server) listServices(c *gin.Context) {
 	p := principalFromContext(c)
-	q := s.DB.Order("id")
+	q := s.DB.Model(&model.Service{}).Order("id")
 	if p != nil && !p.IsAdmin && !p.IsPAT {
 		q = q.Where("owner_id = ?", p.UserID)
 	}
