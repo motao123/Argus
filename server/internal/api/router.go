@@ -90,6 +90,9 @@ func New(s *Server) *gin.Engine {
 			authed.GET("/admin/db/size", s.dbSize)
 			authed.POST("/admin/db/vacuum", s.dbVacuum)
 
+			// 审计日志（admin）
+			authed.GET("/admin/logs", s.listAuditLogs)
+
 			// 插件管理
 			authed.GET("/plugins", s.listPlugins)
 			authed.POST("/plugins/:name/toggle", s.togglePlugin)

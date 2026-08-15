@@ -34,6 +34,7 @@ func (s *Server) createCron(c *gin.Context) {
 	if s.Scheduler != nil {
 		s.Scheduler.Upsert(&cr)
 	}
+	s.auditLog(c, "cron.create", cr.Name)
 	ok(c, cr)
 }
 
@@ -56,6 +57,7 @@ func (s *Server) updateCron(c *gin.Context) {
 	if s.Scheduler != nil {
 		s.Scheduler.Upsert(&cr)
 	}
+	s.auditLog(c, "cron.create", cr.Name)
 	ok(c, cr)
 }
 

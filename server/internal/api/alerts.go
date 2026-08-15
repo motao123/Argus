@@ -29,6 +29,7 @@ func (s *Server) createAlert(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.auditLog(c, "alert.create", a.Name)
 	ok(c, a)
 }
 

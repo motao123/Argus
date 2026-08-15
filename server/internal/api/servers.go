@@ -113,6 +113,7 @@ func (s *Server) createServer(c *gin.Context) {
 		return
 	}
 	s.Store.Upsert(&srv)
+	s.auditLog(c, "server.create", srv.Name)
 	// 密钥仅在创建时返回一次（Agent 配置用）
 	ok(c, gin.H{"server": srv, "secret": srv.Secret})
 }
@@ -141,6 +142,7 @@ func (s *Server) updateServer(c *gin.Context) {
 		return
 	}
 	s.Store.Upsert(&srv)
+	s.auditLog(c, "server.update", srv.Name)
 	ok(c, srv)
 }
 
@@ -154,6 +156,7 @@ func (s *Server) deleteServer(c *gin.Context) {
 		_ = peer.Close()
 	}
 	s.Store.Remove(id)
+	s.auditLog(c, "server.delete", "")
 	ok(c, gin.H{"ok": true})
 }
 
@@ -239,6 +242,7 @@ func (s *Server) serverExec(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
+	s.auditLog(c, "server.exec", req.Command)
 	result, err := s.Agents.Exec(id, req.Command, req.Timeout)
 	if err != nil {
 		code := http.StatusBadGateway

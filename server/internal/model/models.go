@@ -198,3 +198,14 @@ type Transfer struct {
 	In       uint64 `json:"in"`
 	Out      uint64 `json:"out"`
 }
+
+// AuditLog 审计日志（管理操作记录，借鉴 komari Log）。
+type AuditLog struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	UserID    int64     `json:"user_id"`
+	Username  string    `gorm:"size:32" json:"username"`
+	Action    string    `gorm:"size:64" json:"action"`  // 如 server.create / alert.delete
+	Detail    string    `gorm:"size:512" json:"detail"`
+	IP        string    `gorm:"size:64" json:"ip"`
+	CreatedAt time.Time `json:"created_at"`
+}
