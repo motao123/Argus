@@ -93,6 +93,85 @@ func (m *Manager) Load() error {
 	return nil
 }
 
+// MarketDir 市场目录（main 注入，如 ./data/market/plugins）。
+var MarketDir = "./data/market/plugins"
+
+// MarketEntry 市场插件条目。
+type MarketEntry struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	Installed   bool   `json:"installed"`
+}
+
+// ListMarket 扫描市场目录。
+func (m *Manager) ListMarket() []MarketEntry {
+	entries, err := os.ReadDir(MarketDir)
+	if err != nil {
+		return nil
+	}
+	out := make([]MarketEntry, 0)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(MarketDir, e.Name(), "manifest.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue
+		}
+		var man Manifest
+		_ = json.Unmarshal(data, &man)
+		out = append(out, MarketEntry{
+			Name:        e.Name(),
+			Description: man.Description,
+			Version:     man.Version,
+			Installed:   m.Has(e.Name()),
+		})
+	}
+	return out
+}
+
+// InstallFromMarket 从市场安装插件（复制目录）。
+func (m *Manager) InstallFromMarket(name string) error {
+	src := filepath.Join(MarketDir, name)
+	if _, err := os.Stat(filepath.Join(src, "manifest.json")); err != nil {
+		return fmt.Errorf("market plugin %s not found", name)
+	}
+	dst := filepath.Join(m.dir, name)
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	return copyDir(src, dst)
+}
+
+// Has 插件是否存在。
+func (m *Manager) Has(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.plugins[name]
+	return ok
+}
+
+// copyDir 递归复制目录。
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+}
+
 // List 插件列表。
 func (m *Manager) List() []*Plugin {
 	m.mu.Lock()

@@ -151,6 +151,7 @@ func main() {
 	defer natProxy.Close()
 
 	// 插件管理器（data/plugins 目录）
+	plugin.MarketDir = filepath.Join(filepath.Dir(cfg.DBPath), "market", "plugins")
 	plugins := plugin.New(filepath.Join(filepath.Dir(cfg.DBPath), "plugins"))
 	_ = plugins.Load()
 	go func() {
@@ -210,6 +211,9 @@ func main() {
 	router := api.New(srv)
 
 	// 6. 静态资源（内嵌前端，构建时注入；目录不存在则跳过）
+	// pprof 性能剖析（借鉴 komari，受 admin 路由保护）
+	router.GET("/debug/pprof/*pprof", srv.AuthMiddlewareForPProf(), srv.PProfHandler)
+
 	router.NoRoute(func(c *gin.Context) {
 		// gin 对未匹配路由默认 404，静态资源需显式改回 200
 		c.Status(http.StatusOK)

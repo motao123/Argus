@@ -120,6 +120,10 @@ func New(s *Server) *gin.Engine {
 			// 审计日志（admin）
 			authed.GET("/admin/logs", s.listAuditLogs)
 
+			// 插件市场
+			authed.GET("/plugins/market", s.listPluginMarket)
+			authed.POST("/plugins/market/:name/install", s.installPlugin)
+
 			// 插件管理
 			authed.GET("/plugins", s.listPlugins)
 			authed.POST("/plugins/:name/toggle", s.togglePlugin)

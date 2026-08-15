@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,7 +30,7 @@ func (s *Server) backupDownload(c *gin.Context) {
 	_, _ = io.Copy(c.Writer, file)
 }
 
-// backupRestore 上传数据库覆盖（需重启生效）。
+// backupRestore 上传数据库覆盖（需重启生效）。支持分片上传（offset 续传，借鉴 komari 分片上传）。
 func (s *Server) backupRestore(c *gin.Context) {
 	p := principalFromContext(c)
 	if !p.IsAdmin {
@@ -54,14 +53,25 @@ func (s *Server) backupRestore(c *gin.Context) {
 	}
 	defer src.Close()
 
-	// 先备份当前库，再覆盖
 	dbPath := s.Cfg.DBPath
-	backupPath := dbPath + ".pre-restore." + time.Now().Format("20060102-150405")
-	if b, err := os.ReadFile(dbPath); err == nil {
-		_ = os.WriteFile(backupPath, b, 0o600)
+	offset := parseIntQuery64(c.PostForm("offset"))
+
+	// 首个分片：备份当前库
+	if offset == 0 {
+		backupPath := dbPath + ".pre-restore." + time.Now().Format("20060102-150405")
+		if b, err := os.ReadFile(dbPath); err == nil {
+			_ = os.WriteFile(backupPath, b, 0o600)
+		}
 	}
 
-	dst, err := os.Create(dbPath)
+	// 续写模式打开文件
+	flags := os.O_CREATE | os.O_WRONLY
+	if offset > 0 {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+	dst, err := os.OpenFile(dbPath, flags, 0o600)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -71,12 +81,14 @@ func (s *Server) backupRestore(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = os.Remove(dbPath + "-shm")
-	_ = os.Remove(dbPath + "-wal")
-
+	if c.PostForm("final") == "1" {
+		_ = os.Remove(dbPath + "-shm")
+		_ = os.Remove(dbPath + "-wal")
+	}
 	ok(c, gin.H{
-		"ok":           true,
-		"note":         "备份已写入，重启服务生效",
-		"pre_backup":   filepath.Base(backupPath),
+		"ok":      true,
+		"written": offset + file.Size,
+		"final":   c.PostForm("final") == "1",
+		"note":    "写入完成，重启服务生效",
 	})
 }
