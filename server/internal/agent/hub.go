@@ -183,6 +183,15 @@ func (h *Hub) idOf(peer *rpc.Peer) (int64, bool) {
 	return 0, false
 }
 
+// Call 向服务器下发任意 JSON-RPC 调用并等待结果。
+func (h *Hub) Call(serverID int64, method string, params any) (*protocol.Response, error) {
+	peer := h.Peer(serverID)
+	if peer == nil {
+		return nil, ErrOffline
+	}
+	return peer.Call(method, params, 35*time.Second)
+}
+
 // Exec 向服务器下发远程命令并等待结果（最长 35s）。
 func (h *Hub) Exec(serverID int64, command string, timeout int) (*protocol.ExecResult, error) {
 	peer := h.Peer(serverID)

@@ -54,6 +54,10 @@ const (
 	MethodTermData    = "agent.terminal.data"
 	MethodTermClose   = "agent.terminal.close"
 	MethodServiceCheck = "agent.service.check"
+	MethodFsList       = "agent.fs.list"
+	MethodFsRead       = "agent.fs.read"
+	MethodFsWrite      = "agent.fs.write"
+	MethodFsDelete     = "agent.fs.delete"
 )
 
 // ---- 上报结构 ----
@@ -147,4 +151,67 @@ type ServiceCheckResult struct {
 	Up      bool   `json:"up"`
 	DelayMs int    `json:"delay_ms"`
 	Error   string `json:"error,omitempty"`
+}
+
+// ---- 文件管理 ----
+
+// FsListParams 列目录参数。
+type FsListParams struct {
+	Path string `json:"path"`
+}
+
+// FsEntry 目录项。
+type FsEntry struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	Mode      string `json:"mode"`
+	IsDir     bool   `json:"is_dir"`
+	Modified  int64  `json:"modified"`
+}
+
+// FsListResult 目录列表结果。
+type FsListResult struct {
+	Path    string    `json:"path"`
+	Entries []FsEntry `json:"entries"`
+	Error   string    `json:"error,omitempty"`
+}
+
+// FsReadParams 读文件参数（分片）。
+type FsReadParams struct {
+	Path   string `json:"path"`
+	Offset int64  `json:"offset"`
+	Limit  int    `json:"limit"`
+}
+
+// FsReadResult 读文件结果（base64）。
+type FsReadResult struct {
+	Data  []byte `json:"data"`
+	EOF   bool   `json:"eof"`
+	Size  int64  `json:"size"`
+	Error string `json:"error,omitempty"`
+}
+
+// FsWriteParams 写文件参数。
+type FsWriteParams struct {
+	Path   string `json:"path"`
+	Data   []byte `json:"data"`
+	Append bool   `json:"append"`
+}
+
+// FsWriteResult 写文件结果。
+type FsWriteResult struct {
+	Bytes int    `json:"bytes"`
+	Error string `json:"error,omitempty"`
+}
+
+// FsDeleteParams 删除参数。
+type FsDeleteParams struct {
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive"`
+}
+
+// FsDeleteResult 删除结果。
+type FsDeleteResult struct {
+	Error string `json:"error,omitempty"`
 }

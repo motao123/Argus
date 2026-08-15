@@ -82,6 +82,12 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/services/:id", requireScope(ScopeServiceWrite), s.updateService)
 			authed.DELETE("/services/:id", requireScope(ScopeServiceDelete), s.deleteService)
 			authed.GET("/services/:id/history", requireScope(ScopeServiceRead), s.serviceHistory)
+
+			// 文件管理（借用 server 资源 scope）
+			authed.GET("/files/:serverId", requireScope(ScopeServerRead), s.listFiles)
+			authed.POST("/files/:serverId/read", requireScope(ScopeServerRead), s.readFile)
+			authed.POST("/files/:serverId/write", requireScope(ScopeServerWrite), s.writeFile)
+			authed.POST("/files/:serverId/delete", requireScope(ScopeServerWrite), s.deleteFile)
 		}
 		// 仪表盘实时推送（带鉴权 Query 参数，便于浏览器 WS 连接）
 		api.GET("/ws", s.authWS, s.dashboardWS)

@@ -57,6 +57,14 @@ func (h *Handler) Handle(method string, params json.RawMessage) (any, *protocol.
 		return nil, nil
 	case protocol.MethodServiceCheck:
 		return h.handleServiceCheck(params)
+	case protocol.MethodFsList:
+		return h.handleFsList(params)
+	case protocol.MethodFsRead:
+		return h.handleFsRead(params)
+	case protocol.MethodFsWrite:
+		return h.handleFsWrite(params)
+	case protocol.MethodFsDelete:
+		return h.handleFsDelete(params)
 	default:
 		return nil, protocol.NewError(protocol.ErrMethod, "unknown method: "+method)
 	}
