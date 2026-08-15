@@ -60,6 +60,51 @@ export interface Cron {
   last_run_at: string;
 }
 
+export interface ServiceItem {
+  id: number;
+  server_id: number;
+  name: string;
+  type: string;
+  target: string;
+  interval: number;
+  enabled: boolean;
+  last_up: boolean;
+  last_delay: number;
+  today_up_rate: number;
+}
+
+export interface ServiceHistoryPoint {
+  ts: number;
+  up_rate: number;
+  delay: number;
+}
+
+export interface FsEntry {
+  name: string;
+  path: string;
+  size: number;
+  mode: string;
+  is_dir: boolean;
+  modified: number;
+}
+
+export interface User {
+  id: number;
+  username: string;
+  role: string;
+  created_at: string;
+}
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  scopes: string;
+  server_ids: string;
+  expires_at: string | null;
+  revoked: boolean;
+  created_at: string;
+}
+
 export interface MetricPoint {
   ts: number;
   cpu: number;
@@ -141,6 +186,43 @@ export const api = {
       ? request<Notification>(`/api/v1/notifications/${n.id}`, { method: "PUT", body: JSON.stringify(n) })
       : request<Notification>("/api/v1/notifications", { method: "POST", body: JSON.stringify(n) }),
   deleteNotification: (id: number) => request(`/api/v1/notifications/${id}`, { method: "DELETE" }),
+
+  services: () => request<{ services: ServiceItem[] }>("/api/v1/services"),
+  saveService: (svc: Partial<ServiceItem> & { id?: number }) =>
+    svc.id
+      ? request<{ ok: boolean }>(`/api/v1/services/${svc.id}`, { method: "PUT", body: JSON.stringify(svc) })
+      : request<ServiceItem>("/api/v1/services", { method: "POST", body: JSON.stringify(svc) }),
+  deleteService: (id: number) => request(`/api/v1/services/${id}`, { method: "DELETE" }),
+  serviceHistory: (id: number, period: "1d" | "7d" | "30d") =>
+    request<{ period: string; points: ServiceHistoryPoint[] }>(`/api/v1/services/${id}/history?period=${period}`),
+
+  files: (serverId: number, path: string) =>
+    request<{ path: string; entries: FsEntry[] }>(`/api/v1/files/${serverId}?path=${encodeURIComponent(path)}`),
+  fileRead: (serverId: number, path: string, offset = 0, limit = 262144) =>
+    request<{ data: string; eof: boolean; size: number }>(`/api/v1/files/${serverId}/read`, {
+      method: "POST",
+      body: JSON.stringify({ path, offset, limit }),
+    }),
+  fileWrite: (serverId: number, path: string, dataBase64: string, append = false) =>
+    request<{ bytes: number }>(`/api/v1/files/${serverId}/write`, {
+      method: "POST",
+      body: JSON.stringify({ path, data: dataBase64, append }),
+    }),
+  fileDelete: (serverId: number, path: string, recursive = false) =>
+    request(`/api/v1/files/${serverId}/delete`, {
+      method: "POST",
+      body: JSON.stringify({ path, recursive }),
+    }),
+
+  users: () => request<{ users: User[] }>("/api/v1/users"),
+  createUser: (u: { username: string; password: string; role: string }) =>
+    request<{ user: User; agent_secret: string }>("/api/v1/users", { method: "POST", body: JSON.stringify(u) }),
+  deleteUser: (id: number) => request(`/api/v1/users/${id}`, { method: "DELETE" }),
+
+  tokens: () => request<{ tokens: ApiToken[] }>("/api/v1/tokens"),
+  createToken: (t: { name: string; scopes: string[]; server_ids?: string; expires_in?: number }) =>
+    request<{ token: string; id: number }>("/api/v1/tokens", { method: "POST", body: JSON.stringify(t) }),
+  revokeToken: (id: number) => request(`/api/v1/tokens/${id}`, { method: "DELETE" }),
 
   crons: () => request<{ crons: Cron[] }>("/api/v1/crons"),
   saveCron: (c: Partial<Cron> & { id?: number }) =>

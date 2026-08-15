@@ -1,4 +1,4 @@
-import { Activity, Bell, CalendarClock, LayoutDashboard, LogOut, Moon, MonitorSmartphone, Sun } from "lucide-react";
+import { Activity, Bell, CalendarClock, FolderOpen, KeyRound, LayoutDashboard, LogOut, Moon, MonitorSmartphone, Radar, Sun } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
@@ -18,8 +18,11 @@ function useTheme() {
 const nav = [
   { to: "/", label: "总览", icon: LayoutDashboard },
   { to: "/servers", label: "服务器", icon: MonitorSmartphone },
+  { to: "/services", label: "服务监控", icon: Radar },
   { to: "/alerts", label: "报警", icon: Bell },
   { to: "/crons", label: "任务", icon: CalendarClock },
+  { to: "/files", label: "文件管理", icon: FolderOpen },
+  { to: "/access", label: "访问控制", icon: KeyRound },
 ];
 
 export default function Layout() {

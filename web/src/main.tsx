@@ -11,6 +11,9 @@ import ServerDetail from "./pages/ServerDetail";
 import Servers from "./pages/Servers";
 import Alerts from "./pages/Alerts";
 import Crons from "./pages/Crons";
+import Services from "./pages/Services";
+import Files from "./pages/Files";
+import Access from "./pages/Access";
 import TerminalPage from "./pages/Terminal";
 import "./index.css";
 
@@ -44,6 +47,9 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/servers" element={<Servers />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/crons" element={<Crons />} />
+            <Route path="/services" element={<Services />} />
+            <Route path="/files" element={<Files />} />
+            <Route path="/access" element={<Access />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
