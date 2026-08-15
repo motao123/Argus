@@ -14,6 +14,8 @@ const (
 	SettingSiteDesc    = "site_desc"
 	SettingFavicon     = "favicon"
 	SettingForceAuth   = "force_auth"   // 1 = 强制登录
+	SettingTermFontSize = "term_font_size" // 终端字号（默认 13）
+	SettingTermTheme    = "term_theme"    // 终端主题：dark/light
 )
 
 // GetSetting 读设置（默认值兜底）。
@@ -35,6 +37,13 @@ func (s *Server) getPublicSettings(c *gin.Context) {
 		"site_desc": s.GetSetting(SettingSiteDesc, "轻量自托管服务器监控"),
 		"force_auth": s.GetSetting(SettingForceAuth, "0") == "1",
 	})
+}
+
+// getTermSettings 终端外观设置（公开可读，终端页使用）。
+func (s *Server) getTermSettings(c *gin.Context) {
+	fontSize := s.GetSetting(SettingTermFontSize, "13")
+	theme := s.GetSetting(SettingTermTheme, "dark")
+	ok(c, gin.H{"font_size": fontSize, "theme": theme})
 }
 
 // getSettings 管理端读取全部设置。

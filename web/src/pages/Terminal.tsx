@@ -15,13 +15,27 @@ export default function TerminalPage() {
   useEffect(() => {
     if (!ref.current || !getToken()) return;
 
+    let fontSize = 13;
+    let termTheme = "dark";
+    fetch("/api/v1/public/term-settings")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data?.font_size) fontSize = Number(d.data.font_size) || 13;
+        if (d.data?.theme) termTheme = d.data.theme;
+        term.options.fontSize = fontSize;
+        if (termTheme === "light") {
+          term.options.theme = { background: "#ffffff", foreground: "#111827" };
+        }
+      })
+      .catch(() => {});
+
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 13,
+      fontSize,
       fontFamily: 'Menlo, Consolas, "Courier New", monospace',
       theme: {
-        background: "#0d1117",
-        foreground: "#e6edf3",
+        background: termTheme === "light" ? "#ffffff" : "#0d1117",
+        foreground: termTheme === "light" ? "#111827" : "#e6edf3",
       },
     });
     const fit = new FitAddon();

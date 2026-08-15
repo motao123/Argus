@@ -52,6 +52,7 @@ func New(s *Server) *gin.Engine {
 		pub := api.Group("", s.optionalAuthMiddleware())
 		{
 			pub.GET("/public/settings", s.getPublicSettings)
+			pub.GET("/public/term-settings", s.getTermSettings)
 			pub.GET("/servers", s.forceAuth, s.listServers)
 			pub.GET("/servers/:id/metrics", s.forceAuth, s.serverMetrics)
 			pub.GET("/servers/:id/transfer", s.forceAuth, s.serverTransfer)
