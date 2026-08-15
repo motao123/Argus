@@ -149,6 +149,10 @@ func New(s *Server) *gin.Engine {
 			authed.DELETE("/sessions/:id", s.revokeSession)
 			authed.DELETE("/sessions", s.revokeAllSessions)
 
+			// 批量操作（admin）
+			authed.POST("/batch-delete/servers", s.batchDeleteServers)
+			authed.POST("/batch-move/servers", s.batchMoveServers)
+
 			// 服务器过户（admin）
 			authed.POST("/servers/:id/transfer", s.serverTransfer)
 
