@@ -1,0 +1,30 @@
+services:
+  server:
+    image: golang:1.26-alpine
+    working_dir: /app
+    command: sh -c "cd server && go build -o /argus-server ./cmd/argus-server && /argus-server -l 0.0.0.0:8080 -d /data/argus.db"
+    volumes:
+      - .:/app
+      - argus-data:/data
+    ports:
+      - "8080:8080"
+    environment:
+      - ARGUS_ADMIN_USER=admin
+      - ARGUS_ADMIN_PASS=argus123
+    restart: unless-stopped
+
+  agent:
+    image: golang:1.26-alpine
+    working_dir: /app
+    command: sh -c "cd agent && go build -o /argus-agent ./cmd/argus-agent && /argus-agent -s ws://server:8080/ws/agent -c /data"
+    volumes:
+      - .:/app
+      - agent-data:/data
+    depends_on:
+      - server
+    restart: unless-stopped
+    # 本示例 agent 与 server 同机演示；生产环境把 agent 部署到各被监控机器
+
+volumes:
+  argus-data:
+  agent-data:

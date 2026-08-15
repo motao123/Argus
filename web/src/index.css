@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-border: var(--border-c);
+  --color-muted: var(--muted);
+  --color-fg: var(--fg);
+  --color-accent: #6366f1;
+  --color-ok: #22c55e;
+  --color-warn: #f59e0b;
+  --color-err: #ef4444;
+}
+
+:root {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --border-c: #e5e7eb;
+  --muted: #6b7280;
+  --fg: #111827;
+}
+
+.dark {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border-c: #30363d;
+  --muted: #8b949e;
+  --fg: #e6edf3;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family:
+    Inter,
+    "PingFang SC",
+    "Microsoft YaHei",
+    system-ui,
+    sans-serif;
+}
+
+/* 数字等宽，避免图表抖动 */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

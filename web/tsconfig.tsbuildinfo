@@ -1,0 +1,1 @@
+{"root":["./src/main.tsx","./src/components/Layout.tsx","./src/components/ServerCard.tsx","./src/context/servers.tsx","./src/lib/api.ts","./src/lib/format.ts","./src/pages/Alerts.tsx","./src/pages/Crons.tsx","./src/pages/Login.tsx","./src/pages/Overview.tsx","./src/pages/ServerDetail.tsx","./src/pages/Servers.tsx","./src/pages/Terminal.tsx"],"version":"5.7.2"}

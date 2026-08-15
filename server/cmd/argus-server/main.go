@@ -71,6 +71,8 @@ func main() {
 
 	// 6. 静态资源（内嵌前端，构建时注入；目录不存在则跳过）
 	router.NoRoute(func(c *gin.Context) {
+		// gin 对未匹配路由默认 404，静态资源需显式改回 200
+		c.Status(http.StatusOK)
 		serveEmbedded(c.Writer, c.Request)
 	})
 

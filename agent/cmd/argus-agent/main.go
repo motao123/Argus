@@ -44,6 +44,13 @@ func main() {
 
 	col := collector.New(version)
 	for {
+		// 每次重连都重新从文件加载密钥：
+		// run() 首次注册后会保存新密钥，重连必须复用而非再次注册新服务器
+		if *secret == "" {
+			if s, err := loadSecret(cfgFile); err == nil && s != "" {
+				*secret = s
+			}
+		}
 		log.Printf("connecting to %s ...", *serverURL)
 		if err := run(ctx, *serverURL, *secret, *interval, col, cfgFile); err != nil {
 			log.Printf("connection error: %v, retrying in 5s", err)
@@ -120,11 +127,14 @@ func loadSecret(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var m map[string]string
+	// 注意：server_id 是数字，只能按结构体解析，避免 map[string]string 类型错误
+	var m struct {
+		Secret string `json:"secret"`
+	}
 	if err := json.Unmarshal(data, &m); err != nil {
 		return "", err
 	}
-	return m["secret"], nil
+	return m.Secret, nil
 }
 
 func saveSecret(path string, serverID int64, secret string) error {

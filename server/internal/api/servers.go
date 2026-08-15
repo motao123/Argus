@@ -96,7 +96,8 @@ func (s *Server) createServer(c *gin.Context) {
 		return
 	}
 	s.Store.Upsert(&srv)
-	c.JSON(http.StatusOK, srv)
+	// 密钥仅在创建时返回一次（Agent 配置用）
+	c.JSON(http.StatusOK, gin.H{"server": srv, "secret": srv.Secret})
 }
 
 func (s *Server) updateServer(c *gin.Context) {

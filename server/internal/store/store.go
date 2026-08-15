@@ -3,6 +3,7 @@
 package store
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -132,6 +133,7 @@ type MetricBatcher struct {
 
 	mu      sync.Mutex
 	buckets map[int64]*bucket // key: serverID
+	pending []*metricRow      // 已完成的分钟桶，等待落库
 	stop    chan struct{}
 	done    chan struct{}
 }
@@ -145,13 +147,22 @@ func NewMetricBatcher(db *gorm.DB) *MetricBatcher {
 	}
 }
 
-// Feed 接收一条上报。
+// metricRow 待落库的一分钟聚合结果。
+type metricRow = model.Metric
+
+// Feed 接收一条上报。分钟前进时旧桶立即转 pending（避免被新桶覆盖丢失）；
+// 迟到的旧数据并入当前桶，保证不丢不重。
 func (m *MetricBatcher) Feed(serverID int64, r *protocol.ReportParams) {
 	minute := r.Timestamp / 60 * 60
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.buckets[serverID]
-	if !ok || b.ts != minute {
+	if !ok {
+		b = &bucket{serverID: serverID, ts: minute}
+		m.buckets[serverID] = b
+	} else if minute > b.ts {
+		// 分钟前进：上一分钟数据收尾，交给 Flush 落库
+		m.pending = append(m.pending, b.toRow())
 		b = &bucket{serverID: serverID, ts: minute}
 		m.buckets[serverID] = b
 	}
@@ -166,7 +177,7 @@ func (m *MetricBatcher) Feed(serverID int64, r *protocol.ReportParams) {
 	b.load1Sum += r.Load1
 }
 
-// Run 每 60s flush 一次上一分钟数据。
+// Run 每 60s flush 一次已完成的分钟桶。
 func (m *MetricBatcher) Run() {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
@@ -182,33 +193,45 @@ func (m *MetricBatcher) Run() {
 	}
 }
 
-// Flush 将完成的分钟桶写入 DB。
+// toRow 将聚合桶转为待落库行。
+func (b *bucket) toRow() *metricRow {
+	n := float64(b.count)
+	if n == 0 {
+		n = 1
+	}
+	return &metricRow{
+		ServerID:    b.serverID,
+		TS:          b.ts,
+		CPU:         b.cpuSum / n,
+		MemUsed:     b.memUsed,
+		MemTotal:    b.memTotal,
+		DiskUsed:    b.diskUsed,
+		DiskTotal:   b.diskTotal,
+		NetInSpeed:  b.netInSum / n,
+		NetOutSpeed: b.netOutSum / n,
+		Load1:       b.load1Sum / n,
+	}
+}
+
+// Flush 将 pending 中已完成的分钟桶写入 DB。
 func (m *MetricBatcher) Flush() {
 	nowMinute := time.Now().Unix() / 60 * 60
 	m.mu.Lock()
-	rows := make([]*model.Metric, 0, len(m.buckets))
+	var rows []*metricRow
+	rows = append(rows, m.pending...)
+	m.pending = m.pending[:0]
 	for id, b := range m.buckets {
 		if b.ts >= nowMinute {
 			continue // 当前分钟未结束
 		}
-		n := float64(b.count)
-		rows = append(rows, &model.Metric{
-			ServerID:   id,
-			TS:         b.ts,
-			CPU:        b.cpuSum / n,
-			MemUsed:    b.memUsed,
-			MemTotal:   b.memTotal,
-			DiskUsed:   b.diskUsed,
-			DiskTotal:  b.diskTotal,
-			NetInSpeed: b.netInSum / n,
-			NetOutSpeed: b.netOutSum / n,
-			Load1:      b.load1Sum / n,
-		})
+		rows = append(rows, b.toRow())
 		delete(m.buckets, id)
 	}
 	m.mu.Unlock()
 	if len(rows) > 0 {
-		m.db.CreateInBatches(rows, 200)
+		if err := m.db.CreateInBatches(rows, 200).Error; err != nil {
+			log.Printf("metric flush failed: %v", err)
+		}
 	}
 }
 
