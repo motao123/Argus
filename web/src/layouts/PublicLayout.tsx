@@ -1,9 +1,10 @@
 // 前台布局（公开，无需登录）：顶栏式设计，借鉴 komari 前台 + dash-v2 游客模式
-import { Activity, LogIn, Moon, Settings, Sun } from "lucide-react";
+import { Activity, Globe, LogIn, Moon, Settings, Sun } from "lucide-react";
 import { Outlet, Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
 import { getToken, setToken } from "../lib/api";
+import { getLang, setLang, t } from "../lib/i18n";
 import CommandPalette from "../components/CommandPalette";
 
 function useTheme() {
@@ -36,6 +37,7 @@ export default function PublicLayout() {
   const { online, total } = useServers();
   const navigate = useNavigate();
   const loggedIn = !!getToken();
+  const [lang, setLangState] = useState<"zh-CN" | "en">(getLang());
 
   return (
     <div className="flex min-h-screen flex-col bg-bg">
@@ -53,9 +55,21 @@ export default function PublicLayout() {
               在线 {online}/{total}
             </span>
             <button
+              onClick={() => {
+                const next = lang === "zh-CN" ? "en" : "zh-CN";
+                setLang(next);
+                setLangState(next);
+              }}
+              className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted hover:bg-black/5 dark:hover:bg-white/5"
+              title="切换语言"
+            >
+              <Globe className="h-3.5 w-3.5" />
+              {lang === "zh-CN" ? "EN" : "中文"}
+            </button>
+            <button
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
               className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5"
-              title="切换主题"
+              title={t("common.theme")}
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
@@ -66,7 +80,7 @@ export default function PublicLayout() {
                   className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm text-white hover:opacity-90"
                 >
                   <Settings className="h-3.5 w-3.5" />
-                  管理后台
+                  {t("common.admin")}
                 </Link>
                 <button
                   onClick={() => {
@@ -75,7 +89,7 @@ export default function PublicLayout() {
                   }}
                   className="text-sm text-muted hover:text-fg"
                 >
-                  退出
+                  {t("common.logout")}
                 </button>
               </div>
             ) : (
@@ -84,7 +98,7 @@ export default function PublicLayout() {
                 className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5"
               >
                 <LogIn className="h-3.5 w-3.5" />
-                登录
+                {t("common.login")}
               </Link>
             )}
           </div>
@@ -99,7 +113,7 @@ export default function PublicLayout() {
 
       {/* 页脚 */}
       <footer className="border-t border-border py-4 text-center text-xs text-muted">
-        Powered by <span className="font-medium">Argus</span> — 轻量自托管服务器监控
+        Powered by <span className="font-medium">Argus</span> — {t("common.poweredBy")}
       </footer>
     </div>
   );

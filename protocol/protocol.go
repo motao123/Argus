@@ -97,6 +97,10 @@ type ReportParams struct {
 	Load15         float64  `json:"load15"`
 	TCPCount       int      `json:"tcp_count"`
 	Uptime         uint64   `json:"uptime"`
+	Temperature    float64  `json:"temperature"` // CPU 温度（摄氏度）
+	GPUUtil        float64  `json:"gpu_util"`    // GPU 利用率（%）
+	GPUMemUsed     uint64   `json:"gpu_mem_used"`
+	GPUMemTotal    uint64   `json:"gpu_mem_total"`
 	Timestamp      int64    `json:"ts"`
 }
 

@@ -45,6 +45,8 @@ func (s *Server) dashboardWS(c *gin.Context) {
 				v.NetInSpeed = st.Last.NetInSpeed
 				v.NetOutSpeed = st.Last.NetOutSpeed
 				v.Load1 = st.Last.Load1
+				v.Temperature = st.Last.Temperature
+				v.GPUUtil = st.Last.GPUUtil
 				v.Uptime = st.Last.Uptime
 				v.Online = st.Online
 				v.LastSeen = st.LastSeen

@@ -26,6 +26,8 @@ type serverView struct {
 	NetInSpeed   float64 `json:"net_in_speed"`
 	NetOutSpeed  float64 `json:"net_out_speed"`
 	Load1     float64   `json:"load1"`
+	Temperature float64 `json:"temperature"`
+	GPUUtil   float64   `json:"gpu_util"`
 	Uptime    uint64    `json:"uptime"`
 	Online    bool      `json:"online"`
 	LastSeen  time.Time `json:"last_seen"`
@@ -71,6 +73,8 @@ func (s *Server) listServers(c *gin.Context) {
 			v.NetInSpeed = st.Last.NetInSpeed
 			v.NetOutSpeed = st.Last.NetOutSpeed
 			v.Load1 = st.Last.Load1
+			v.Temperature = st.Last.Temperature
+			v.GPUUtil = st.Last.GPUUtil
 			v.Uptime = st.Last.Uptime
 			v.Online = st.Online
 			v.LastSeen = st.LastSeen

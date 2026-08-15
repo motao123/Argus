@@ -161,6 +161,8 @@ func (c *Collector) Collect() *protocol.ReportParams {
 	if tcp, err := net.Connections("tcp"); err == nil {
 		r.TCPCount = len(tcp)
 	}
+	r.Temperature = CPUTemperature()
+	r.GPUUtil, r.GPUMemUsed, r.GPUMemTotal = GPUInfo()
 	return r
 }
 
