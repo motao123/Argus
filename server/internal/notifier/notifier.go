@@ -10,8 +10,12 @@ import (
 	"net/http"
 	"net/smtp"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/dop251/goja"
 
 	"github.com/motao123/Argus/server/internal/model"
 )
@@ -27,8 +31,41 @@ func Send(n *model.Notification, title, content string) {
 		sendEmail(n, title, content)
 	case "serverchan":
 		sendServerChan(n, title, content)
+	case "javascript":
+		sendJS(n, title, content)
 	default: // webhook
 		sendWebhook(n, title, content)
+	}
+}
+
+// sendJS 执行 JS 通知脚本（借鉴 komari javascript 渠道）。
+// 脚本位于 data/scripts/notify-<id>.js，注入 title/content 与 console.log。
+func sendJS(n *model.Notification, title, content string) {
+	scriptDir := os.Getenv("ARGUS_DATA_DIR")
+	if scriptDir == "" {
+		scriptDir = "./data"
+	}
+	path := filepath.Join(scriptDir, "scripts", fmt.Sprintf("notify-%d.js", n.ID))
+	src, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("js notify: script %s not found", path)
+		return
+	}
+	vm := goja.New()
+	_ = vm.Set("title", title)
+	_ = vm.Set("content", content)
+	console := vm.NewObject()
+	console.Set("log", func(call goja.FunctionCall) goja.Value {
+		parts := make([]string, 0, len(call.Arguments))
+		for _, a := range call.Arguments {
+			parts = append(parts, a.String())
+		}
+		log.Printf("js notify #%d: %s", n.ID, strings.Join(parts, " "))
+		return goja.Undefined()
+	})
+	_ = vm.Set("console", console)
+	if _, err := vm.RunString(string(src)); err != nil {
+		log.Printf("js notify #%d error: %v", n.ID, err)
 	}
 }
 
