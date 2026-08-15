@@ -33,7 +33,7 @@ func (s *Server) login(c *gin.Context) {
 		fail(c, http.StatusUnauthorized, "invalid 2fa code")
 		return
 	}
-	token, err := s.issueToken(&user)
+	token, err := s.issueTokenWithSession(c, &user)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "issue token")
 		return

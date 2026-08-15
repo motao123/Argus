@@ -187,6 +187,9 @@ func (s *Server) identify(raw string) (*principal, error) {
 	if err != nil {
 		return nil, errInvalidToken
 	}
+	if isJTIRevoked(cl.RegisteredClaims.ID) {
+		return nil, errInvalidToken
+	}
 	var user model.User
 	if err := s.DB.First(&user, cl.UserID).Error; err != nil {
 		return nil, errInvalidToken

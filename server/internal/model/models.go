@@ -168,3 +168,14 @@ type OAuthConfig struct {
 	Enabled      bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt    time.Time `json:"created_at"`
 }
+
+// Session 登录会话（借鉴 nezha JWTSession + komari Session）。
+type Session struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	UserID    int64     `gorm:"index" json:"user_id"`
+	JTI       string    `gorm:"size:64;not null;uniqueIndex" json:"-"` // JWT ID，踢出用
+	UserAgent string    `gorm:"size:256;default:''" json:"user_agent"`
+	IP        string    `gorm:"size:64;default:''" json:"ip"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}

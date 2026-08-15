@@ -103,6 +103,11 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/files/:serverId/write", requireScope(ScopeServerWrite), s.writeFile)
 			authed.POST("/files/:serverId/delete", requireScope(ScopeServerWrite), s.deleteFile)
 
+			// 会话管理
+			authed.GET("/sessions", s.listSessions)
+			authed.DELETE("/sessions/:id", s.revokeSession)
+			authed.DELETE("/sessions", s.revokeAllSessions)
+
 			// 服务器过户（admin）
 			authed.POST("/servers/:id/transfer", s.transferServer)
 
@@ -142,11 +147,17 @@ type claims struct {
 
 // issueToken 签发 JWT（30 天），携带用户 ID 与角色。
 func (s *Server) issueToken(u *model.User) (string, error) {
+	return s.issueTokenWithJTI(u, randomHex(8))
+}
+
+// issueTokenWithJTI 签发带 JTI 的 JWT（会话踢出用）。
+func (s *Server) issueTokenWithJTI(u *model.User, jti string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{
 		UserID:   u.ID,
 		Username: u.Username,
 		Role:     u.Role,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * 24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
