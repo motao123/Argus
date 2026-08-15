@@ -21,3 +21,4 @@ data/
 
 # 构建产物
 dist/
+*.tsbuildinfo
