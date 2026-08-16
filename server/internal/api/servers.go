@@ -353,9 +353,10 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ServerURL string `json:"server_url"`
-		Interval  int    `json:"interval"`
-		Secret    string `json:"secret"`
+		ServerURL    string                 `json:"server_url"`
+		Interval     int                    `json:"interval"`
+		Secret       string                 `json:"secret"`
+		Capabilities *protocol.Capabilities `json:"capabilities"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -367,7 +368,7 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 		return
 	}
 	resp, err := peer.Call(protocol.MethodApplyConfig, protocol.AgentConfig{
-		ServerURL: req.ServerURL, Interval: req.Interval, Secret: req.Secret,
+		ServerURL: req.ServerURL, Interval: req.Interval, Secret: req.Secret, Capabilities: req.Capabilities,
 	}, 15*time.Second)
 	if err != nil {
 		fail(c, http.StatusBadGateway, err.Error())

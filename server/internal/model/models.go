@@ -8,12 +8,17 @@ import (
 
 // Server 一台被监控服务器（持久化配置）。
 type Server struct {
-	ID      int64  `gorm:"primaryKey" json:"id"`
-	Name    string `gorm:"size:64;not null" json:"name"`
-	Secret  string `gorm:"size:64;not null;uniqueIndex" json:"-"`
-	Group   string `gorm:"column:group_name;size:64;default:''" json:"group"` // group 是 SQL 保留字
-	Note    string `gorm:"size:255;default:''" json:"note"`
-	OwnerID int64  `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有
+	ID           int64  `gorm:"primaryKey" json:"id"`
+	Name         string `gorm:"size:64;not null" json:"name"`
+	Secret       string `gorm:"size:64;not null;uniqueIndex" json:"-"`
+	Group        string `gorm:"column:group_name;size:64;default:''" json:"group"` // group 是 SQL 保留字
+	Note         string `gorm:"size:255;default:''" json:"note"`
+	OwnerID      int64  `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有
+	Protocol     string `gorm:"size:32;default:''" json:"protocol,omitempty"`
+	Version      string `gorm:"size:64;default:''" json:"version,omitempty"`
+	OS           string `gorm:"size:32;default:''" json:"os,omitempty"`
+	Arch         string `gorm:"size:32;default:''" json:"arch,omitempty"`
+	Capabilities string `gorm:"size:1024;default:''" json:"capabilities,omitempty"`
 	// 计费信息（借鉴 komari，VPS 售卖场景）
 	Price     float64    `gorm:"default:0" json:"price"`
 	CycleDays int        `gorm:"default:0" json:"cycle_days"` // 计费周期（天），0 = 无

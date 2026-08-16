@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -60,17 +59,5 @@ func probeTCP(ctx context.Context, target string) *protocol.ServiceCheckResult {
 		return &protocol.ServiceCheckResult{Up: false, DelayMs: int(elapsed.Milliseconds()), Error: err.Error()}
 	}
 	conn.Close()
-	return &protocol.ServiceCheckResult{Up: true, DelayMs: int(elapsed.Milliseconds())}
-}
-
-func probePing(ctx context.Context, target string) *protocol.ServiceCheckResult {
-	// ICMP 需要 root/raw socket，用系统 ping 命令（-W 超时秒）
-	cmd := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "3", target)
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	elapsed := time.Since(start)
-	if err != nil {
-		return &protocol.ServiceCheckResult{Up: false, DelayMs: int(elapsed.Milliseconds()), Error: strings.TrimSpace(string(out))}
-	}
 	return &protocol.ServiceCheckResult{Up: true, DelayMs: int(elapsed.Milliseconds())}
 }

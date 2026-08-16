@@ -2,9 +2,9 @@
 package task
 
 import (
-	"context"
 	"encoding/json"
 	"log"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -19,6 +19,7 @@ import (
 type Handler struct {
 	conn *websocket.Conn
 	peer *rpc.Peer
+	caps protocol.Capabilities
 
 	mu       sync.Mutex
 	sessions map[string]*termSession
@@ -27,16 +28,24 @@ type Handler struct {
 // termSession 一个终端会话：pty 进程 + 输出转发 goroutine。
 type termSession struct {
 	cmd    *exec.Cmd
+	io     *terminalIO
 	stdin  chan []byte
 	close  chan struct{}
 	closed sync.Once
 }
 
 func NewHandler(conn *websocket.Conn) *Handler {
-	return &Handler{
-		conn:     conn,
-		sessions: make(map[string]*termSession),
-	}
+	return &Handler{conn: conn, caps: DefaultCapabilities(), sessions: make(map[string]*termSession)}
+}
+
+func DefaultCapabilities() protocol.Capabilities {
+	return protocol.Capabilities{Metrics: true, Probe: true, Command: true, Terminal: true, Files: true, Upgrade: true, NAT: true}
+}
+
+func (h *Handler) SetCapabilities(c protocol.Capabilities) { h.caps = c }
+
+func disabled() (any, *protocol.RPCError) {
+	return nil, protocol.NewError(protocol.ErrUnauthorized, "capability disabled")
 }
 
 // SetPeer 设置 JSON-RPC 对等端（用于流式通知）。
@@ -46,36 +55,81 @@ func (h *Handler) SetPeer(peer *rpc.Peer) { h.peer = peer }
 func (h *Handler) Handle(method string, params json.RawMessage) (any, *protocol.RPCError) {
 	switch method {
 	case protocol.MethodExec:
+		if !h.caps.Command {
+			return disabled()
+		}
 		return h.handleExec(params)
 	case protocol.MethodTerminal:
+		if !h.caps.Terminal {
+			return disabled()
+		}
 		return h.handleTerminalOpen(params)
 	case protocol.MethodTermData:
+		if !h.caps.Terminal {
+			return disabled()
+		}
 		h.handleTermData(params)
 		return nil, nil
+	case protocol.MethodTermResize:
+		if !h.caps.Terminal {
+			return disabled()
+		}
+		h.handleTermResize(params)
+		return nil, nil
 	case protocol.MethodTermClose:
+		if !h.caps.Terminal {
+			return disabled()
+		}
 		h.handleTermClose(params)
 		return nil, nil
 	case protocol.MethodServiceCheck:
+		if !h.caps.Probe {
+			return disabled()
+		}
 		return h.handleServiceCheck(params)
 	case protocol.MethodFsList:
+		if !h.caps.Files {
+			return disabled()
+		}
 		return h.handleFsList(params)
 	case protocol.MethodFsRead:
+		if !h.caps.Files {
+			return disabled()
+		}
 		return h.handleFsRead(params)
 	case protocol.MethodFsWrite:
+		if !h.caps.Files {
+			return disabled()
+		}
 		return h.handleFsWrite(params)
 	case protocol.MethodFsDelete:
+		if !h.caps.Files {
+			return disabled()
+		}
 		return h.handleFsDelete(params)
 	case protocol.MethodNATConnect:
+		if !h.caps.NAT {
+			return disabled()
+		}
 		return h.handleNATConnect(params)
 	case protocol.MethodNATData:
+		if !h.caps.NAT {
+			return disabled()
+		}
 		h.handleNATData(params)
 		return nil, nil
 	case protocol.MethodNATClose:
+		if !h.caps.NAT {
+			return disabled()
+		}
 		h.handleNATClose(params)
 		return nil, nil
 	case protocol.MethodApplyConfig:
 		return h.handleApplyConfig(params)
 	case protocol.MethodUpgrade:
+		if !h.caps.Upgrade {
+			return disabled()
+		}
 		return h.handleUpgrade(params)
 	default:
 		return nil, protocol.NewError(protocol.ErrMethod, "unknown method: "+method)
@@ -113,30 +167,6 @@ func (h *Handler) handleServiceCheck(params json.RawMessage) (any, *protocol.RPC
 	return result, nil
 }
 
-// ---- exec ----
-
-func (h *Handler) handleExec(params json.RawMessage) (any, *protocol.RPCError) {
-	var p protocol.ExecParams
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, protocol.NewError(protocol.ErrParams, err.Error())
-	}
-	timeout := time.Duration(p.Timeout) * time.Second
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "sh", "-c", p.Command)
-	out, err := cmd.CombinedOutput()
-	result := protocol.ExecResult{Output: string(out), Code: cmd.ProcessState.ExitCode()}
-	if err != nil {
-		// CommandContext 超时/失败时 exit code 可能为 -1
-		result.Error = err.Error()
-	}
-	return result, nil
-}
-
 // ---- terminal ----
 
 func (h *Handler) handleTerminalOpen(params json.RawMessage) (any, *protocol.RPCError) {
@@ -150,24 +180,17 @@ func (h *Handler) handleTerminalOpen(params json.RawMessage) (any, *protocol.RPC
 
 	shell := p.Command
 	if shell == "" {
-		shell = "sh"
+		shell = defaultShell()
 	}
 
 	cmd := exec.Command(shell)
-	stdin, err := cmd.StdinPipe()
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	io, err := startTerminal(cmd, p.Cols, p.Rows)
 	if err != nil {
-		return nil, protocol.NewError(protocol.ErrInternal, err.Error())
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, protocol.NewError(protocol.ErrInternal, err.Error())
-	}
-	cmd.Stderr = cmd.Stdout // 合并 stderr 到 stdout
-	if err := cmd.Start(); err != nil {
 		return nil, protocol.NewError(protocol.ErrInternal, err.Error())
 	}
 
-	ts := &termSession{cmd: cmd, stdin: make(chan []byte, 64), close: make(chan struct{})}
+	ts := &termSession{cmd: cmd, io: io, stdin: make(chan []byte, 64), close: make(chan struct{})}
 	h.mu.Lock()
 	h.sessions[p.SessionID] = ts
 	h.mu.Unlock()
@@ -176,7 +199,7 @@ func (h *Handler) handleTerminalOpen(params json.RawMessage) (any, *protocol.RPC
 	go func() {
 		buf := make([]byte, 4096)
 		for {
-			n, err := stdout.Read(buf)
+			n, err := io.Read(buf)
 			if n > 0 {
 				_ = h.peer.Notify(protocol.MethodTermData, protocol.TerminalData{
 					SessionID: p.SessionID,
@@ -195,7 +218,7 @@ func (h *Handler) handleTerminalOpen(params json.RawMessage) (any, *protocol.RPC
 		for {
 			select {
 			case data := <-ts.stdin:
-				_, _ = stdin.Write(data)
+				_, _ = io.Write(data)
 			case <-ts.close:
 				return
 			}
@@ -228,6 +251,19 @@ func (h *Handler) handleTermData(params json.RawMessage) {
 	}
 }
 
+func (h *Handler) handleTermResize(params json.RawMessage) {
+	var p protocol.TerminalResize
+	if json.Unmarshal(params, &p) != nil {
+		return
+	}
+	h.mu.Lock()
+	ts := h.sessions[p.SessionID]
+	h.mu.Unlock()
+	if ts != nil {
+		_ = ts.io.Resize(p.Cols, p.Rows)
+	}
+}
+
 func (h *Handler) handleTermClose(params json.RawMessage) {
 	var p protocol.TerminalData
 	_ = json.Unmarshal(params, &p)
@@ -248,6 +284,9 @@ func (h *Handler) closeSession(id string) {
 		close(ts.close)
 		if ts.cmd != nil && ts.cmd.Process != nil {
 			_ = ts.cmd.Process.Kill()
+		}
+		if ts.io != nil {
+			_ = ts.io.Close()
 		}
 	})
 	_ = h.peer.Notify(protocol.MethodTermClose, protocol.TerminalData{SessionID: id})

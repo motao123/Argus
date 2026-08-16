@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/load"
 	"github.com/shirou/gopsutil/v4/mem"
@@ -131,7 +130,7 @@ func (c *Collector) Collect() *protocol.ReportParams {
 		r.SwapTotal = sw.Total
 	}
 	// 磁盘取根分区使用量
-	if du, err := disk.Usage("/"); err == nil {
+	if du, err := diskUsage(); err == nil {
 		r.DiskUsed = du.Used
 		r.DiskTotal = du.Total
 	}

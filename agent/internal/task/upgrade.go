@@ -7,60 +7,34 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/motao123/Argus/protocol"
 )
 
-// upgradeSelf 下载新二进制、校验 SHA-256、备份原文件并原子替换后重启。
-// 通过 detached 子进程在 1 秒后完成替换与 re-exec，避免替换运行中的自身。
-func upgradeSelf(p *protocol.UpgradeParams) (string, error) {
-	self, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("resolve self: %w", err)
-	}
-	selfAbs, err := filepath.Abs(self)
-	if err != nil {
-		return "", err
-	}
-	newPath := selfAbs + ".new"
-	backupPath := selfAbs + ".bak"
-
-	// 1. 下载
+func prepareUpgrade(p *protocol.UpgradeParams, self, newPath, backupPath string) error {
 	if err := downloadFile(p.URL, newPath); err != nil {
-		return "", fmt.Errorf("download: %w", err)
+		return fmt.Errorf("download: %w", err)
 	}
-
-	// 2. SHA-256 校验
 	got, err := sha256File(newPath)
 	if err != nil {
-		return "", err
-	}
-	if !strings.EqualFold(got, p.SHA256) {
 		_ = os.Remove(newPath)
-		return "", fmt.Errorf("sha256 mismatch: got %s want %s", got, p.SHA256)
+		return err
 	}
+	if !equalSHA256(got, p.SHA256) {
+		_ = os.Remove(newPath)
+		return fmt.Errorf("sha256 mismatch: got %s want %s", got, p.SHA256)
+	}
+	if err := copyFile(self, backupPath); err != nil {
+		_ = os.Remove(newPath)
+		return fmt.Errorf("backup self: %w", err)
+	}
+	return nil
+}
 
-	// 3. 备份当前二进制
-	if err := copyFile(selfAbs, backupPath); err != nil {
-		_ = os.Remove(newPath)
-		return "", fmt.Errorf("backup self: %w", err)
-	}
-
-	// 4. 后台执行替换 + 重启（detached，父进程退出后继续）
-	args := append([]string{"-c"},
-		fmt.Sprintf("sleep 1; mv -f %s %s; chmod +x %s; exec %s %s",
-			shellQuote(newPath), shellQuote(selfAbs), shellQuote(selfAbs), shellQuote(selfAbs), strings.Join(quoteAll(os.Args[1:]), " ")))
-	cmd := exec.Command("/bin/sh", args...)
-	cmd.SysProcAttr = detachAttr()
-	if err := cmd.Start(); err != nil {
-		_ = os.Remove(newPath)
-		return "", fmt.Errorf("spawn replacement: %w", err)
-	}
-	return fmt.Sprintf("upgraded to %s, restarting", p.Version), nil
+func equalSHA256(got, want string) bool {
+	return strings.EqualFold(strings.TrimSpace(got), strings.TrimSpace(want))
 }
 
 func downloadFile(url, dst string) error {
@@ -108,16 +82,4 @@ func copyFile(src, dst string) error {
 	defer out.Close()
 	_, err = io.Copy(out, in)
 	return err
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-func quoteAll(args []string) []string {
-	out := make([]string, 0, len(args))
-	for _, a := range args {
-		out = append(out, shellQuote(a))
-	}
-	return out
 }

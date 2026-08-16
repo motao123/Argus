@@ -150,7 +150,7 @@ func (s *Server) terminalWS(c *gin.Context) {
 	defer conn.Close()
 
 	sessionID := newSessionID()
-	if err := s.Agents.OpenTerminal(serverID, sessionID); err != nil {
+	if err := s.Agents.OpenTerminal(serverID, sessionID, 80, 24); err != nil {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("terminal open failed: "+err.Error()))
 		return
 	}
@@ -167,9 +167,19 @@ func (s *Server) terminalWS(c *gin.Context) {
 
 	// 浏览器输入 → Agent
 	for {
-		_, data, err := conn.ReadMessage()
+		msgType, data, err := conn.ReadMessage()
 		if err != nil {
 			return
+		}
+		if msgType == websocket.TextMessage {
+			var resize protocol.TerminalResize
+			if json.Unmarshal(data, &resize) == nil && resize.Cols > 0 && resize.Rows > 0 {
+				resize.SessionID = sessionID
+				if err := s.Agents.ResizeTerm(serverID, resize); err != nil {
+					return
+				}
+				continue
+			}
 		}
 		if err := s.Agents.SendTermData(serverID, protocol.TerminalData{SessionID: sessionID, Data: data}); err != nil {
 			return

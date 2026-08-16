@@ -165,13 +165,36 @@ func (ch *connHandler) handleRegister(params json.RawMessage) (any, *protocol.RP
 	}
 
 	ch.hub.attach(srv.ID, ch.peer)
+	// Persist optional registration metadata; omitted fields preserve legacy agents.
+	updates := make(map[string]any)
+	if p.Protocol != "" {
+		srv.Protocol, updates["protocol"] = p.Protocol, p.Protocol
+	}
+	if p.Version != "" {
+		srv.Version, updates["version"] = p.Version, p.Version
+	}
+	if p.OS != "" {
+		srv.OS, updates["os"] = p.OS, p.OS
+	}
+	if p.Arch != "" {
+		srv.Arch, updates["arch"] = p.Arch, p.Arch
+	}
+	if p.Capabilities != nil {
+		if raw, err := json.Marshal(p.Capabilities); err == nil {
+			srv.Capabilities = string(raw)
+			updates["capabilities"] = srv.Capabilities
+		}
+	}
+	if len(updates) > 0 {
+		ch.hub.db.Model(&srv).Updates(updates)
+	}
 	ch.hub.store.Upsert(&srv)
 	ch.hub.store.SetOnline(srv.ID)
 	log.Printf("agent %s (#%d) registered", srv.Name, srv.ID)
 	if ch.hub.TransferCb != nil {
 		ch.hub.TransferCb(srv.ID)
 	}
-	return protocol.RegisterResult{ServerID: srv.ID, Secret: srv.Secret}, nil
+	return protocol.RegisterResult{ServerID: srv.ID, Secret: srv.Secret, Capabilities: p.Capabilities}, nil
 }
 
 // handleReport 周期状态上报。首次携带 Host 信息时同步更新。
@@ -266,12 +289,12 @@ func (h *Hub) Exec(serverID int64, command string, timeout int) (*protocol.ExecR
 }
 
 // OpenTerminal 向 Agent 打开终端会话，返回 agent 侧 Peer 供中继。
-func (h *Hub) OpenTerminal(serverID int64, sessionID string) error {
+func (h *Hub) OpenTerminal(serverID int64, sessionID string, cols, rows int) error {
 	peer := h.Peer(serverID)
 	if peer == nil {
 		return ErrOffline
 	}
-	resp, err := peer.Call(protocol.MethodTerminal, protocol.TerminalParams{SessionID: sessionID}, 10*time.Second)
+	resp, err := peer.Call(protocol.MethodTerminal, protocol.TerminalParams{SessionID: sessionID, Cols: cols, Rows: rows}, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -281,7 +304,15 @@ func (h *Hub) OpenTerminal(serverID int64, sessionID string) error {
 	return nil
 }
 
-// SendTermData 向 Agent 转发终端输入。
+// ResizeTerm 通知 Agent 调整终端窗口。
+func (h *Hub) ResizeTerm(serverID int64, resize protocol.TerminalResize) error {
+	peer := h.Peer(serverID)
+	if peer == nil {
+		return ErrOffline
+	}
+	return peer.Notify(protocol.MethodTermResize, resize)
+}
+
 func (h *Hub) SendTermData(serverID int64, data protocol.TerminalData) error {
 	peer := h.Peer(serverID)
 	if peer == nil {

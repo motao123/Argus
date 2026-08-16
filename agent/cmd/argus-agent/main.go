@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -58,6 +59,15 @@ func main() {
 		log.Fatal("注册密钥必填：请通过 -k 传入服务器密钥或用户 Agent 密钥（服务器已禁止空密钥注册）")
 	}
 
+	caps := task.DefaultCapabilities()
+	if data, err := os.ReadFile(cfgFile); err == nil {
+		var saved struct {
+			Capabilities *protocol.Capabilities `json:"capabilities"`
+		}
+		if json.Unmarshal(data, &saved) == nil && saved.Capabilities != nil {
+			caps = *saved.Capabilities
+		}
+	}
 	col := collector.New(version)
 	for {
 		// 每次重连都重新从文件加载密钥：
@@ -68,7 +78,7 @@ func main() {
 			}
 		}
 		log.Printf("connecting to %s ...", *serverURL)
-		if err := run(ctx, *serverURL, *secret, *interval, col, cfgFile); err != nil {
+		if err := run(ctx, *serverURL, *secret, *interval, col, cfgFile, caps); err != nil {
 			log.Printf("connection error: %v, retrying in 5s", err)
 		}
 		select {
@@ -79,7 +89,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, serverURL, secret string, interval time.Duration, col *collector.Collector, cfgFile string) error {
+func run(ctx context.Context, serverURL, secret string, interval time.Duration, col *collector.Collector, cfgFile string, caps protocol.Capabilities) error {
 	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
 	if err != nil {
 		return err
@@ -87,6 +97,7 @@ func run(ctx context.Context, serverURL, secret string, interval time.Duration, 
 	defer conn.Close()
 
 	handler := task.NewHandler(conn)
+	handler.SetCapabilities(caps)
 	peer := rpc.New(conn, handler)
 	handler.SetPeer(peer)
 
@@ -94,7 +105,11 @@ func run(ctx context.Context, serverURL, secret string, interval time.Duration, 
 	go peer.ReadLoop()
 
 	// 注册（每次连接都执行：首次无密钥由服务端生成，之后用已保存密钥重新鉴权）
-	resp, err := peer.Call(protocol.MethodRegister, protocol.RegisterParams{Secret: secret}, 10*time.Second)
+	resp, err := peer.Call(protocol.MethodRegister, protocol.RegisterParams{
+		Secret: secret, Protocol: protocol.ProtocolVersion, Version: version,
+		OS: runtime.GOOS, Arch: runtime.GOARCH,
+		Capabilities: &caps,
+	}, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -117,6 +132,14 @@ func run(ctx context.Context, serverURL, secret string, interval time.Duration, 
 	}
 
 	// 上报循环
+	if !caps.Metrics {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-peer.Closed():
+			return errors.New("connection closed")
+		}
+	}
 	lastHost := protocol.HostInfo{}
 	go func() {
 		_ = col.Run(ctx, interval, func(r *protocol.ReportParams) {

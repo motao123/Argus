@@ -11,6 +11,7 @@ export default function TerminalPage() {
   const ref = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState("");
+  const [compatMode, setCompatMode] = useState(false);
 
   useEffect(() => {
     if (!ref.current || !getToken()) return;
@@ -48,7 +49,9 @@ export default function TerminalPage() {
 
     ws.onopen = () => {
       setConnected(true);
+      setCompatMode(false);
       term.write("\x1b[32m已连接服务器终端...\x1b[0m\r\n");
+      sendResize();
     };
     ws.onmessage = (e) => {
       const data = typeof e.data === "string" ? e.data : new Uint8Array(e.data);
@@ -65,9 +68,11 @@ export default function TerminalPage() {
     };
     // 注意：不要把 resize 信息作为终端输入发送 —— Agent 侧没有窗口尺寸协议，
     // JSON 会被 shell 当成命令吞掉。尺寸变化只做本地 fit。
-    const onResize = () => {
+    const sendResize = () => {
       fit.fit();
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
     };
+    const onResize = () => sendResize();
     term.onData(onData);
     term.onResize(onResize);
     const ro = new ResizeObserver(onResize);
@@ -92,7 +97,7 @@ export default function TerminalPage() {
             connected ? "bg-ok/15 text-ok" : error ? "bg-err/15 text-err" : "bg-muted/20 text-muted"
           }`}
         >
-          {error ? "连接失败" : connected ? "已连接" : "连接中…"}
+          {error ? "连接失败" : compatMode ? "兼容模式" : connected ? "已连接" : "连接中…"}
         </span>
       </div>
       <div ref={ref} className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border" />

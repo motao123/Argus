@@ -4,6 +4,20 @@ package protocol
 
 import "encoding/json"
 
+// ProtocolVersion identifies the additive wire protocol version.
+const ProtocolVersion = "1"
+
+// Stable capability names advertised during registration.
+const (
+	CapabilityMetrics  = "metrics"
+	CapabilityProbe    = "probe"
+	CapabilityCommand  = "command"
+	CapabilityTerminal = "terminal"
+	CapabilityFiles    = "files"
+	CapabilityUpgrade  = "upgrade"
+	CapabilityNAT      = "nat"
+)
+
 // ---- JSON-RPC 2.0 信封 ----
 
 // Request 是请求或通知（无 ID 即为通知）。
@@ -52,6 +66,7 @@ const (
 	MethodExec         = "agent.exec"
 	MethodTerminal     = "agent.terminal"
 	MethodTermData     = "agent.terminal.data"
+	MethodTermResize   = "agent.terminal.resize"
 	MethodTermClose    = "agent.terminal.close"
 	MethodServiceCheck = "agent.service.check"
 	MethodFsList       = "agent.fs.list"
@@ -67,9 +82,21 @@ const (
 
 // AgentConfig 服务端下发的 Agent 运行配置（借鉴 nezha ApplyConfig）。
 type AgentConfig struct {
-	ServerURL string `json:"server_url,omitempty"` // WS 地址
-	Interval  int    `json:"interval,omitempty"`   // 上报间隔（秒）
-	Secret    string `json:"secret,omitempty"`     // 新密钥
+	ServerURL    string        `json:"server_url,omitempty"` // WS 地址
+	Interval     int           `json:"interval,omitempty"`   // 上报间隔（秒）
+	Secret       string        `json:"secret,omitempty"`     // 新密钥
+	Capabilities *Capabilities `json:"capabilities,omitempty"`
+}
+
+// Capabilities controls optional Agent features.
+type Capabilities struct {
+	Metrics  bool `json:"metrics"`
+	Probe    bool `json:"probe"`
+	Command  bool `json:"command"`
+	Terminal bool `json:"terminal"`
+	Files    bool `json:"files"`
+	Upgrade  bool `json:"upgrade"`
+	NAT      bool `json:"nat"`
 }
 
 // UpgradeParams Agent 自升级参数（下载 → SHA-256 校验 → 原子替换 → 重启）。
@@ -122,13 +149,19 @@ type ReportParams struct {
 
 // RegisterParams 注册参数。Secret 为空表示首次注册，由服务端生成。
 type RegisterParams struct {
-	Secret string `json:"secret"`
+	Secret       string        `json:"secret"`
+	Protocol     string        `json:"protocol,omitempty"`
+	Version      string        `json:"version,omitempty"`
+	OS           string        `json:"os,omitempty"`
+	Arch         string        `json:"arch,omitempty"`
+	Capabilities *Capabilities `json:"capabilities,omitempty"`
 }
 
 // RegisterResult 注册结果。
 type RegisterResult struct {
-	ServerID int64  `json:"server_id"`
-	Secret   string `json:"secret"`
+	ServerID     int64         `json:"server_id"`
+	Secret       string        `json:"secret"`
+	Capabilities *Capabilities `json:"capabilities,omitempty"`
 }
 
 // ---- 任务下发 ----
@@ -158,6 +191,13 @@ type TerminalParams struct {
 type TerminalData struct {
 	SessionID string `json:"session_id"`
 	Data      []byte `json:"data"`
+}
+
+// TerminalResize 调整终端窗口大小。
+type TerminalResize struct {
+	SessionID string `json:"session_id"`
+	Cols      int    `json:"cols"`
+	Rows      int    `json:"rows"`
 }
 
 // ---- 服务监控 ----

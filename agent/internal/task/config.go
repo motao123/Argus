@@ -30,6 +30,9 @@ func (h *Handler) handleApplyConfig(params json.RawMessage) (any, *protocol.RPCE
 	if cfg.Secret != "" {
 		existing["secret"] = cfg.Secret
 	}
+	if cfg.Capabilities != nil {
+		existing["capabilities"] = cfg.Capabilities
+	}
 	existing["pending_restart"] = true
 	data, _ := json.MarshalIndent(existing, "", "  ")
 	if err := os.WriteFile(ApplyConfigPath, data, 0600); err != nil {

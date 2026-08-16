@@ -3,6 +3,7 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,11 @@ import (
 // Handler 处理对端主动发来的方法调用。
 type Handler interface {
 	Handle(method string, params json.RawMessage) (any, *protocol.RPCError)
+}
+
+// CallContextHandler may honor cancellation and deadlines for long handlers.
+type CallContextHandler interface {
+	HandleContext(ctx context.Context, method string, params json.RawMessage) (any, *protocol.RPCError)
 }
 
 // Peer 维护一条 WebSocket 长连接，双向复用：
@@ -50,6 +56,13 @@ func (p *Peer) Conn() *websocket.Conn { return p.conn }
 
 // Call 发送请求并等待应答。
 func (p *Peer) Call(method string, params any, timeout time.Duration) (*protocol.Response, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return p.CallContext(ctx, method, params)
+}
+
+// CallContext sends a request and waits for its response or context cancellation.
+func (p *Peer) CallContext(ctx context.Context, method string, params any) (*protocol.Response, error) {
 	id := p.allocID()
 	raw, err := json.Marshal(params)
 	if err != nil {
@@ -68,11 +81,14 @@ func (p *Peer) Call(method string, params any, timeout time.Duration) (*protocol
 	}
 
 	select {
-	case resp := <-ch:
+	case resp, ok := <-ch:
+		if !ok {
+			return nil, errors.New("connection closed")
+		}
 		return resp, nil
-	case <-time.After(timeout):
+	case <-ctx.Done():
 		p.dropPending(id)
-		return nil, errors.New("request timeout")
+		return nil, ctx.Err()
 	case <-p.closed:
 		return nil, errors.New("connection closed")
 	}
@@ -126,12 +142,9 @@ func (p *Peer) ReadLoop() {
 			return
 		}
 		if msg.Method != "" {
-			// 对端请求
+			// Dispatch independently so a long handler cannot block reads.
 			if p.handler != nil {
-				result, rpcErr := p.handler.Handle(msg.Method, msg.Params)
-				if len(msg.ID) > 0 {
-					_ = p.WriteRaw(protocol.Response{ID: msg.ID, Result: result, Error: rpcErr})
-				}
+				go p.dispatch(msg)
 			} else if len(msg.ID) > 0 {
 				_ = p.WriteRaw(protocol.Response{
 					ID:    msg.ID,
@@ -151,6 +164,19 @@ func (p *Peer) ReadLoop() {
 		if ok {
 			ch <- &protocol.Response{ID: msg.ID, Result: msg.Result, Error: msg.Error}
 		}
+	}
+}
+
+func (p *Peer) dispatch(msg wireMessage) {
+	var result any
+	var rpcErr *protocol.RPCError
+	if h, ok := p.handler.(CallContextHandler); ok {
+		result, rpcErr = h.HandleContext(context.Background(), msg.Method, msg.Params)
+	} else {
+		result, rpcErr = p.handler.Handle(msg.Method, msg.Params)
+	}
+	if len(msg.ID) > 0 {
+		_ = p.WriteRaw(protocol.Response{ID: msg.ID, Result: result, Error: rpcErr})
 	}
 }
 
