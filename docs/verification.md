@@ -203,3 +203,12 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
   非 admin 插件/建用户/过户均拒绝；admin/owner 放行
 - 生产镜像：web 阶段 podman 构建验证通过；golang 阶段因本机 Docker Hub 直连超时
   （环境网络限制，非 Dockerfile 问题），CNB 流水线在可达 registry 下完成镜像构建
+
+## 十八、批次A：前端接线补齐（审计/通知中心/生命周期/延迟趋势，2026-08-16）
+
+- 新增「审计日志」页（/admin/audit）：分页表格（时间/用户/动作/详情/IP）
+- 新增「通知中心」页（/admin/notifications）：离线/上线通知配置、流量定时报告配置、通知分组 CRUD
+- 新增「服务器生命周期」页（/admin/lifecycle）：过户发起/列表/取消（展示一次性密钥）、Agent 批量升级（多选目标/URL/SHA-256/版本 + 逐机回执）
+- 服务监控：卡片可展开「延迟趋势」折线图（serviceHistory 1d 分钟级 delay）
+- 清理过时注释；新增 TestAuditLogsAdminOnly
+- 浏览器验证：审计/通知中心/生命周期三页 + 各区块 + 延迟趋势入口全部通过

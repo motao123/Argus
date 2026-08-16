@@ -1,8 +1,39 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { api, type ServiceItem } from "../lib/api";
+import {
+  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
+import { api, type ServiceHistoryPoint, type ServiceItem } from "../lib/api";
 import { useServers } from "../context/servers";
+
+// 延迟趋势折线图（1d 分钟级延迟，借鉴 dash-v2 ServiceTracker）
+function DelayTrend({ svcId, name }: { svcId: number; name: string }) {
+  const { data } = useQuery({
+    queryKey: ["svc-history", svcId, "1d"],
+    queryFn: () => api.serviceHistory(svcId, "1d"),
+    staleTime: 2 * 60 * 1000,
+  });
+  const points = data?.points ?? [];
+  if (points.length === 0) return <div className="py-4 text-center text-xs text-muted">暂无延迟数据</div>;
+  return (
+    <div className="mt-3 h-32">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={points} margin={{ top: 5, right: 5, bottom: 0, left: -15 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-c)" />
+          <XAxis dataKey="ts" tickFormatter={(v: number) => new Date(v * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} tick={{ fontSize: 10, fill: "var(--muted)" }} />
+          <YAxis tick={{ fontSize: 10, fill: "var(--muted)" }} width={50} />
+          <Tooltip
+            labelFormatter={(v: number) => new Date(v * 1000).toLocaleString("zh-CN", { hour12: false })}
+            formatter={(v) => [`${Number(v).toFixed(1)}ms 可用率 ${points.find((p: ServiceHistoryPoint) => p.ts === v)?.up_rate ?? ""}%`, name]}
+            contentStyle={{ background: "var(--panel)", border: "1px solid var(--border-c)", borderRadius: 8 }}
+          />
+          <Line type="monotone" dataKey="delay" stroke="var(--color-accent)" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 // 最近 30 天可用率色块（真实数据，借鉴 dash-v2 ServiceTracker）
 function UptimeBlocks({ svcId }: { svcId: number }) {
@@ -49,6 +80,7 @@ export default function Services() {
 
   const [form, setForm] = useState<Partial<ServiceItem> | null>(null);
   const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["services"] });
 
@@ -150,7 +182,7 @@ export default function Services() {
       <div className="space-y-3">
         {services.map((svc) => (
           <div key={svc.id} className="rounded-xl border border-border bg-panel p-4">
-            <div className="flex items-center justify-between">
+            <button className="flex w-full items-center justify-between text-left" onClick={() => setExpanded(expanded === svc.id ? null : svc.id)}>
               <div className="flex items-center gap-3">
                 <span
                   className={`h-2.5 w-2.5 rounded-full ${svc.last_up ? "bg-ok shadow-[0_0_6px] shadow-ok" : "bg-err"}`}
@@ -171,17 +203,21 @@ export default function Services() {
                   今日 {svc.today_up_rate.toFixed(1)}%
                 </span>
                 <UptimeBlocks svcId={svc.id} />
-                <button onClick={() => setForm({ ...svc })} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => confirm(`删除服务「${svc.name}」？`) && remove.mutate(svc.id)}
-                  className="rounded p-1.5 text-err hover:bg-err/10"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <span className="text-xs text-muted">{expanded === svc.id ? "收起 ▲" : "延迟趋势 ▼"}</span>
               </div>
+            </button>
+            <div className="flex justify-end gap-1 pr-1 pt-2">
+              <button onClick={() => setForm({ ...svc })} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
+                <Pencil className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => confirm(`删除服务「${svc.name}」？`) && remove.mutate(svc.id)}
+                className="rounded p-1.5 text-err hover:bg-err/10"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
+            {expanded === svc.id && <DelayTrend svcId={svc.id} name={svc.name} />}
           </div>
         ))}
         {services.length === 0 && (

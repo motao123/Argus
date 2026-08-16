@@ -51,6 +51,33 @@ export interface ServerGroup {
   name: string;
 }
 
+export interface AuditLog {
+  id: number;
+  user_id: number;
+  username: string;
+  action: string;
+  detail: string;
+  ip: string;
+  created_at: string;
+}
+
+export interface TransferRecord {
+  id: number;
+  server_id: number;
+  server_name: string;
+  to_username: string;
+  status: string;
+  created_at: string;
+}
+
+export interface UpgradeJob {
+  id: string;
+  url: string;
+  version: string;
+  created_at: string;
+  results: Record<string, { server_id: number; name: string; status: string; error?: string }>;
+}
+
 export interface Alert {
   id: number;
   name: string;
@@ -357,6 +384,28 @@ export const api = {
   testMessage: (webhook_id: number, title?: string, content?: string) =>
     request<{ ok: boolean; sent_to: string }>("/api/v1/test-message", { method: "POST", body: JSON.stringify({ webhook_id, title, content }) }),
   notificationGroups: () => request<{ groups: NotificationGroup[] }>("/api/v1/notification-groups"),
+  saveNotificationGroup: (g: Partial<NotificationGroup> & { id?: number }) =>
+    g.id
+      ? request<{ ok: boolean }>(`/api/v1/notification-groups/${g.id}`, { method: "PUT", body: JSON.stringify(g) })
+      : request<NotificationGroup>("/api/v1/notification-groups", { method: "POST", body: JSON.stringify(g) }),
+  deleteNotificationGroup: (id: number) => request(`/api/v1/notification-groups/${id}`, { method: "DELETE" }),
+
+  auditLogs: (offset = 0, limit = 50) =>
+    request<{ logs: AuditLog[]; pagination?: { total: number } }>(`/api/v1/admin/logs?offset=${offset}&limit=${limit}`),
+  offlineNotify: () => request<{ webhook_id: number; offline_after: number; enabled: boolean }>("/api/v1/offline-notify"),
+  saveOfflineNotify: (cfg: { webhook_id: number; offline_after: number; enabled: boolean }) =>
+    request<{ ok: boolean }>("/api/v1/offline-notify", { method: "POST", body: JSON.stringify(cfg) }),
+  trafficReport: () => request<{ webhook_id: number; hour: number; enabled: boolean }>("/api/v1/traffic-report"),
+  saveTrafficReport: (cfg: { webhook_id: number; hour: number; enabled: boolean }) =>
+    request<{ ok: boolean }>("/api/v1/traffic-report", { method: "POST", body: JSON.stringify(cfg) }),
+
+  transfers: () => request<{ transfers: TransferRecord[] }>("/api/v1/server-transfers"),
+  createTransfer: (server_id: number, to_user_id: number) =>
+    request<{ transfer: TransferRecord; new_secret: string; note: string }>("/api/v1/server-transfers", { method: "POST", body: JSON.stringify({ server_id, to_user_id }) }),
+  cancelTransfer: (id: number) => request<{ ok: boolean }>(`/api/v1/server-transfers/${id}/cancel`, { method: "POST" }),
+  upgradeJobs: () => request<{ jobs: UpgradeJob[] }>("/api/v1/upgrade-jobs"),
+  createUpgradeJob: (j: { server_ids: number[]; url: string; sha256: string; version: string }) =>
+    request<UpgradeJob>("/api/v1/upgrade-jobs", { method: "POST", body: JSON.stringify(j) }),
 
   services: () => request<{ services: ServiceItem[] }>("/api/v1/services"),
   saveService: (svc: Partial<ServiceItem> & { id?: number }) =>

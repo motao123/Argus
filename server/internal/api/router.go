@@ -186,7 +186,7 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/batch-delete/servers", s.batchDeleteServers)
 			authed.POST("/batch-move/servers", s.batchMoveServers)
 
-			// 服务器过户状态机尚未实现，禁止保留一个会误报成功的 POST 路由。
+			// 服务器过户状态机已实现（见 transfers.go），POST 原误绑已移除。
 
 			// DDNS
 			authed.GET("/ddns", s.listDDNS)

@@ -119,3 +119,27 @@ func TestTransferRequiresAdmin(t *testing.T) {
 		t.Fatalf("non-admin transfer: got %d want 403", w.Code)
 	}
 }
+
+func TestAuditLogsAdminOnly(t *testing.T) {
+	e := newAuthzEnv(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	authed := r.Group("", e.srv.authMiddleware())
+	authed.GET("/admin/logs", e.srv.listAuditLogs)
+	// admin 可读
+	req := httptest.NewRequest(http.MethodGet, "/admin/logs?limit=5", nil)
+	req.Header.Set("Authorization", "Bearer "+e.token(t, e.admin))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin audit: got %d", w.Code)
+	}
+	// 普通用户 403
+	req2 := httptest.NewRequest(http.MethodGet, "/admin/logs?limit=5", nil)
+	req2.Header.Set("Authorization", "Bearer "+e.token(t, e.alice))
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusForbidden {
+		t.Fatalf("non-admin audit: got %d want 403", w2.Code)
+	}
+}

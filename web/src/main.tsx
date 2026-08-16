@@ -21,6 +21,9 @@ import Network from "./pages/Network";
 import Security from "./pages/Security";
 import Maintenance from "./pages/Maintenance";
 import Plugins from "./pages/Plugins";
+import Audit from "./pages/Audit";
+import Notifications from "./pages/Notifications";
+import Lifecycle from "./pages/Lifecycle";
 import { NotFound, Forbidden } from "./pages/Status";
 import ErrorBoundary from "./components/ErrorBoundary";
 import TerminalPage from "./pages/Terminal";
@@ -79,6 +82,9 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/admin/security" element={<Security />} />
             <Route path="/admin/maintenance" element={<Maintenance />} />
             <Route path="/admin/plugins" element={<Plugins />} />
+            <Route path="/admin/audit" element={<Audit />} />
+            <Route path="/admin/notifications" element={<Notifications />} />
+            <Route path="/admin/lifecycle" element={<Lifecycle />} />
             <Route path="/admin/settings" element={<Settings />} />
             <Route path="/admin/terminal/:id" element={<TerminalPage />} />
             <Route path="/admin/403" element={<Forbidden />} />
