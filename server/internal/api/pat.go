@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -281,7 +282,7 @@ func (s *Server) identify(raw string) (*principal, error) {
 	if err != nil {
 		return nil, errInvalidToken
 	}
-	if isJTIRevoked(cl.RegisteredClaims.ID) {
+	if s.isJTIRevoked(cl.RegisteredClaims.ID) {
 		return nil, errInvalidToken
 	}
 	var user model.User
@@ -426,6 +427,7 @@ func (s *Server) createToken(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"token": plain, "id": tok.ID, "name": tok.Name, "scopes": tok.Scopes})
+	s.auditLog(c, "pat.create", tok.Name)
 }
 
 // revokeToken 吊销令牌。
@@ -446,4 +448,5 @@ func (s *Server) revokeToken(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"ok": true})
+	s.auditLog(c, "pat.revoke", fmt.Sprintf("token_id=%d", id))
 }

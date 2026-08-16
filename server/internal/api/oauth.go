@@ -27,7 +27,7 @@ func (s *Server) oauthRedirect(c *gin.Context) {
 		return
 	}
 	state := randomHex(16)
-	c.SetCookie("oauth_state", state, 600, "/", "", false, true)
+	c.SetCookie("oauth_state", state, 600, "/", "", c.Request.TLS != nil, true)
 
 	redirectURI := s.oauthRedirectURI(c, provider)
 	authURL, err := s.OAuth.BuildAuthURL(provider, redirectURI, state)
@@ -85,7 +85,7 @@ func (s *Server) oauthCallback(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "issue token")
 		return
 	}
-	c.SetCookie("oauth_state", "", -1, "/", "", false, true)
+	c.SetCookie("oauth_state", "", -1, "/", "", c.Request.TLS != nil, true)
 	// 安全交换：JWT 不出现在 URL。发放一次性短期 code，由前端交换。
 	oneTimeCode := issueOAuthCode(token, 60*time.Second)
 	c.Redirect(http.StatusFound, "/login?oauth_code="+oneTimeCode)
@@ -163,7 +163,23 @@ func (s *Server) listOAuthConfigs(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok(c, gin.H{"providers": cfgs})
+	type oauthView struct {
+		ID                     int64  `json:"id"`
+		Name                   string `json:"name"`
+		ClientID               string `json:"client_id"`
+		AuthURL                string `json:"auth_url"`
+		TokenURL               string `json:"token_url"`
+		UserInfoURL            string `json:"user_info_url"`
+		UsernameField          string `json:"username_field"`
+		AdminLogins            string `json:"admin_logins"`
+		Enabled                bool   `json:"enabled"`
+		ClientSecretConfigured bool   `json:"client_secret_configured"`
+	}
+	out := make([]oauthView, 0, len(cfgs))
+	for _, cfg := range cfgs {
+		out = append(out, oauthView{ID: cfg.ID, Name: cfg.Name, ClientID: cfg.ClientID, AuthURL: cfg.AuthURL, TokenURL: cfg.TokenURL, UserInfoURL: cfg.UserInfoURL, UsernameField: cfg.UsernameField, AdminLogins: cfg.AdminLogins, Enabled: cfg.Enabled, ClientSecretConfigured: cfg.ClientSecret != ""})
+	}
+	ok(c, gin.H{"providers": out})
 }
 
 func (s *Server) saveOAuthConfig(c *gin.Context) {
@@ -174,19 +190,48 @@ func (s *Server) saveOAuthConfig(c *gin.Context) {
 	}
 	// 独立请求结构（模型字段带 json:"-" 脱敏，不能直接绑定）
 	var req struct {
-		Name          string `json:"name"`
-		ClientID      string `json:"client_id"`
-		ClientSecret  string `json:"client_secret"`
-		AuthURL       string `json:"auth_url"`
-		TokenURL      string `json:"token_url"`
-		UserInfoURL   string `json:"user_info_url"`
-		UsernameField string `json:"username_field"`
-		AdminLogins   string `json:"admin_logins"`
-		Enabled       bool   `json:"enabled"`
+		Name              string `json:"name"`
+		ClientID          string `json:"client_id"`
+		ClientSecret      string `json:"client_secret"`
+		AuthURL           string `json:"auth_url"`
+		TokenURL          string `json:"token_url"`
+		UserInfoURL       string `json:"user_info_url"`
+		UsernameField     string `json:"username_field"`
+		AdminLogins       string `json:"admin_logins"`
+		Enabled           bool   `json:"enabled"`
+		ClearClientSecret bool   `json:"clear_client_secret"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
+	}
+	var existing model.OAuthConfig
+	existingErr := s.DB.Where("name = ?", req.Name).First(&existing).Error
+	if existingErr == nil {
+		if req.ClientSecret == "" && !req.ClearClientSecret {
+			req.ClientSecret = existing.ClientSecret
+		}
+		if req.ClientID == "" {
+			req.ClientID = existing.ClientID
+		}
+		if req.AuthURL == "" {
+			req.AuthURL = existing.AuthURL
+		}
+		if req.TokenURL == "" {
+			req.TokenURL = existing.TokenURL
+		}
+		if req.UserInfoURL == "" {
+			req.UserInfoURL = existing.UserInfoURL
+		}
+		if req.UsernameField == "" {
+			req.UsernameField = existing.UsernameField
+		}
+		if req.AdminLogins == "" {
+			req.AdminLogins = existing.AdminLogins
+		}
+	}
+	if req.ClearClientSecret {
+		req.ClientSecret = ""
 	}
 	if err := oauth.BuildCustomURL(req.Name, req.AuthURL, req.TokenURL, req.UserInfoURL); err != nil {
 		fail(c, http.StatusBadRequest, err.Error())
@@ -207,8 +252,7 @@ func (s *Server) saveOAuthConfig(c *gin.Context) {
 		Enabled:       req.Enabled,
 	}
 	// upsert
-	var existing model.OAuthConfig
-	if err := s.DB.Where("name = ?", req.Name).First(&existing).Error; err == nil {
+	if existingErr == nil {
 		record.ID = existing.ID
 		s.DB.Save(&record)
 	} else {

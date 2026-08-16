@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -54,5 +55,33 @@ func TestOAuthCodeExchange(t *testing.T) {
 	expired := issueOAuthCode("t", -time.Second)
 	if code, _ := consume(expired); code != http.StatusUnauthorized {
 		t.Fatalf("expired code: got %d want 401", code)
+	}
+}
+
+func TestOAuthStateCookieSecureByScheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, target string
+		tls, secure  bool
+	}{
+		{name: "http", target: "http://localhost/oauth"},
+		{name: "https", target: "https://example.com/oauth", tls: true, secure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			r.GET("/oauth", func(c *gin.Context) {
+				c.SetCookie("oauth_state", "state", 600, "/", "", c.Request.TLS != nil, true)
+			})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.target, nil)
+			if tc.tls {
+				req.TLS = &tls.ConnectionState{}
+			}
+			r.ServeHTTP(w, req)
+			cookie := w.Header().Get("Set-Cookie")
+			if strings.Contains(cookie, "Secure") != tc.secure {
+				t.Fatalf("cookie=%q secure=%v", cookie, tc.secure)
+			}
+		})
 	}
 }

@@ -218,13 +218,16 @@ func (s *Server) updateNotification(c *gin.Context) {
 	}
 	// 部分更新：未提交字段保留原值（读取已脱敏，避免空值覆盖凭据）
 	var req struct {
-		Name    *string `json:"name"`
-		Type    *string `json:"type"`
-		URL     *string `json:"url"`
-		Method  *string `json:"method"`
-		Headers *string `json:"headers"`
-		Body    *string `json:"body"`
-		ChatID  *string `json:"chat_id"`
+		Name         *string `json:"name"`
+		Type         *string `json:"type"`
+		URL          *string `json:"url"`
+		Method       *string `json:"method"`
+		Headers      *string `json:"headers"`
+		Body         *string `json:"body"`
+		ChatID       *string `json:"chat_id"`
+		ClearURL     *bool   `json:"clear_url"`
+		ClearHeaders *bool   `json:"clear_headers"`
+		ClearBody    *bool   `json:"clear_body"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -237,16 +240,22 @@ func (s *Server) updateNotification(c *gin.Context) {
 	if req.Type != nil {
 		updates["type"] = *req.Type
 	}
-	if req.URL != nil {
+	if req.ClearURL != nil && *req.ClearURL {
+		updates["url"] = ""
+	} else if req.URL != nil && *req.URL != "" && *req.URL != maskURL(n.URL) {
 		updates["url"] = *req.URL
 	}
 	if req.Method != nil {
 		updates["method"] = *req.Method
 	}
-	if req.Headers != nil {
+	if req.ClearHeaders != nil && *req.ClearHeaders {
+		updates["headers"] = ""
+	} else if req.Headers != nil && *req.Headers != "" {
 		updates["headers"] = *req.Headers
 	}
-	if req.Body != nil {
+	if req.ClearBody != nil && *req.ClearBody {
+		updates["body"] = ""
+	} else if req.Body != nil && *req.Body != "" {
 		updates["body"] = *req.Body
 	}
 	if req.ChatID != nil {

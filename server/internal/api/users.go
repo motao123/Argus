@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -81,6 +82,7 @@ func (s *Server) createUser(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"user": u, "agent_secret": u.AgentSecret})
+	s.auditLog(c, "user.create", u.Username)
 }
 
 // deleteUser 删除用户（仅 admin）。其名下服务器联动删除（借鉴 nezha）。
@@ -113,6 +115,7 @@ func (s *Server) deleteUser(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"ok": true, "deleted_servers": len(servers)})
+	s.auditLog(c, "user.delete", fmt.Sprintf("user_id=%d", id))
 }
 
 // updateUser 修改用户（admin 改角色；用户自己改密码）。

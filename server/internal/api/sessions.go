@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -28,7 +29,21 @@ func revokeJTI(jti string, until time.Time) {
 	tokenBlacklistMu.Unlock()
 }
 
-// isJTIRevoked 检查 JTI 是否被踢出。
+// persistRevokedJTI keeps a revoked token invalid after a process restart.
+func (s *Server) persistRevokedJTI(jti string, until time.Time) {
+	if jti == "" || until.IsZero() || !until.After(time.Now()) {
+		return
+	}
+	revokeJTI(jti, until)
+	var revoked model.RevokedSession
+	if err := s.DB.Where("jti = ?", jti).First(&revoked).Error; err != nil {
+		s.DB.Create(&model.RevokedSession{JTI: jti, ExpiresAt: until})
+	} else if revoked.ExpiresAt.Before(until) {
+		s.DB.Model(&revoked).Update("expires_at", until)
+	}
+}
+
+// isJTIRevoked checks the in-memory blacklist.
 func isJTIRevoked(jti string) bool {
 	tokenBlacklistMu.Lock()
 	defer tokenBlacklistMu.Unlock()
@@ -40,6 +55,23 @@ func isJTIRevoked(jti string) bool {
 		delete(tokenBlacklist, jti)
 		return false
 	}
+	return true
+}
+
+// isJTIRevoked checks memory first, then the persistent revocation table.
+func (s *Server) isJTIRevoked(jti string) bool {
+	if isJTIRevoked(jti) {
+		return true
+	}
+	var revoked model.RevokedSession
+	if err := s.DB.Where("jti = ?", jti).First(&revoked).Error; err != nil {
+		return false
+	}
+	if time.Now().After(revoked.ExpiresAt) {
+		s.DB.Delete(&revoked)
+		return false
+	}
+	revokeJTI(jti, revoked.ExpiresAt)
 	return true
 }
 
@@ -90,28 +122,40 @@ func (s *Server) revokeSession(c *gin.Context) {
 		fail(c, http.StatusForbidden, "not your session")
 		return
 	}
-	revokeJTI(sess.JTI, sess.ExpiresAt)
+	s.persistRevokedJTI(sess.JTI, sess.ExpiresAt)
 	s.DB.Delete(&model.Session{}, id)
+	s.auditLog(c, "session.revoke", fmt.Sprintf("session_id=%d", id))
 	ok(c, gin.H{"ok": true})
 }
 
-// revokeAllSessions 踢出用户全部会话（保留当前）。
+// revokeAllSessions 踢出当前用户全部会话（保留当前）。管理员可通过 user_id 指定用户。
 func (s *Server) revokeAllSessions(c *gin.Context) {
 	p := principalFromContext(c)
+	userID := p.UserID
+	if p.IsAdmin && c.Query("user_id") != "" {
+		userID = parseIntQuery64(c.Query("user_id"))
+		if userID <= 0 {
+			fail(c, http.StatusBadRequest, "invalid user_id")
+			return
+		}
+	}
 	var sessions []model.Session
-	s.DB.Where("user_id = ?", p.UserID).Find(&sessions)
+	s.DB.Where("user_id = ?", userID).Find(&sessions)
 	curJTI := ""
 	if cl, err := s.parseToken(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")); err == nil {
 		curJTI = cl.RegisteredClaims.ID
 	}
+	revoked := 0
 	for i := range sessions {
 		if sessions[i].JTI == curJTI {
 			continue
 		}
-		revokeJTI(sessions[i].JTI, sessions[i].ExpiresAt)
+		s.persistRevokedJTI(sessions[i].JTI, sessions[i].ExpiresAt)
 		s.DB.Delete(&model.Session{}, sessions[i].ID)
+		revoked++
 	}
-	ok(c, gin.H{"ok": true, "revoked": len(sessions)})
+	s.auditLog(c, "session.revoke_all", fmt.Sprintf("user_id=%d revoked=%d", userID, revoked))
+	ok(c, gin.H{"ok": true, "revoked": revoked})
 }
 
 var _ = hex.EncodeToString

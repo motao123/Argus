@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogOut, MonitorSmartphone } from "lucide-react";
+import { LogOut, MonitorSmartphone, ShieldOff } from "lucide-react";
 import { api, type Session } from "../lib/api";
 import { fmtDateTime } from "../lib/format";
 
@@ -12,11 +12,27 @@ export default function Sessions() {
     mutationFn: api.kickSession,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
   });
+  const kickAll = useMutation({
+    mutationFn: () => api.kickAllSessions(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
+  });
 
   return (
     <div>
       <h1 className="mb-1 text-xl font-semibold">在线会话</h1>
       <p className="mb-5 text-sm text-muted">当前登录会话（10s 自动刷新），可强制踢出（借鉴 nezha 在线用户管理）</p>
+
+      <div className="mb-3 flex justify-end">
+        <button
+          onClick={() => sessions.length > 1 && confirm("踢出除当前会话外的全部会话？") && kickAll.mutate()}
+          disabled={sessions.length <= 1 || kickAll.isPending}
+          className="flex items-center gap-1.5 rounded border border-err/30 px-2.5 py-1.5 text-sm text-err hover:bg-err/10 disabled:cursor-not-allowed disabled:opacity-40"
+          title="踢出全部其他会话"
+        >
+          <ShieldOff className="h-4 w-4" />
+          全部踢出
+        </button>
+      </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-panel">
         <table className="w-full text-sm">

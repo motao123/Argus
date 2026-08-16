@@ -1,6 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -393,7 +396,8 @@ func (s *Server) serverExec(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
-	s.auditLog(c, "server.exec", req.Command)
+	cmdHash := sha256.Sum256([]byte(req.Command))
+	s.auditLog(c, "server.exec", fmt.Sprintf("sha256=%s length=%d", hex.EncodeToString(cmdHash[:]), len(req.Command)))
 	result, err := s.Agents.Exec(id, req.Command, req.Timeout)
 	if err != nil {
 		code := http.StatusBadGateway

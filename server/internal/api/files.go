@@ -163,6 +163,7 @@ func (s *Server) deleteFile(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"ok": true})
+	s.auditLog(c, "file.delete", req.Path)
 }
 
 // canAccessServer 校验身份能否访问该服务器（JWT 用户 owner 或 admin；PAT 白名单）。

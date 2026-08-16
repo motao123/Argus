@@ -14,7 +14,7 @@ export default function Security() {
   const [setupCode, setSetupCode] = useState("");
   const [disableCode, setDisableCode] = useState("");
   const [msg, setMsg] = useState("");
-  const [oauthForm, setOAuthForm] = useState<(Partial<OAuthConfig> & { name: string; client_secret?: string }) | null>(null);
+  const [oauthForm, setOAuthForm] = useState<(Partial<OAuthConfig> & { name: string; client_secret?: string; clear_client_secret?: boolean }) | null>(null);
 
   const twoFAEnabled = !!me?.two_fa_enabled;
 
@@ -49,7 +49,7 @@ export default function Security() {
     onError: (e) => setMsg((e as Error).message),
   });
   const saveProvider = useMutation({
-    mutationFn: (cfg: Partial<OAuthConfig> & { name: string; client_secret?: string }) => api.saveOAuthConfig(cfg),
+    mutationFn: (cfg: Partial<OAuthConfig> & { name: string; client_secret?: string; clear_client_secret?: boolean }) => api.saveOAuthConfig(cfg),
     onSuccess: () => {
       setOAuthForm(null);
       qc.invalidateQueries({ queryKey: ["oauth-configs"] });
@@ -142,7 +142,8 @@ export default function Security() {
           <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-border bg-panel p-4 md:grid-cols-2">
             <input aria-label="名称" placeholder="名称（github/gitee/custom）" value={oauthForm.name ?? ""} onChange={(e) => setOAuthForm({ ...oauthForm, name: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input aria-label="Client ID" placeholder="Client ID" value={oauthForm.client_id ?? ""} onChange={(e) => setOAuthForm({ ...oauthForm, client_id: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input aria-label="Client Secret" type="password" placeholder="Client Secret（留空保留原值）" value={oauthForm.client_secret ?? ""} onChange={(e) => setOAuthForm({ ...oauthForm, client_secret: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            <input aria-label="Client Secret" type="password" placeholder={oauthForm.client_secret_configured ? "Client Secret（已配置，留空保留）" : "Client Secret"} value={oauthForm.client_secret ?? ""} onChange={(e) => setOAuthForm({ ...oauthForm, client_secret: e.target.value, clear_client_secret: false })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            {oauthForm.client_secret_configured && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!oauthForm.clear_client_secret} onChange={(e) => setOAuthForm({ ...oauthForm, clear_client_secret: e.target.checked, client_secret: "" })} />清空已配置 Secret</label>}
             <input aria-label="Auth URL" placeholder="授权端点 URL" value={oauthForm.auth_url ?? ""} onChange={(e) => setOAuthForm({ ...oauthForm, auth_url: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input aria-label="Token URL" placeholder="Token 端点 URL" value={oauthForm.token_url ?? ""} onChange={(e) => setOAuthForm({ ...oauthForm, token_url: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input aria-label="UserInfo URL" placeholder="用户信息端点 URL" value={oauthForm.user_info_url ?? ""} onChange={(e) => setOAuthForm({ ...oauthForm, user_info_url: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
@@ -174,7 +175,7 @@ export default function Security() {
                   <td className="px-4 py-2.5 text-right">
                     <button
                       title="编辑"
-                      onClick={() => setOAuthForm({ id: p.id, name: p.name, client_id: p.client_id, auth_url: p.auth_url, token_url: p.token_url, user_info_url: p.user_info_url, username_field: p.username_field, admin_logins: p.admin_logins, enabled: p.enabled })}
+                      onClick={() => setOAuthForm({ id: p.id, name: p.name, client_id: p.client_id, client_secret: "", client_secret_configured: p.client_secret_configured, auth_url: p.auth_url, token_url: p.token_url, user_info_url: p.user_info_url, username_field: p.username_field, admin_logins: p.admin_logins, enabled: p.enabled })}
                       className="mr-1 rounded p-1.5 text-muted hover:bg-accent/10"
                     >
                       <KeyRound className="h-4 w-4" />

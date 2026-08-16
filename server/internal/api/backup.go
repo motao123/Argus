@@ -1,15 +1,20 @@
 package api
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -72,11 +77,75 @@ func fileHash(path string) (string, int64, error) {
 
 // restoreSession 分片上传会话（内存态，短生命周期）。
 type restoreSession struct {
-	path    string
-	written int64
+	path       string
+	written    int64
+	ready      bool
+	lastActive time.Time
+	mu         sync.Mutex
 }
 
-var restoreSessions = map[string]*restoreSession{}
+const restoreSessionTTL = 30 * time.Minute
+
+var restoreState = struct {
+	sync.Mutex
+	sessions  map[string]*restoreSession
+	restoring bool
+}{sessions: make(map[string]*restoreSession)}
+
+var safeRestoreID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+func newRestoreID() (string, error) {
+	var raw [18]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return "restore-" + base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+func cleanupRestoreSessions(now time.Time) {
+	for id, sess := range restoreState.sessions {
+		if now.Sub(sess.lastActive) <= restoreSessionTTL {
+			continue
+		}
+		_ = os.Remove(sess.path)
+		delete(restoreState.sessions, id)
+	}
+}
+
+func cleanupOrphanRestoreFiles(dir string, now time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	active := make(map[string]struct{}, len(restoreState.sessions))
+	for _, sess := range restoreState.sessions {
+		active[sess.path] = struct{}{}
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if _, ok := active[path]; ok {
+			continue
+		}
+		info, err := entry.Info()
+		if err == nil && now.Sub(info.ModTime()) > restoreSessionTTL {
+			_ = os.Remove(path)
+		}
+	}
+}
+
+func parseRestoreOffset(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	offset, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || offset < 0 {
+		return 0, fmt.Errorf("invalid offset")
+	}
+	return offset, nil
+}
 
 // backupRestore 分片恢复：staging 写入 + 分片顺序校验 + 最终完整性校验 + 原子切换。
 // 表单字段：upload_id（可选，续传）、offset、final、file
@@ -95,25 +164,64 @@ func (s *Server) backupRestore(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "file too large (max 512MB)")
 		return
 	}
-	uploadID := c.PostForm("upload_id")
-	offset := parseIntQuery64(c.PostForm("offset"))
+	uploadID := strings.TrimSpace(c.PostForm("upload_id"))
+	if uploadID != "" && !safeRestoreID.MatchString(uploadID) {
+		fail(c, http.StatusBadRequest, "invalid upload_id")
+		return
+	}
+	offset, err := parseRestoreOffset(c.PostForm("offset"))
+	if err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	final := c.PostForm("final") == "1"
+
+	restoreState.Lock()
+	cleanupRestoreSessions(time.Now())
+	if restoreState.restoring {
+		restoreState.Unlock()
+		fail(c, http.StatusConflict, "another restore is in progress")
+		return
+	}
+	restoreState.restoring = true
+	defer func() {
+		restoreState.restoring = false
+		restoreState.Unlock()
+	}()
 
 	dir := filepath.Join(filepath.Dir(s.Cfg.DBPath), "restore-staging")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	sess, found := restoreSessions[uploadID]
+	now := time.Now()
+	cleanupOrphanRestoreFiles(dir, now)
+	if uploadID == "" {
+		var err error
+		uploadID, err = newRestoreID()
+		if err != nil {
+			fail(c, http.StatusInternalServerError, "cannot generate upload_id")
+			return
+		}
+	}
+	sess, found := restoreState.sessions[uploadID]
 	if !found {
 		if offset != 0 {
 			fail(c, http.StatusBadRequest, "unknown upload_id for resume")
 			return
 		}
-		sess = &restoreSession{path: filepath.Join(dir, "restore-"+fmt.Sprintf("%d", time.Now().UnixNano())+".db")}
-		restoreSessions[uploadID] = sess
+		sess = &restoreSession{path: filepath.Join(dir, uploadID+".db"), lastActive: now}
+		restoreState.sessions[uploadID] = sess
 	}
+	if now.Sub(sess.lastActive) > restoreSessionTTL {
+		_ = os.Remove(sess.path)
+		delete(restoreState.sessions, uploadID)
+		fail(c, http.StatusBadRequest, "upload session expired")
+		return
+	}
+	sess.lastActive = now
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 	if sess.written != offset {
 		fail(c, http.StatusConflict, fmt.Sprintf("offset mismatch: expected %d got %d", sess.written, offset))
 		return
@@ -147,7 +255,7 @@ func (s *Server) backupRestore(c *gin.Context) {
 	// 最终校验：SQLite 头 + integrity_check + 总哈希
 	if err := validateSQLiteFile(sess.path); err != nil {
 		_ = os.Remove(sess.path)
-		delete(restoreSessions, uploadID)
+		delete(restoreState.sessions, uploadID)
 		fail(c, http.StatusBadRequest, "invalid database: "+err.Error())
 		return
 	}
@@ -156,7 +264,7 @@ func (s *Server) backupRestore(c *gin.Context) {
 		got, _, err := fileHash(sess.path)
 		if err != nil || got != totalHash {
 			_ = os.Remove(sess.path)
-			delete(restoreSessions, uploadID)
+			delete(restoreState.sessions, uploadID)
 			fail(c, http.StatusBadRequest, "total hash mismatch")
 			return
 		}
@@ -165,13 +273,13 @@ func (s *Server) backupRestore(c *gin.Context) {
 	// 原子切换：先备份当前库，再替换
 	if err := s.swapDatabase(sess.path); err != nil {
 		_ = os.Remove(sess.path)
-		delete(restoreSessions, uploadID)
+		delete(restoreState.sessions, uploadID)
 		fail(c, http.StatusInternalServerError, "swap failed: "+err.Error())
 		return
 	}
 	_ = os.Remove(sess.path)
-	delete(restoreSessions, uploadID)
-	ok(c, gin.H{"ok": true, "written": sess.written, "final": true, "note": "恢复完成，请重启服务生效"})
+	delete(restoreState.sessions, uploadID)
+	ok(c, gin.H{"ok": true, "written": sess.written, "final": true, "status": "restart_required", "restart_required": true, "note": "数据库文件已切换；当前进程不会自动重启，请通过进程管理器重启服务"})
 }
 
 // validateSQLiteFile 校验文件是合法 SQLite 库并可通过完整性检查。

@@ -243,6 +243,14 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// RevokedSession 持久化 JWT 吊销状态；会话记录删除后仍可在重启后拒绝旧令牌。
+type RevokedSession struct {
+	ID        int64     `gorm:"primaryKey" json:"-"`
+	JTI       string    `gorm:"size:64;not null;uniqueIndex" json:"-"`
+	ExpiresAt time.Time `gorm:"index" json:"-"`
+	CreatedAt time.Time `json:"-"`
+}
+
 // Setting 站点设置键值（借鉴 komari DB 存储配置）。
 type Setting struct {
 	Key   string `gorm:"primaryKey;size:64" json:"key"`

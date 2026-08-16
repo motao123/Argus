@@ -104,6 +104,27 @@ export interface Notification {
   chat_id: string;
 }
 
+export type NotificationUpdate = Partial<Notification> & {
+  clear_url?: boolean;
+  clear_headers?: boolean;
+  clear_body?: boolean;
+};
+
+export function notificationUpdatePayload(n: NotificationUpdate): NotificationUpdate {
+  const payload: NotificationUpdate = { id: n.id };
+  if (n.name !== undefined) payload.name = n.name;
+  if (n.type !== undefined) payload.type = n.type;
+  if (n.method !== undefined) payload.method = n.method;
+  if (n.chat_id !== undefined) payload.chat_id = n.chat_id;
+  if (n.clear_url) payload.clear_url = true;
+  else if (n.url && !n.url.endsWith("/***")) payload.url = n.url;
+  if (n.clear_headers) payload.clear_headers = true;
+  else if (n.headers) payload.headers = n.headers;
+  if (n.clear_body) payload.clear_body = true;
+  else if (n.body) payload.body = n.body;
+  return payload;
+}
+
 export interface Cron {
   id: number;
   name: string;
@@ -244,6 +265,7 @@ export interface OAuthConfig {
   username_field: string;
   admin_logins: string;
   enabled: boolean;
+  client_secret_configured?: boolean;
 }
 
 let token: string | null = localStorage.getItem("argus-token");
@@ -314,7 +336,7 @@ export const api = {
     request<{ ok: boolean }>("/api/v1/auth/2fa/disable", { method: "POST", body: JSON.stringify({ code }) }),
 
   oauthConfigs: () => request<{ providers: OAuthConfig[] }>("/api/v1/oauth/providers"),
-  saveOAuthConfig: (cfg: Partial<OAuthConfig> & { name: string; client_secret?: string }) =>
+  saveOAuthConfig: (cfg: Partial<OAuthConfig> & { name: string; client_secret?: string; clear_client_secret?: boolean }) =>
     request<{ ok: boolean }>("/api/v1/oauth/providers", { method: "POST", body: JSON.stringify(cfg) }),
   deleteOAuthConfig: (name: string) => request(`/api/v1/oauth/providers/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
@@ -376,9 +398,9 @@ export const api = {
   deleteAlert: (id: number) => request(`/api/v1/alerts/${id}`, { method: "DELETE" }),
 
   notifications: () => request<{ notifications: Notification[] }>("/api/v1/notifications"),
-  saveNotification: (n: Partial<Notification> & { id?: number }) =>
+  saveNotification: (n: NotificationUpdate) =>
     n.id
-      ? request<Notification>(`/api/v1/notifications/${n.id}`, { method: "PUT", body: JSON.stringify(n) })
+      ? request<Notification>(`/api/v1/notifications/${n.id}`, { method: "PUT", body: JSON.stringify(notificationUpdatePayload(n)) })
       : request<Notification>("/api/v1/notifications", { method: "POST", body: JSON.stringify(n) }),
   deleteNotification: (id: number) => request(`/api/v1/notifications/${id}`, { method: "DELETE" }),
   testMessage: (webhook_id: number, title?: string, content?: string) =>
@@ -445,6 +467,7 @@ export const api = {
     request(`/api/v1/settings`, { method: "POST", body: JSON.stringify({ settings }) }),
   sessions: () => request<{ sessions: Session[] }>("/api/v1/sessions"),
   kickSession: (id: number) => request(`/api/v1/sessions/${id}`, { method: "DELETE" }),
+  kickAllSessions: (userId?: number) => request(`/api/v1/sessions${userId ? `?user_id=${userId}` : ""}`, { method: "DELETE" }),
 
   ddns: () => request<{ profiles: DDNSProfile[] }>("/api/v1/ddns"),
   saveDDNS: async (p: Partial<DDNSProfile> & { id?: number; access_key?: string }): Promise<DDNSProfile | { ok: boolean }> =>
