@@ -143,3 +143,69 @@ func TestAuditLogsAdminOnly(t *testing.T) {
 		t.Fatalf("non-admin audit: got %d want 403", w2.Code)
 	}
 }
+
+func TestNotificationRedactionAndPartialUpdate(t *testing.T) {
+	e := newAuthzEnv(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	authed := r.Group("", e.srv.authMiddleware())
+	authed.GET("/notifications", e.srv.listNotifications)
+	authed.PUT("/notifications/:id", e.srv.updateNotification)
+	authed.POST("/notifications", e.srv.createNotification)
+
+	// 创建含凭据的通知
+	create := httptest.NewRequest(http.MethodPost, "/notifications", strings.NewReader(`{"name":"tg","type":"telegram","url":"https://api.telegram.org/bot123456:SECRET/sendMessage","headers":"{\"X\":\"abc\"}","body":"{\"chat_id\":\"42\"}"}`))
+	create.Header.Set("Authorization", "Bearer "+e.token(t, e.admin))
+	create.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, create)
+	var created struct {
+		Data struct{ ID int64 `json:"id"` } `json:"data"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &created)
+	id := created.Data.ID
+
+	// 列表读取：URL 脱敏、headers/body 不回显
+	listReq := httptest.NewRequest(http.MethodGet, "/notifications", nil)
+	listReq.Header.Set("Authorization", "Bearer "+e.token(t, e.admin))
+	wl := httptest.NewRecorder()
+	r.ServeHTTP(wl, listReq)
+	var listResp struct {
+		Data struct {
+			Notifications []notificationView `json:"notifications"`
+		} `json:"data"`
+	}
+	json.Unmarshal(wl.Body.Bytes(), &listResp)
+	var found *notificationView
+	for i := range listResp.Data.Notifications {
+		if listResp.Data.Notifications[i].ID == id {
+			found = &listResp.Data.Notifications[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("notification not in list")
+	}
+	if strings.Contains(found.URL, "SECRET") || found.Headers != "" || found.Body != "" {
+		t.Fatalf("secrets leaked in view: url=%q headers=%q body=%q", found.URL, found.Headers, found.Body)
+	}
+	if !strings.Contains(found.URL, "api.telegram.org") {
+		t.Fatalf("host should remain visible in masked url: %q", found.URL)
+	}
+
+	// 部分更新：只改名，不触碰 URL（URL 省略保留原值）
+	upd := httptest.NewRequest(http.MethodPut, "/notifications/"+itoa(id), strings.NewReader(`{"name":"tg-renamed"}`))
+	upd.Header.Set("Authorization", "Bearer "+e.token(t, e.admin))
+	upd.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, upd)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("partial update: got %d", w2.Code)
+	}
+	var n model.Notification
+	if err := e.srv.DB.First(&n, id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n.Name != "tg-renamed" || !strings.Contains(n.URL, "SECRET") {
+		t.Fatalf("partial update overwrote secrets: name=%q url=%q", n.Name, n.URL)
+	}
+}

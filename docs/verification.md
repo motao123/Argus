@@ -212,3 +212,12 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
 - 服务监控：卡片可展开「延迟趋势」折线图（serviceHistory 1d 分钟级 delay）
 - 清理过时注释；新增 TestAuditLogsAdminOnly
 - 浏览器验证：审计/通知中心/生命周期三页 + 各区块 + 延迟趋势入口全部通过
+
+## 十九、批次B：周期流量告警 + 通知字段脱敏（2026-08-16）
+
+- 告警引擎新增 traffic_in_cycle / traffic_out_cycle 指标：按当前自然月 Transfer 小时桶累计用量（字节）判定
+- 前端报警表单新增两项「本月入/出向流量」指标
+- 通知渠道脱敏：列表读取 URL 打码（保留协议+主机，隐藏路径/凭据）、headers/body 不回显；
+  更新改为部分更新（省略/空值保留原值，对齐 nezha 脱敏规范）
+- 端到端验证：URL 掩码、凭据不回显、部分更新保留原值、traffic 告警创建通过
+- 新增 TestNotificationRedactionAndPartialUpdate

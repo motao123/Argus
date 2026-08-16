@@ -12,6 +12,8 @@ const metrics = [
   { key: "load1", label: "负载 (1min)" },
   { key: "temperature", label: "温度 (°C)" },
   { key: "gpu", label: "GPU 使用率 (%)" },
+  { key: "traffic_in_cycle", label: "本月入向流量 (字节)" },
+  { key: "traffic_out_cycle", label: "本月出向流量 (字节)" },
   { key: "offline", label: "离线" },
 ];
 
@@ -54,7 +56,19 @@ export default function Alerts() {
   const deleteAlert = useMutation({ mutationFn: api.deleteAlert, onSuccess: invalidate });
 
   const saveN = useMutation({
-    mutationFn: (n: Partial<Notification>) => api.saveNotification(n),
+    mutationFn: async (n: Partial<Notification>) => {
+      // 编辑时仅提交实际改动字段：读取已脱敏（url 掩码/headers/body 空），
+      // 掩码 URL 与空凭据字段不回传，避免覆盖原值（对齐 nezha 脱敏规范）
+      const payload: Partial<Notification> = { id: n.id };
+      if (n.name) payload.name = n.name;
+      if (n.type) payload.type = n.type;
+      if (n.url && !n.url.endsWith("/***")) payload.url = n.url;
+      if (n.method) payload.method = n.method;
+      if (n.headers && n.headers !== "{}") payload.headers = n.headers;
+      if (n.body && n.body !== "{}") payload.body = n.body;
+      if (n.chat_id) payload.chat_id = n.chat_id;
+      return api.saveNotification(payload);
+    },
     onSuccess: () => {
       setNForm(null);
       invalidate();

@@ -186,9 +186,37 @@ func (e *Engine) metricValue(a *model.Alert, st store.State) (float64, bool) {
 		return st.Last.NetOutSpeed, true
 	case "load1":
 		return st.Last.Load1, true
+	case "traffic_in_cycle":
+		// 当前自然月入向流量（字节），借鉴 komari 周期流量告警
+		used, ok := e.cycleTraffic(st.Server.ID, true)
+		return float64(used), ok
+	case "traffic_out_cycle":
+		used, ok := e.cycleTraffic(st.Server.ID, false)
+		return float64(used), ok
 	default:
 		return 0, false
 	}
+}
+
+// cycleTraffic 当前自然月累计入/出流量（字节）。
+func (e *Engine) cycleTraffic(serverID int64, in bool) (uint64, bool) {
+	if e.db == nil {
+		return 0, false
+	}
+	now := time.Now()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Unix()
+	col := "`out`"
+	if in {
+		col = "`in`"
+	}
+	var sum struct{ V uint64 }
+	if err := e.db.Model(&model.Transfer{}).
+		Select("COALESCE(SUM(" + col + "),0) as v").
+		Where("server_id = ? AND ts >= ?", serverID, monthStart).
+		Scan(&sum).Error; err != nil {
+		return 0, false
+	}
+	return sum.V, true
 }
 
 // inRange 判定指标是否落在触发区间（低于下限或高于上限即触发）。
