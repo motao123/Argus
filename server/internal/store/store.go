@@ -122,19 +122,21 @@ func (h *Hub) Snapshot() map[int64]State {
 
 // bucket 单服务器一分钟内的聚合缓冲。
 type bucket struct {
-	serverID  int64
-	ts        int64 // 整分钟
-	count     int
-	cpuSum    float64
-	memUsed   uint64
-	memTotal  uint64
-	diskUsed  uint64
-	diskTotal uint64
-	netInSum  float64
-	netOutSum float64
-	load1Sum  float64
-	tempSum   float64
-	gpuSum    float64
+	serverID                                                               int64
+	ts                                                                     int64 // 整分钟
+	count                                                                  int
+	cpuSum                                                                 float64
+	memUsed                                                                uint64
+	memTotal                                                               uint64
+	diskUsed                                                               uint64
+	diskTotal                                                              uint64
+	netInSum                                                               float64
+	netOutSum                                                              float64
+	load1Sum                                                               float64
+	tempSum                                                                float64
+	gpuSum                                                                 float64
+	processSum, tcpEstablishedSum, tcpListenSum, udpSum                    float64
+	diskReadSpeedSum, diskWriteSpeedSum, diskReadIOPSSum, diskWriteIOPSSum float64
 }
 
 // MetricBatcher 聚合 Agent 上报为分钟级指标并批量落库。
@@ -187,6 +189,14 @@ func (m *MetricBatcher) Feed(serverID int64, r *protocol.ReportParams) {
 	b.load1Sum += r.Load1
 	b.tempSum += r.Temperature
 	b.gpuSum += r.GPUUtil
+	b.processSum += float64(r.ProcessCount)
+	b.tcpEstablishedSum += float64(r.TCPEstablished)
+	b.tcpListenSum += float64(r.TCPListen)
+	b.udpSum += float64(r.UDPCount)
+	b.diskReadSpeedSum += r.DiskReadSpeed
+	b.diskWriteSpeedSum += r.DiskWriteSpeed
+	b.diskReadIOPSSum += r.DiskReadIOPS
+	b.diskWriteIOPSSum += r.DiskWriteIOPS
 }
 
 // Run 每 60s flush 一次已完成的分钟桶。
@@ -212,19 +222,23 @@ func (b *bucket) toRow() *metricRow {
 		n = 1
 	}
 	return &metricRow{
-		ServerID:    b.serverID,
-		TS:          b.ts,
-		Granularity: 60,
-		CPU:         b.cpuSum / n,
-		MemUsed:     b.memUsed,
-		MemTotal:    b.memTotal,
-		DiskUsed:    b.diskUsed,
-		DiskTotal:   b.diskTotal,
-		NetInSpeed:  b.netInSum / n,
-		NetOutSpeed: b.netOutSum / n,
-		Load1:       b.load1Sum / n,
-		Temperature: b.tempSum / n,
-		GPUUtil:     b.gpuSum / n,
+		ServerID:     b.serverID,
+		TS:           b.ts,
+		Granularity:  60,
+		CPU:          b.cpuSum / n,
+		MemUsed:      b.memUsed,
+		MemTotal:     b.memTotal,
+		DiskUsed:     b.diskUsed,
+		DiskTotal:    b.diskTotal,
+		NetInSpeed:   b.netInSum / n,
+		NetOutSpeed:  b.netOutSum / n,
+		Load1:        b.load1Sum / n,
+		Temperature:  b.tempSum / n,
+		GPUUtil:      b.gpuSum / n,
+		ProcessCount: b.processSum / n, TCPEstablished: b.tcpEstablishedSum / n,
+		TCPListen: b.tcpListenSum / n, UDPCount: b.udpSum / n,
+		DiskReadSpeed: b.diskReadSpeedSum / n, DiskWriteSpeed: b.diskWriteSpeedSum / n,
+		DiskReadIOPS: b.diskReadIOPSSum / n, DiskWriteIOPS: b.diskWriteIOPSSum / n,
 	}
 }
 

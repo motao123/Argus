@@ -76,7 +76,13 @@ export default function Services() {
   const qc = useQueryClient();
   const { servers } = useServers();
   const { data } = useQuery({ queryKey: ["services"], queryFn: api.services, refetchInterval: 10000 });
+  const { data: notificationData } = useQuery({ queryKey: ["notifications"], queryFn: api.notifications });
+  const { data: groupData } = useQuery({ queryKey: ["notification-groups"], queryFn: api.notificationGroups });
+  const { data: cronData } = useQuery({ queryKey: ["crons"], queryFn: api.crons });
   const services = data?.services ?? [];
+  const notifications = notificationData?.notifications ?? [];
+  const notificationGroups = groupData?.groups ?? [];
+  const crons = cronData?.crons ?? [];
 
   const [form, setForm] = useState<Partial<ServiceItem> | null>(null);
   const [error, setError] = useState("");
@@ -109,7 +115,7 @@ export default function Services() {
           <p className="text-sm text-muted">HTTP / TCP / Ping 探测，由指定服务器上的 Agent 执行</p>
         </div>
         <button
-          onClick={() => setForm({ server_id: servers[0]?.id ?? 0, name: "", type: "http", target: "", interval: 60, enabled: true })}
+          onClick={() => setForm({ server_id: servers[0]?.id ?? 0, name: "", type: "http", target: "", interval: 60, enabled: true, hidden: false, notify: false, http_method: "GET", verify_tls: true, timeout: 10, expected_status_min: 200, expected_status_max: 399, ping_count: 4, cert_warn: true })}
           className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
@@ -143,7 +149,7 @@ export default function Services() {
             />
             <select
               value={form.type ?? "http"}
-              onChange={(e) => setForm({ ...form, type: e.target.value })}
+              onChange={(e) => setForm({ ...form, type: e.target.value as ServiceItem["type"] })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
               <option value="http">HTTP</option>
@@ -163,6 +169,23 @@ export default function Services() {
               onChange={(e) => setForm({ ...form, interval: Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
+            {form.type === "http" && <>
+              <select value={form.http_method ?? "GET"} onChange={(e) => setForm({ ...form, http_method: e.target.value as "GET" | "HEAD" })} className="rounded-lg border border-border bg-bg px-3 py-2"><option>GET</option><option>HEAD</option></select>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={form.verify_tls !== false} onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })} />验证 TLS</label>
+              <input type="number" title="期望状态下限" value={form.expected_status_min ?? 200} onChange={(e) => setForm({ ...form, expected_status_min: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
+              <input type="number" title="期望状态上限" value={form.expected_status_max ?? 399} onChange={(e) => setForm({ ...form, expected_status_max: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
+              <label className="flex items-center gap-2"><input type="checkbox" checked={form.cert_warn ?? true} onChange={(e) => setForm({ ...form, cert_warn: e.target.checked })} />证书告警</label>
+            </>}
+            {form.type === "ping" && <input type="number" title="Ping 包数" value={form.ping_count ?? 4} onChange={(e) => setForm({ ...form, ping_count: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />}
+            <input type="number" title="超时秒数" value={form.timeout ?? 10} onChange={(e) => setForm({ ...form, timeout: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.hidden ?? false} onChange={(e) => setForm({ ...form, hidden: e.target.checked })} />隐藏</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.notify ?? false} onChange={(e) => setForm({ ...form, notify: e.target.checked })} />通知</label>
+            <select value={form.notification_group_id ?? 0} onChange={(e) => setForm({ ...form, notification_group_id: Number(e.target.value), notify_webhook_id: 0 })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>通知组</option>{notificationGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
+            <select value={form.notify_webhook_id ?? 0} onChange={(e) => setForm({ ...form, notify_webhook_id: Number(e.target.value), notification_group_id: 0 })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>Webhook</option>{notifications.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}</select>
+            <select value={form.failure_trigger_cron_id ?? 0} onChange={(e) => setForm({ ...form, failure_trigger_cron_id: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>故障任务</option>{crons.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            <select value={form.recovery_trigger_cron_id ?? 0} onChange={(e) => setForm({ ...form, recovery_trigger_cron_id: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>恢复任务</option>{crons.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           </div>
           <div className="mt-3 flex gap-2">
             <button
@@ -185,7 +208,7 @@ export default function Services() {
             <button className="flex w-full items-center justify-between text-left" onClick={() => setExpanded(expanded === svc.id ? null : svc.id)}>
               <div className="flex items-center gap-3">
                 <span
-                  className={`h-2.5 w-2.5 rounded-full ${svc.last_up ? "bg-ok shadow-[0_0_6px] shadow-ok" : "bg-err"}`}
+                  className={`h-2.5 w-2.5 rounded-full ${svc.last_up === null ? "bg-muted" : svc.last_up ? "bg-ok shadow-[0_0_6px] shadow-ok" : "bg-err"}`}
                 />
                 <span className="font-medium">{svc.name}</span>
                 <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent">
@@ -197,10 +220,10 @@ export default function Services() {
               </div>
               <div className="flex items-center gap-3">
                 <span className="tabular text-sm text-muted">
-                  {svc.last_up ? "正常" : "异常"} · {svc.last_delay}ms
+                  {svc.last_up === null ? "未知" : svc.last_up ? "正常" : "异常"} · {svc.last_delay === null ? "—" : `${svc.last_delay}ms`}
                 </span>
-                <span className={`tabular rounded-full px-2 py-0.5 text-xs ${svc.today_up_rate >= 99 ? "bg-ok/15 text-ok" : svc.today_up_rate >= 90 ? "bg-warn/15 text-warn" : "bg-err/15 text-err"}`}>
-                  今日 {svc.today_up_rate.toFixed(1)}%
+                <span className={`tabular rounded-full px-2 py-0.5 text-xs ${(svc.today_up_rate ?? -1) >= 99 ? "bg-ok/15 text-ok" : (svc.today_up_rate ?? -1) >= 90 ? "bg-warn/15 text-warn" : svc.today_up_rate === null ? "bg-black/5 text-muted" : "bg-err/15 text-err"}`}>
+                  今日 {svc.today_up_rate === null ? "—" : `${svc.today_up_rate.toFixed(1)}%`}
                 </span>
                 <UptimeBlocks svcId={svc.id} />
                 <span className="text-xs text-muted">{expanded === svc.id ? "收起 ▲" : "延迟趋势 ▼"}</span>
@@ -217,7 +240,15 @@ export default function Services() {
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
-            {expanded === svc.id && <DelayTrend svcId={svc.id} name={svc.name} />}
+            {expanded === svc.id && <div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted sm:grid-cols-6">
+                <span>可用率 {svc.availability === null ? "—" : `${svc.availability}%`}</span>
+                <span>延迟 {svc.min_delay === null ? "—" : `${svc.min_delay}/${svc.avg_delay}/${svc.max_delay}ms`}</span>
+                <span>丢包 {svc.loss_rate === null ? "—" : `${svc.loss_rate}%`}</span>
+                <span>状态 {svc.status_code ?? "—"}</span><span>证书 {svc.cert_days === null ? "—" : `${svc.cert_days}天`}</span>
+                <span>阶段 DNS/连接/TLS/TTFB {([svc.dns_ms, svc.connect_ms, svc.tls_ms, svc.ttfb_ms].map(v => v === null ? "—" : `${v}ms`).join(" / "))}</span>
+              </div><DelayTrend svcId={svc.id} name={svc.name} />
+            </div>}
           </div>
         ))}
         {services.length === 0 && (

@@ -33,6 +33,18 @@ func (h *Handler) handleApplyConfig(params json.RawMessage) (any, *protocol.RPCE
 	if cfg.Capabilities != nil {
 		existing["capabilities"] = cfg.Capabilities
 	}
+	if cfg.InterfaceInclude != nil {
+		existing["interface_include"] = cfg.InterfaceInclude
+	}
+	if cfg.InterfaceExclude != nil {
+		existing["interface_exclude"] = cfg.InterfaceExclude
+	}
+	if cfg.MountInclude != nil {
+		existing["mount_include"] = cfg.MountInclude
+	}
+	if cfg.MountExclude != nil {
+		existing["mount_exclude"] = cfg.MountExclude
+	}
 	existing["pending_restart"] = true
 	data, _ := json.MarshalIndent(existing, "", "  ")
 	if err := os.WriteFile(ApplyConfigPath, data, 0600); err != nil {

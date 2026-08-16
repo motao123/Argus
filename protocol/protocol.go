@@ -5,7 +5,7 @@ package protocol
 import "encoding/json"
 
 // ProtocolVersion identifies the additive wire protocol version.
-const ProtocolVersion = "1"
+const ProtocolVersion = "2"
 
 // Stable capability names advertised during registration.
 const (
@@ -82,10 +82,14 @@ const (
 
 // AgentConfig 服务端下发的 Agent 运行配置（借鉴 nezha ApplyConfig）。
 type AgentConfig struct {
-	ServerURL    string        `json:"server_url,omitempty"` // WS 地址
-	Interval     int           `json:"interval,omitempty"`   // 上报间隔（秒）
-	Secret       string        `json:"secret,omitempty"`     // 新密钥
-	Capabilities *Capabilities `json:"capabilities,omitempty"`
+	ServerURL        string        `json:"server_url,omitempty"` // WS 地址
+	Interval         int           `json:"interval,omitempty"`   // 上报间隔（秒）
+	Secret           string        `json:"secret,omitempty"`     // 新密钥
+	Capabilities     *Capabilities `json:"capabilities,omitempty"`
+	InterfaceInclude []string      `json:"interface_include,omitempty"`
+	InterfaceExclude []string      `json:"interface_exclude,omitempty"`
+	MountInclude     []string      `json:"mount_include,omitempty"`
+	MountExclude     []string      `json:"mount_exclude,omitempty"`
 }
 
 // Capabilities controls optional Agent features.
@@ -113,38 +117,77 @@ type HostInfo struct {
 	Hostname        string `json:"hostname"`
 	Platform        string `json:"platform"`
 	PlatformVersion string `json:"platform_version"`
+	OS              string `json:"os,omitempty"`
+	Arch            string `json:"arch,omitempty"`
+	KernelVersion   string `json:"kernel_version,omitempty"`
 	CPUModel        string `json:"cpu_model"`
 	CPUCores        int    `json:"cpu_cores"`
 	MemTotal        uint64 `json:"mem_total"`
 	AgentVersion    string `json:"agent_version"`
-	IP              string `json:"ip"`
+	IP              string `json:"ip"` // 旧客户端/服务端兼容的主 IPv4
+	IPv4            string `json:"ipv4,omitempty"`
+	IPv6            string `json:"ipv6,omitempty"`
 	CountryCode     string `json:"country_code"`
+}
+
+// Availability distinguishes a valid zero value from an unsupported or failed collector.
+type Availability struct {
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// GPUDevice is a bounded per-device summary; it intentionally contains no process data.
+type GPUDevice struct {
+	Index    int     `json:"index"`
+	Name     string  `json:"name"`
+	Util     float64 `json:"util"`
+	MemUsed  uint64  `json:"mem_used"`
+	MemTotal uint64  `json:"mem_total"`
+}
+
+// GPUReport represents multi-GPU data and explicit platform/collector availability.
+type GPUReport struct {
+	Availability
+	Devices []GPUDevice `json:"devices,omitempty"`
 }
 
 // ReportParams 周期状态上报（默认 2s 一次）。
 type ReportParams struct {
-	Host           HostInfo `json:"host,omitempty"` // 仅在变更/首报时填充
-	CPU            float64  `json:"cpu"`
-	MemUsed        uint64   `json:"mem_used"`
-	MemTotal       uint64   `json:"mem_total"`
-	SwapUsed       uint64   `json:"swap_used"`
-	SwapTotal      uint64   `json:"swap_total"`
-	DiskUsed       uint64   `json:"disk_used"`
-	DiskTotal      uint64   `json:"disk_total"`
-	NetInTransfer  uint64   `json:"net_in_transfer"`
-	NetOutTransfer uint64   `json:"net_out_transfer"`
-	NetInSpeed     float64  `json:"net_in_speed"`
-	NetOutSpeed    float64  `json:"net_out_speed"`
-	Load1          float64  `json:"load1"`
-	Load5          float64  `json:"load5"`
-	Load15         float64  `json:"load15"`
-	TCPCount       int      `json:"tcp_count"`
-	Uptime         uint64   `json:"uptime"`
-	Temperature    float64  `json:"temperature"` // CPU 温度（摄氏度）
-	GPUUtil        float64  `json:"gpu_util"`    // GPU 利用率（%）
-	GPUMemUsed     uint64   `json:"gpu_mem_used"`
-	GPUMemTotal    uint64   `json:"gpu_mem_total"`
-	Timestamp      int64    `json:"ts"`
+	Host                    HostInfo     `json:"host,omitempty"` // 仅在变更/首报时填充
+	CPU                     float64      `json:"cpu"`
+	MemUsed                 uint64       `json:"mem_used"`
+	MemTotal                uint64       `json:"mem_total"`
+	SwapUsed                uint64       `json:"swap_used"`
+	SwapTotal               uint64       `json:"swap_total"`
+	DiskUsed                uint64       `json:"disk_used"`
+	DiskTotal               uint64       `json:"disk_total"`
+	NetInTransfer           uint64       `json:"net_in_transfer"`
+	NetOutTransfer          uint64       `json:"net_out_transfer"`
+	NetInSpeed              float64      `json:"net_in_speed"`
+	NetOutSpeed             float64      `json:"net_out_speed"`
+	Load1                   float64      `json:"load1"`
+	Load5                   float64      `json:"load5"`
+	Load15                  float64      `json:"load15"`
+	TCPCount                int          `json:"tcp_count"` // legacy: all TCP sockets
+	ProcessCount            int          `json:"process_count,omitempty"`
+	TCPEstablished          int          `json:"tcp_established,omitempty"`
+	TCPListen               int          `json:"tcp_listen,omitempty"`
+	UDPCount                int          `json:"udp_count,omitempty"`
+	DiskReadSpeed           float64      `json:"disk_read_speed,omitempty"`
+	DiskWriteSpeed          float64      `json:"disk_write_speed,omitempty"`
+	DiskReadIOPS            float64      `json:"disk_read_iops,omitempty"`
+	DiskWriteIOPS           float64      `json:"disk_write_iops,omitempty"`
+	Uptime                  uint64       `json:"uptime"`
+	Temperature             float64      `json:"temperature"` // CPU 温度（摄氏度）
+	GPUUtil                 float64      `json:"gpu_util"`    // 旧协议兼容：多卡平均利用率
+	GPUMemUsed              uint64       `json:"gpu_mem_used"`
+	GPUMemTotal             uint64       `json:"gpu_mem_total"`
+	ProcessAvailability     Availability `json:"process_availability,omitempty"`
+	SocketAvailability      Availability `json:"socket_availability,omitempty"`
+	DiskIOAvailability      Availability `json:"disk_io_availability,omitempty"`
+	TemperatureAvailability Availability `json:"temperature_availability,omitempty"`
+	GPU                     GPUReport    `json:"gpu,omitempty"`
+	Timestamp               int64        `json:"ts"`
 }
 
 // RegisterParams 注册参数。Secret 为空表示首次注册，由服务端生成。
@@ -204,16 +247,34 @@ type TerminalResize struct {
 
 // ServiceCheckParams 服务探测参数（server → agent）。
 type ServiceCheckParams struct {
-	Type    string `json:"type"`    // http / tcp / ping
-	Target  string `json:"target"`  // URL / host:port / host
-	Timeout int    `json:"timeout"` // 秒
+	Type              string `json:"type"`
+	Target            string `json:"target"`
+	Timeout           int    `json:"timeout"`
+	Method            string `json:"method,omitempty"`
+	VerifyTLS         *bool  `json:"verify_tls,omitempty"`
+	ExpectedStatusMin int    `json:"expected_status_min,omitempty"`
+	ExpectedStatusMax int    `json:"expected_status_max,omitempty"`
+	MaxRedirects      int    `json:"max_redirects,omitempty"`
+	PingCount         int    `json:"ping_count,omitempty"`
 }
 
-// ServiceCheckResult 服务探测结果（agent → server）。
+// ServiceCheckResult 服务探测结果（agent → server）。新增字段可被旧 server 安全忽略。
 type ServiceCheckResult struct {
-	Up      bool   `json:"up"`
-	DelayMs int    `json:"delay_ms"`
-	Error   string `json:"error,omitempty"`
+	Up                     bool    `json:"up"`
+	DelayMs                int     `json:"delay_ms"`
+	Error                  string  `json:"error,omitempty"`
+	StatusCode             int     `json:"status_code,omitempty"`
+	DNSMs                  int     `json:"dns_ms,omitempty"`
+	ConnectMs              int     `json:"connect_ms,omitempty"`
+	TLSMs                  int     `json:"tls_ms,omitempty"`
+	TTFBMs                 int     `json:"ttfb_ms,omitempty"`
+	TLSVerificationSkipped bool    `json:"tls_verification_skipped,omitempty"`
+	CertIssuer             string  `json:"cert_issuer,omitempty"`
+	CertNotAfter           int64   `json:"cert_not_after,omitempty"`
+	CertDaysRemaining      int     `json:"cert_days_remaining,omitempty"`
+	Sent                   int     `json:"sent,omitempty"`
+	Received               int     `json:"received,omitempty"`
+	LossPercent            float64 `json:"loss_percent,omitempty"`
 }
 
 // ---- 文件管理 ----

@@ -4,12 +4,21 @@ export interface HostInfo {
   hostname: string;
   platform: string;
   platform_version: string;
+  os: string;
+  arch: string;
+  kernel_version: string;
   cpu_model: string;
   cpu_cores: number;
   agent_version: string;
   ip: string;
+  ipv4: string;
+  ipv6: string;
   country_code: string;
 }
+
+export interface Availability { available: boolean; reason?: string }
+export interface GPUDevice { index: number; name: string; util: number; mem_used: number; mem_total: number }
+export interface GPUReport extends Availability { devices?: GPUDevice[] }
 
 export interface Server {
   id: number;
@@ -27,6 +36,19 @@ export interface Server {
   load1: number;
   temperature: number;
   gpu_util: number;
+  gpu: GPUReport;
+  process_count: number;
+  tcp_established: number;
+  tcp_listen: number;
+  udp_count: number;
+  disk_read_speed: number;
+  disk_write_speed: number;
+  disk_read_iops: number;
+  disk_write_iops: number;
+  disk_io_availability: Availability;
+  socket_availability: Availability;
+  process_availability: Availability;
+  temperature_availability: Availability;
   uptime: number;
   online: boolean;
   last_seen: string;
@@ -138,15 +160,41 @@ export interface Cron {
 
 export interface ServiceItem {
   id: number;
+  owner_id: number;
   server_id: number;
   name: string;
-  type: string;
+  type: "http" | "tcp" | "ping";
   target: string;
   interval: number;
   enabled: boolean;
-  last_up: boolean;
-  last_delay: number;
-  today_up_rate: number;
+  hidden: boolean;
+  notify: boolean;
+  notify_webhook_id: number;
+  notification_group_id: number;
+  http_method: "GET" | "HEAD";
+  verify_tls: boolean | null;
+  timeout: number;
+  expected_status_min: number;
+  expected_status_max: number;
+  ping_count: number;
+  cert_warn: boolean;
+  failure_trigger_cron_id: number;
+  recovery_trigger_cron_id: number;
+  last_up: boolean | null;
+  last_delay: number | null;
+  last_check_at: number;
+  today_up_rate: number | null;
+  availability: number | null;
+  min_delay: number | null;
+  avg_delay: number | null;
+  max_delay: number | null;
+  loss_rate: number | null;
+  status_code: number | null;
+  cert_days: number | null;
+  dns_ms: number | null;
+  connect_ms: number | null;
+  tls_ms: number | null;
+  ttfb_ms: number | null;
 }
 
 export interface ServiceHistoryPoint {
@@ -224,6 +272,14 @@ export interface MetricPoint {
   mem_total: number;
   disk_used: number;
   disk_total: number;
+  process_count: number;
+  tcp_established: number;
+  tcp_listen: number;
+  udp_count: number;
+  disk_read_speed: number;
+  disk_write_speed: number;
+  disk_read_iops: number;
+  disk_write_iops: number;
 }
 
 export interface Me {

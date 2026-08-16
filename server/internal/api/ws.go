@@ -88,6 +88,19 @@ func (s *Server) dashboardWS(c *gin.Context) {
 				v.Load1 = st.Last.Load1
 				v.Temperature = st.Last.Temperature
 				v.GPUUtil = st.Last.GPUUtil
+				v.GPU = st.Last.GPU
+				v.ProcessCount = st.Last.ProcessCount
+				v.TCPEstablished = st.Last.TCPEstablished
+				v.TCPListen = st.Last.TCPListen
+				v.UDPCount = st.Last.UDPCount
+				v.DiskReadSpeed = st.Last.DiskReadSpeed
+				v.DiskWriteSpeed = st.Last.DiskWriteSpeed
+				v.DiskReadIOPS = st.Last.DiskReadIOPS
+				v.DiskWriteIOPS = st.Last.DiskWriteIOPS
+				v.DiskIOAvailability = st.Last.DiskIOAvailability
+				v.SocketAvailability = st.Last.SocketAvailability
+				v.ProcessAvailability = st.Last.ProcessAvailability
+				v.TemperatureAvailability = st.Last.TemperatureAvailability
 				v.Uptime = st.Last.Uptime
 				v.Online = st.Online
 				v.LastSeen = st.LastSeen
@@ -100,11 +113,13 @@ func (s *Server) dashboardWS(c *gin.Context) {
 						Hostname:        st.Host.Hostname,
 						Platform:        st.Host.Platform,
 						PlatformVersion: st.Host.PlatformVersion,
-						CPUModel:        st.Host.CPUModel,
-						CPUCores:        st.Host.CPUCores,
-						AgentVersion:    st.Host.AgentVersion,
-						IP:              st.Host.IP,
-						CountryCode:     country,
+						OS:              st.Host.OS, Arch: st.Host.Arch, KernelVersion: st.Host.KernelVersion,
+						CPUModel:     st.Host.CPUModel,
+						CPUCores:     st.Host.CPUCores,
+						AgentVersion: st.Host.AgentVersion,
+						IP:           st.Host.IP,
+						IPv4:         st.Host.IPv4, IPv6: st.Host.IPv6,
+						CountryCode: country,
 					}
 				}
 				out = append(out, v)

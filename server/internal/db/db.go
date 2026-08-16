@@ -98,6 +98,12 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		if err := gdb.Model(&model.Cron{}).Where("owner_id = 0 OR owner_id IS NULL").Update("owner_id", admin.ID).Error; err != nil {
 			return nil, fmt.Errorf("backfill cron owners: %w", err)
 		}
+		if err := gdb.Model(&model.Notification{}).Where("owner_id = 0 OR owner_id IS NULL").Update("owner_id", admin.ID).Error; err != nil {
+			return nil, fmt.Errorf("backfill notification owners: %w", err)
+		}
+		if err := gdb.Model(&model.NotificationGroup{}).Where("owner_id = 0 OR owner_id IS NULL").Update("owner_id", admin.ID).Error; err != nil {
+			return nil, fmt.Errorf("backfill notification group owners: %w", err)
+		}
 	}
 	return gdb, nil
 }

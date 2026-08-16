@@ -13,10 +13,21 @@ import (
 // serviceView 服务监控视图：配置 + 最近状态 + 今日可用率。
 type serviceView struct {
 	model.Service
-	LastUp      bool    `json:"last_up"`
-	LastDelay   int     `json:"last_delay"`
-	LastCheckAt int64   `json:"last_check_at"`
-	TodayUpRate float64 `json:"today_up_rate"` // 0-100
+	LastUp       *bool    `json:"last_up"`
+	LastDelay    *int     `json:"last_delay"`
+	LastCheckAt  int64    `json:"last_check_at"`
+	TodayUpRate  *float64 `json:"today_up_rate"`
+	Availability *float64 `json:"availability"`
+	MinDelay     *int     `json:"min_delay"`
+	AvgDelay     *int     `json:"avg_delay"`
+	MaxDelay     *int     `json:"max_delay"`
+	LossRate     *float64 `json:"loss_rate"`
+	StatusCode   *int     `json:"status_code"`
+	CertDays     *int     `json:"cert_days"`
+	DNSMs        *int     `json:"dns_ms"`
+	ConnectMs    *int     `json:"connect_ms"`
+	TLSMs        *int     `json:"tls_ms"`
+	TTFBMs       *int     `json:"ttfb_ms"`
 }
 
 // listServices 服务监控列表。
@@ -58,9 +69,14 @@ func (s *Server) listServices(c *gin.Context) {
 		// 最近一条
 		var last model.ServiceHistory
 		if err := s.DB.Where("service_id = ?", services[i].ID).Order("ts DESC, id DESC").First(&last).Error; err == nil {
-			v.LastUp = last.UpCount > 0
-			v.LastDelay = int(last.DelaySum / max64(1, int64(last.Total)))
-			v.LastCheckAt = last.Ts
+			up := last.UpCount > 0
+			delay := int(last.DelaySum / max64(1, int64(last.Total)))
+			v.LastUp, v.LastDelay, v.LastCheckAt = &up, &delay, last.Ts
+			if last.StatusCode > 0 {
+				v.StatusCode = &last.StatusCode
+			}
+			v.CertDays = last.CertDays
+			v.DNSMs, v.ConnectMs, v.TLSMs, v.TTFBMs = optionalDuration(last.DNSMs), optionalDuration(last.ConnectMs), optionalDuration(last.TLSMs), optionalDuration(last.TTFBMs)
 		}
 		// 今日可用率
 		var agg struct{ Up, Total int64 }
@@ -69,11 +85,36 @@ func (s *Server) listServices(c *gin.Context) {
 			Where("service_id = ? AND ts >= ?", services[i].ID, todayStart).
 			Scan(&agg)
 		if agg.Total > 0 {
-			v.TodayUpRate = float64(agg.Up) / float64(agg.Total) * 100
+			rate := math.Round(float64(agg.Up)/float64(agg.Total)*1000) / 10
+			v.TodayUpRate = &rate
+		}
+		var stats struct {
+			Up, Total, Sent, Received, DelaySum int64
+			MinDelay, MaxDelay                  int
+		}
+		s.DB.Model(&model.ServiceHistory{}).
+			Select("COALESCE(SUM(up_count),0) up, COALESCE(SUM(total),0) total, COALESCE(SUM(sent),0) sent, COALESCE(SUM(received),0) received, COALESCE(SUM(delay_sum),0) delay_sum, COALESCE(MIN(CASE WHEN total > 0 THEN delay_min END),0) min_delay, COALESCE(MAX(delay_max),0) max_delay").
+			Where("service_id = ? AND ts >= ?", services[i].ID, time.Now().Add(-24*time.Hour).Unix()).Scan(&stats)
+		if stats.Total > 0 {
+			availability := round2(float64(stats.Up) / float64(stats.Total) * 100)
+			avg := int(stats.DelaySum / stats.Total)
+			v.Availability, v.MinDelay, v.AvgDelay, v.MaxDelay = &availability, &stats.MinDelay, &avg, &stats.MaxDelay
+			loss := 100 - availability
+			if stats.Sent > 0 {
+				loss = round2(float64(stats.Sent-stats.Received) / float64(stats.Sent) * 100)
+			}
+			v.LossRate = &loss
 		}
 		out = append(out, v)
 	}
 	okPage(c, gin.H{"services": out}, total, offset, limit)
+}
+
+func optionalDuration(v int) *int {
+	if v <= 0 {
+		return nil
+	}
+	return &v
 }
 
 func max64(a, b int64) int64 {
@@ -86,13 +127,25 @@ func max64(a, b int64) int64 {
 func (s *Server) createService(c *gin.Context) {
 	p := principalFromContext(c)
 	var req struct {
-		ServerID        int64  `json:"server_id"`
-		Name            string `json:"name"`
-		Type            string `json:"type"`
-		Target          string `json:"target"`
-		Interval        int    `json:"interval"`
-		Notify          bool   `json:"notify"`
-		NotifyWebhookID int64  `json:"notify_webhook_id"`
+		ServerID              int64  `json:"server_id"`
+		Name                  string `json:"name"`
+		Type                  string `json:"type"`
+		Target                string `json:"target"`
+		Interval              int    `json:"interval"`
+		Notify                bool   `json:"notify"`
+		NotifyWebhookID       int64  `json:"notify_webhook_id"`
+		NotificationGroupID   int64  `json:"notification_group_id"`
+		HTTPMethod            string `json:"http_method"`
+		VerifyTLS             *bool  `json:"verify_tls"`
+		Timeout               int    `json:"timeout"`
+		ExpectedStatusMin     int    `json:"expected_status_min"`
+		ExpectedStatusMax     int    `json:"expected_status_max"`
+		MaxRedirects          int    `json:"max_redirects"`
+		PingCount             int    `json:"ping_count"`
+		CertWarn              bool   `json:"cert_warn"`
+		Hidden                bool   `json:"hidden"`
+		FailureTriggerCronID  int64  `json:"failure_trigger_cron_id"`
+		RecoveryTriggerCronID int64  `json:"recovery_trigger_cron_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -111,16 +164,65 @@ func (s *Server) createService(c *gin.Context) {
 	default:
 		req.Type = "http"
 	}
+	if req.HTTPMethod == "" {
+		req.HTTPMethod = "GET"
+	}
+	if req.HTTPMethod != "GET" && req.HTTPMethod != "HEAD" {
+		fail(c, http.StatusBadRequest, "http_method must be GET or HEAD")
+		return
+	}
+	if req.Timeout <= 0 {
+		req.Timeout = 10
+	}
+	if req.ExpectedStatusMin == 0 {
+		req.ExpectedStatusMin = 200
+	}
+	if req.ExpectedStatusMax == 0 {
+		req.ExpectedStatusMax = 399
+	}
+	if req.ExpectedStatusMin < 100 || req.ExpectedStatusMax > 599 || req.ExpectedStatusMin > req.ExpectedStatusMax {
+		fail(c, http.StatusBadRequest, "invalid expected status range")
+		return
+	}
+	if req.MaxRedirects <= 0 {
+		req.MaxRedirects = 3
+	}
+	if req.MaxRedirects > 10 {
+		fail(c, http.StatusBadRequest, "max_redirects must be at most 10")
+		return
+	}
+	if req.PingCount <= 0 {
+		req.PingCount = 3
+	}
+	if req.PingCount > 10 {
+		fail(c, http.StatusBadRequest, "ping_count must be at most 10")
+		return
+	}
+	verifyTLS := true
+	if req.VerifyTLS != nil {
+		verifyTLS = *req.VerifyTLS
+	}
 	svc := model.Service{
-		OwnerID:         p.UserID,
-		ServerID:        req.ServerID,
-		Name:            req.Name,
-		Type:            req.Type,
-		Target:          req.Target,
-		Interval:        req.Interval,
-		Enabled:         true,
-		Notify:          req.Notify,
-		NotifyWebhookID: req.NotifyWebhookID,
+		OwnerID:               p.UserID,
+		ServerID:              req.ServerID,
+		Name:                  req.Name,
+		Type:                  req.Type,
+		Target:                req.Target,
+		Interval:              req.Interval,
+		Enabled:               true,
+		Hidden:                req.Hidden,
+		Notify:                req.Notify,
+		NotifyWebhookID:       req.NotifyWebhookID,
+		NotificationGroupID:   req.NotificationGroupID,
+		HTTPMethod:            req.HTTPMethod,
+		VerifyTLS:             &verifyTLS,
+		Timeout:               req.Timeout,
+		ExpectedStatusMin:     req.ExpectedStatusMin,
+		ExpectedStatusMax:     req.ExpectedStatusMax,
+		PingCount:             req.PingCount,
+		CertWarn:              req.CertWarn,
+		FailureTriggerCronID:  req.FailureTriggerCronID,
+		RecoveryTriggerCronID: req.RecoveryTriggerCronID,
 	}
 	if err := s.DB.Create(&svc).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
@@ -141,15 +243,26 @@ func (s *Server) updateService(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ServerID        *int64  `json:"server_id"`
-		Name            *string `json:"name"`
-		Type            *string `json:"type"`
-		Target          *string `json:"target"`
-		Interval        *int    `json:"interval"`
-		Enabled         *bool   `json:"enabled"`
-		Hidden          *bool   `json:"hidden"`
-		Notify          *bool   `json:"notify"`
-		NotifyWebhookID *int64  `json:"notify_webhook_id"`
+		ServerID              *int64  `json:"server_id"`
+		Name                  *string `json:"name"`
+		Type                  *string `json:"type"`
+		Target                *string `json:"target"`
+		Interval              *int    `json:"interval"`
+		Timeout               *int    `json:"timeout"`
+		HTTPMethod            *string `json:"http_method"`
+		VerifyTLS             *bool   `json:"verify_tls"`
+		ExpectedStatusMin     *int    `json:"expected_status_min"`
+		ExpectedStatusMax     *int    `json:"expected_status_max"`
+		MaxRedirects          *int    `json:"max_redirects"`
+		PingCount             *int    `json:"ping_count"`
+		Enabled               *bool   `json:"enabled"`
+		Hidden                *bool   `json:"hidden"`
+		Notify                *bool   `json:"notify"`
+		NotifyWebhookID       *int64  `json:"notify_webhook_id"`
+		NotificationGroupID   *int64  `json:"notification_group_id"`
+		CertWarn              *bool   `json:"cert_warn"`
+		FailureTriggerCronID  *int64  `json:"failure_trigger_cron_id"`
+		RecoveryTriggerCronID *int64  `json:"recovery_trigger_cron_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -177,6 +290,31 @@ func (s *Server) updateService(c *gin.Context) {
 	if req.Interval != nil {
 		updates["interval"] = *req.Interval
 	}
+	if req.Timeout != nil {
+		updates["timeout"] = *req.Timeout
+	}
+	if req.HTTPMethod != nil {
+		if *req.HTTPMethod != "GET" && *req.HTTPMethod != "HEAD" {
+			fail(c, http.StatusBadRequest, "http_method must be GET or HEAD")
+			return
+		}
+		updates["http_method"] = *req.HTTPMethod
+	}
+	if req.VerifyTLS != nil {
+		updates["verify_tls"] = *req.VerifyTLS
+	}
+	if req.ExpectedStatusMin != nil {
+		updates["expected_status_min"] = *req.ExpectedStatusMin
+	}
+	if req.ExpectedStatusMax != nil {
+		updates["expected_status_max"] = *req.ExpectedStatusMax
+	}
+	if req.MaxRedirects != nil {
+		updates["max_redirects"] = *req.MaxRedirects
+	}
+	if req.PingCount != nil {
+		updates["ping_count"] = *req.PingCount
+	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
 	}
@@ -188,6 +326,50 @@ func (s *Server) updateService(c *gin.Context) {
 	}
 	if req.NotifyWebhookID != nil {
 		updates["notify_webhook_id"] = *req.NotifyWebhookID
+	}
+	for key, value := range map[string]any{
+		"notification_group_id": req.NotificationGroupID, "http_method": req.HTTPMethod,
+		"verify_tls": req.VerifyTLS, "timeout": req.Timeout, "expected_status_min": req.ExpectedStatusMin,
+		"expected_status_max": req.ExpectedStatusMax, "ping_count": req.PingCount, "cert_warn": req.CertWarn,
+		"failure_trigger_cron_id": req.FailureTriggerCronID, "recovery_trigger_cron_id": req.RecoveryTriggerCronID,
+	} {
+		switch v := value.(type) {
+		case *int64:
+			if v != nil {
+				updates[key] = *v
+			}
+		case *int:
+			if v != nil {
+				updates[key] = *v
+			}
+		case *string:
+			if v != nil {
+				updates[key] = *v
+			}
+		case *bool:
+			if v != nil {
+				updates[key] = *v
+			}
+		}
+	}
+	minStatus, maxStatus := svc.ExpectedStatusMin, svc.ExpectedStatusMax
+	if req.ExpectedStatusMin != nil {
+		minStatus = *req.ExpectedStatusMin
+	}
+	if req.ExpectedStatusMax != nil {
+		maxStatus = *req.ExpectedStatusMax
+	}
+	if minStatus < 100 || maxStatus > 599 || minStatus > maxStatus {
+		fail(c, http.StatusBadRequest, "invalid expected status range")
+		return
+	}
+	if req.MaxRedirects != nil && (*req.MaxRedirects < 0 || *req.MaxRedirects > 10) {
+		fail(c, http.StatusBadRequest, "max_redirects must be 0-10")
+		return
+	}
+	if req.PingCount != nil && (*req.PingCount < 1 || *req.PingCount > 10) {
+		fail(c, http.StatusBadRequest, "ping_count must be 1-10")
+		return
 	}
 	if err := s.DB.Model(&svc).Updates(updates).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
@@ -310,13 +492,16 @@ func (s *Server) serviceStats(c *gin.Context) {
 	}
 	from := time.Now().Add(-24 * time.Hour).Unix()
 	var agg struct {
-		Up, Total int64
-		DelaySum  int64
-		MaxDelay  int64
+		Up, Total                    int64
+		DelaySum, MinDelay, MaxDelay int64
+		Sent, Received               int64
+		CertDaysMin                  *int
 	}
 	s.DB.Model(&model.ServiceHistory{}).
 		Select(`COALESCE(SUM(up_count),0) as up, COALESCE(SUM(total),0) as total,
-		        COALESCE(SUM(delay_sum),0) as delay_sum, COALESCE(MAX(delay_sum/total),0) as max_delay`).
+		        COALESCE(SUM(delay_sum),0) as delay_sum, COALESCE(MIN(delay_min),0) as min_delay,
+		        COALESCE(MAX(delay_max),0) as max_delay, COALESCE(SUM(sent),0) as sent,
+		        COALESCE(SUM(received),0) as received, MIN(cert_days) as cert_days_min`).
 		Where("service_id = ? AND ts >= ?", id, from).
 		Scan(&agg)
 	upRate := 0.0
@@ -324,15 +509,17 @@ func (s *Server) serviceStats(c *gin.Context) {
 	avgDelay := 0
 	if agg.Total > 0 {
 		upRate = float64(agg.Up) / float64(agg.Total) * 100
-		lossRate = 100 - upRate
 		avgDelay = int(agg.DelaySum / agg.Total)
 	}
+	if agg.Sent > 0 {
+		lossRate = float64(agg.Sent-agg.Received) / float64(agg.Sent) * 100
+	}
 	ok(c, gin.H{
-		"up_rate":      round2(upRate),
-		"loss_rate":    round2(lossRate),
-		"avg_delay":    avgDelay,
-		"max_delay":    int(agg.MaxDelay),
-		"total_probes": agg.Total,
+		"up_rate":   round2(upRate),
+		"loss_rate": round2(lossRate),
+		"min_delay": int(agg.MinDelay), "avg_delay": avgDelay, "max_delay": int(agg.MaxDelay),
+		"total_probes": agg.Total, "sent": agg.Sent, "received": agg.Received,
+		"failures": agg.Sent - agg.Received, "cert_days_min": agg.CertDaysMin,
 	})
 }
 

@@ -136,18 +136,51 @@ func main() {
 
 	// 服务监控哨兵
 	svcSentinel := sentinel.New(gdb)
-	svcSentinel.NotifyCb = func(svc *model.Service, up bool) {
-		var n model.Notification
-		if err := gdb.First(&n, svc.NotifyWebhookID).Error; err != nil {
+	svcSentinel.NotifyCb = func(svc *model.Service, kind, detail string) {
+		title := fmt.Sprintf("[Argus] 服务事件 %s", svc.Name)
+		content := fmt.Sprintf("%s (%s) %s: %s %s", svc.Name, svc.Type, svc.Target, kind, detail)
+		targets := make([]model.Notification, 0)
+		if svc.NotificationGroupID > 0 {
+			var group model.NotificationGroup
+			if err := gdb.Where("id = ? AND owner_id = ?", svc.NotificationGroupID, svc.OwnerID).First(&group).Error; err == nil {
+				for _, raw := range strings.Split(group.MemberIDs, ",") {
+					var id int64
+					fmt.Sscan(strings.TrimSpace(raw), &id)
+					var n model.Notification
+					if id > 0 && gdb.Where("id = ? AND owner_id = ?", id, svc.OwnerID).First(&n).Error == nil {
+						targets = append(targets, n)
+					}
+				}
+			}
+		} else if svc.NotifyWebhookID > 0 {
+			var n model.Notification
+			if gdb.Where("id = ? AND owner_id = ?", svc.NotifyWebhookID, svc.OwnerID).First(&n).Error == nil {
+				targets = append(targets, n)
+			}
+		}
+		for i := range targets {
+			n := targets[i]
+			go notifier.Send(&n, title, content)
+		}
+	}
+	svcSentinel.TriggerCb = func(svc *model.Service, up bool) {
+		id := svc.FailureTriggerCronID
+		if up {
+			id = svc.RecoveryTriggerCronID
+		}
+		if id <= 0 {
 			return
 		}
-		kind := "恢复"
-		if !up {
-			kind = "故障"
+		var cron model.Cron
+		if gdb.Where("id = ? AND owner_id = ?", id, svc.OwnerID).First(&cron).Error != nil {
+			return
 		}
-		title := fmt.Sprintf("[Argus] 服务%s %s", kind, svc.Name)
-		content := fmt.Sprintf("%s (%s) %s", svc.Name, svc.Type, svc.Target)
-		go notifier.Send(&n, title, content)
+		var server model.Server
+		if gdb.First(&server, svc.ServerID).Error != nil || server.OwnerID != svc.OwnerID {
+			return
+		}
+		cron.ServerIDs = fmt.Sprintf("%d", svc.ServerID)
+		go sched.RunOnce(&cron)
 	}
 	go svcSentinel.Run(agents.Peers)
 	defer svcSentinel.Stop()

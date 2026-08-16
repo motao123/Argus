@@ -38,13 +38,13 @@ function ServiceStatusStrip() {
           <span
             key={s.id}
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
-              s.last_up ? "bg-ok/10 text-ok" : "bg-err/10 text-err"
+              s.last_up === null ? "bg-black/5 text-muted" : s.last_up ? "bg-ok/10 text-ok" : "bg-err/10 text-err"
             }`}
-            title={`${s.target} · 今日可用率 ${s.today_up_rate.toFixed(1)}%`}
+            title={`${s.target} · 今日可用率 ${s.today_up_rate === null ? "未知" : `${s.today_up_rate.toFixed(1)}%`}`}
           >
-            <span className={`h-1.5 w-1.5 rounded-full ${s.last_up ? "bg-ok" : "bg-err"}`} />
+            <span className={`h-1.5 w-1.5 rounded-full ${s.last_up === null ? "bg-muted" : s.last_up ? "bg-ok" : "bg-err"}`} />
             {s.name}
-            <span className="tabular opacity-70">{s.today_up_rate.toFixed(0)}%</span>
+            <span className="tabular opacity-70">{s.today_up_rate === null ? "—" : `${s.today_up_rate.toFixed(0)}%`}</span>
           </span>
         ))}
       </div>

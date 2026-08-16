@@ -54,30 +54,48 @@ func (s *Server) authorizePublicServer(c *gin.Context, serverID int64) (*model.S
 // serverView 前端视图：持久化配置 + 实时状态。
 type serverView struct {
 	model.Server
-	Host        *hostView `json:"host,omitempty"`
-	CPU         float64   `json:"cpu"`
-	MemUsed     uint64    `json:"mem_used"`
-	MemTotal    uint64    `json:"mem_total"`
-	DiskUsed    uint64    `json:"disk_used"`
-	DiskTotal   uint64    `json:"disk_total"`
-	NetInSpeed  float64   `json:"net_in_speed"`
-	NetOutSpeed float64   `json:"net_out_speed"`
-	Load1       float64   `json:"load1"`
-	Temperature float64   `json:"temperature"`
-	GPUUtil     float64   `json:"gpu_util"`
-	Uptime      uint64    `json:"uptime"`
-	Online      bool      `json:"online"`
-	LastSeen    time.Time `json:"last_seen"`
+	Host                    *hostView             `json:"host,omitempty"`
+	CPU                     float64               `json:"cpu"`
+	MemUsed                 uint64                `json:"mem_used"`
+	MemTotal                uint64                `json:"mem_total"`
+	DiskUsed                uint64                `json:"disk_used"`
+	DiskTotal               uint64                `json:"disk_total"`
+	NetInSpeed              float64               `json:"net_in_speed"`
+	NetOutSpeed             float64               `json:"net_out_speed"`
+	Load1                   float64               `json:"load1"`
+	Temperature             float64               `json:"temperature"`
+	GPUUtil                 float64               `json:"gpu_util"`
+	GPU                     protocol.GPUReport    `json:"gpu"`
+	ProcessCount            int                   `json:"process_count"`
+	TCPEstablished          int                   `json:"tcp_established"`
+	TCPListen               int                   `json:"tcp_listen"`
+	UDPCount                int                   `json:"udp_count"`
+	DiskReadSpeed           float64               `json:"disk_read_speed"`
+	DiskWriteSpeed          float64               `json:"disk_write_speed"`
+	DiskReadIOPS            float64               `json:"disk_read_iops"`
+	DiskWriteIOPS           float64               `json:"disk_write_iops"`
+	DiskIOAvailability      protocol.Availability `json:"disk_io_availability"`
+	SocketAvailability      protocol.Availability `json:"socket_availability"`
+	ProcessAvailability     protocol.Availability `json:"process_availability"`
+	TemperatureAvailability protocol.Availability `json:"temperature_availability"`
+	Uptime                  uint64                `json:"uptime"`
+	Online                  bool                  `json:"online"`
+	LastSeen                time.Time             `json:"last_seen"`
 }
 
 type hostView struct {
 	Hostname        string `json:"hostname"`
 	Platform        string `json:"platform"`
 	PlatformVersion string `json:"platform_version"`
+	OS              string `json:"os"`
+	Arch            string `json:"arch"`
+	KernelVersion   string `json:"kernel_version"`
 	CPUModel        string `json:"cpu_model"`
 	CPUCores        int    `json:"cpu_cores"`
 	AgentVersion    string `json:"agent_version"`
 	IP              string `json:"ip"`
+	IPv4            string `json:"ipv4"`
+	IPv6            string `json:"ipv6"`
 	CountryCode     string `json:"country_code"`
 }
 
@@ -128,6 +146,19 @@ func (s *Server) listServers(c *gin.Context) {
 			v.Load1 = st.Last.Load1
 			v.Temperature = st.Last.Temperature
 			v.GPUUtil = st.Last.GPUUtil
+			v.GPU = st.Last.GPU
+			v.ProcessCount = st.Last.ProcessCount
+			v.TCPEstablished = st.Last.TCPEstablished
+			v.TCPListen = st.Last.TCPListen
+			v.UDPCount = st.Last.UDPCount
+			v.DiskReadSpeed = st.Last.DiskReadSpeed
+			v.DiskWriteSpeed = st.Last.DiskWriteSpeed
+			v.DiskReadIOPS = st.Last.DiskReadIOPS
+			v.DiskWriteIOPS = st.Last.DiskWriteIOPS
+			v.DiskIOAvailability = st.Last.DiskIOAvailability
+			v.SocketAvailability = st.Last.SocketAvailability
+			v.ProcessAvailability = st.Last.ProcessAvailability
+			v.TemperatureAvailability = st.Last.TemperatureAvailability
 			v.Uptime = st.Last.Uptime
 			v.Online = st.Online
 			v.LastSeen = st.LastSeen
@@ -140,11 +171,13 @@ func (s *Server) listServers(c *gin.Context) {
 					Hostname:        st.Host.Hostname,
 					Platform:        st.Host.Platform,
 					PlatformVersion: st.Host.PlatformVersion,
-					CPUModel:        st.Host.CPUModel,
-					CPUCores:        st.Host.CPUCores,
-					AgentVersion:    st.Host.AgentVersion,
-					IP:              st.Host.IP,
-					CountryCode:     country,
+					OS:              st.Host.OS, Arch: st.Host.Arch, KernelVersion: st.Host.KernelVersion,
+					CPUModel:     st.Host.CPUModel,
+					CPUCores:     st.Host.CPUCores,
+					AgentVersion: st.Host.AgentVersion,
+					IP:           st.Host.IP,
+					IPv4:         st.Host.IPv4, IPv6: st.Host.IPv6,
+					CountryCode: country,
 				}
 			}
 		}
@@ -297,9 +330,10 @@ func (s *Server) serverMetrics(c *gin.Context) {
 
 	// 内存聚合降采样到 step
 	type agg struct {
-		count                                  int
-		cpu, netIn, netOut, load1, temp, gpu   float64
-		memUsed, memTotal, diskUsed, diskTotal uint64
+		count                                                                         int
+		cpu, netIn, netOut, load1, temp, gpu, process, tcpEstablished, tcpListen, udp float64
+		diskReadSpeed, diskWriteSpeed, diskReadIOPS, diskWriteIOPS                    float64
+		memUsed, memTotal, diskUsed, diskTotal                                        uint64
 	}
 	buckets := map[int64]*agg{}
 	var order []int64
@@ -318,6 +352,14 @@ func (s *Server) serverMetrics(c *gin.Context) {
 		a.load1 += r.Load1
 		a.temp += r.Temperature
 		a.gpu += r.GPUUtil
+		a.process += r.ProcessCount
+		a.tcpEstablished += r.TCPEstablished
+		a.tcpListen += r.TCPListen
+		a.udp += r.UDPCount
+		a.diskReadSpeed += r.DiskReadSpeed
+		a.diskWriteSpeed += r.DiskWriteSpeed
+		a.diskReadIOPS += r.DiskReadIOPS
+		a.diskWriteIOPS += r.DiskWriteIOPS
 		a.memUsed = r.MemUsed
 		a.memTotal = r.MemTotal
 		a.diskUsed = r.DiskUsed
@@ -329,17 +371,19 @@ func (s *Server) serverMetrics(c *gin.Context) {
 		a := buckets[bts]
 		n := float64(a.count)
 		out = append(out, gin.H{
-			"ts":          bts,
-			"cpu":         round2(a.cpu / n),
-			"net_in":      round2(a.netIn / n),
-			"net_out":     round2(a.netOut / n),
-			"load1":       round2(a.load1 / n),
-			"temperature": round2(a.temp / n),
-			"gpu_util":    round2(a.gpu / n),
-			"mem_used":    a.memUsed,
-			"mem_total":   a.memTotal,
-			"disk_used":   a.diskUsed,
-			"disk_total":  a.diskTotal,
+			"ts":            bts,
+			"cpu":           round2(a.cpu / n),
+			"net_in":        round2(a.netIn / n),
+			"net_out":       round2(a.netOut / n),
+			"load1":         round2(a.load1 / n),
+			"temperature":   round2(a.temp / n),
+			"gpu_util":      round2(a.gpu / n),
+			"process_count": round2(a.process / n), "tcp_established": round2(a.tcpEstablished / n), "tcp_listen": round2(a.tcpListen / n), "udp_count": round2(a.udp / n),
+			"disk_read_speed": round2(a.diskReadSpeed / n), "disk_write_speed": round2(a.diskWriteSpeed / n), "disk_read_iops": round2(a.diskReadIOPS / n), "disk_write_iops": round2(a.diskWriteIOPS / n),
+			"mem_used":   a.memUsed,
+			"mem_total":  a.memTotal,
+			"disk_used":  a.diskUsed,
+			"disk_total": a.diskTotal,
 		})
 	}
 	ok(c, gin.H{"period": period, "points": out})
@@ -353,10 +397,14 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ServerURL    string                 `json:"server_url"`
-		Interval     int                    `json:"interval"`
-		Secret       string                 `json:"secret"`
-		Capabilities *protocol.Capabilities `json:"capabilities"`
+		ServerURL        string                 `json:"server_url"`
+		Interval         int                    `json:"interval"`
+		Secret           string                 `json:"secret"`
+		Capabilities     *protocol.Capabilities `json:"capabilities"`
+		InterfaceInclude []string               `json:"interface_include"`
+		InterfaceExclude []string               `json:"interface_exclude"`
+		MountInclude     []string               `json:"mount_include"`
+		MountExclude     []string               `json:"mount_exclude"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -369,6 +417,7 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 	}
 	resp, err := peer.Call(protocol.MethodApplyConfig, protocol.AgentConfig{
 		ServerURL: req.ServerURL, Interval: req.Interval, Secret: req.Secret, Capabilities: req.Capabilities,
+		InterfaceInclude: req.InterfaceInclude, InterfaceExclude: req.InterfaceExclude, MountInclude: req.MountInclude, MountExclude: req.MountExclude,
 	}, 15*time.Second)
 	if err != nil {
 		fail(c, http.StatusBadGateway, err.Error())

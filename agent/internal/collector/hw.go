@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/motao123/Argus/protocol"
 )
 
 // CPUTemperature 读取 CPU 温度（/sys/class/thermal 平均，摄氏度）。
@@ -36,24 +38,38 @@ func CPUTemperature() float64 {
 	return round1(sum / float64(n))
 }
 
-// GPUInfo 读取 GPU 利用率（nvidia-smi，不存在返回零值）。
-func GPUInfo() (util float64, memUsed, memTotal uint64) {
+// GPUInfo reads all NVIDIA devices without collecting high-cardinality process data.
+func GPUInfo() protocol.GPUReport {
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
-		return 0, 0, 0
+		return protocol.GPUReport{Availability: protocol.Availability{Reason: "nvidia-smi not found"}}
 	}
 	out, err := exec.Command("nvidia-smi",
-		"--query-gpu=utilization.gpu,memory.used,memory.total",
+		"--query-gpu=index,name,utilization.gpu,memory.used,memory.total",
 		"--format=csv,noheader,nounits").Output()
 	if err != nil {
-		return 0, 0, 0
+		return protocol.GPUReport{Availability: protocol.Availability{Reason: "nvidia-smi query failed"}}
 	}
-	fields := strings.Split(strings.TrimSpace(string(out)), ",")
-	if len(fields) >= 3 {
-		util, _ = strconv.ParseFloat(strings.TrimSpace(fields[0]), 64)
-		memUsed, _ = strconv.ParseUint(strings.TrimSpace(fields[1]), 10, 64)
-		memTotal, _ = strconv.ParseUint(strings.TrimSpace(fields[2]), 10, 64)
-		memUsed *= 1024 * 1024
-		memTotal *= 1024 * 1024
+	report := protocol.GPUReport{Availability: protocol.Availability{Available: true}}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Split(line, ",")
+		if len(fields) < 5 {
+			continue
+		}
+		index, errIndex := strconv.Atoi(strings.TrimSpace(fields[0]))
+		util, errUtil := strconv.ParseFloat(strings.TrimSpace(fields[2]), 64)
+		used, errUsed := strconv.ParseUint(strings.TrimSpace(fields[3]), 10, 64)
+		total, errTotal := strconv.ParseUint(strings.TrimSpace(fields[4]), 10, 64)
+		if errIndex != nil || errUtil != nil || errUsed != nil || errTotal != nil {
+			continue
+		}
+		report.Devices = append(report.Devices, protocol.GPUDevice{
+			Index: index, Name: strings.TrimSpace(fields[1]), Util: util,
+			MemUsed: used * 1024 * 1024, MemTotal: total * 1024 * 1024,
+		})
 	}
-	return util, memUsed, memTotal
+	if len(report.Devices) == 0 {
+		report.Available = false
+		report.Reason = "no NVIDIA GPU data"
+	}
+	return report
 }

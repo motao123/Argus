@@ -27,8 +27,8 @@ func TestBatcher(t *testing.T) {
 	b := NewMetricBatcher(gdb)
 
 	// 1) 旧分钟数据 → 新分钟首报触发 rollover，flush 后旧分钟落库
-	b.Feed(1, &protocol.ReportParams{Timestamp: old, CPU: 42.5})
-	b.Feed(1, &protocol.ReportParams{Timestamp: old, CPU: 43.5})
+	b.Feed(1, &protocol.ReportParams{Timestamp: old, CPU: 42.5, ProcessCount: 10, TCPEstablished: 4, DiskReadSpeed: 100})
+	b.Feed(1, &protocol.ReportParams{Timestamp: old, CPU: 43.5, ProcessCount: 20, TCPEstablished: 8, DiskReadSpeed: 300})
 	b.Feed(1, &protocol.ReportParams{Timestamp: now, CPU: 99})
 	b.Flush()
 
@@ -37,6 +37,9 @@ func TestBatcher(t *testing.T) {
 	fmt.Printf("after-1: rows=%d\n", len(rows))
 	if len(rows) != 1 || rows[0].CPU != 43 {
 		t.Fatalf("expected 1 row cpu=43, got %+v", rows)
+	}
+	if rows[0].ProcessCount != 15 || rows[0].TCPEstablished != 6 || rows[0].DiskReadSpeed != 200 {
+		t.Fatalf("extended metrics not aggregated: %+v", rows[0])
 	}
 
 	// 2) 迟到的旧数据并入当前桶（不丢不重）

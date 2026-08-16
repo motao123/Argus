@@ -197,11 +197,13 @@ func (s *Server) listNotifications(c *gin.Context) {
 }
 
 func (s *Server) createNotification(c *gin.Context) {
+	p := principalFromContext(c)
 	var n model.Notification
 	if err := c.ShouldBindJSON(&n); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
+	n.OwnerID = p.UserID
 	if err := s.DB.Create(&n).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return

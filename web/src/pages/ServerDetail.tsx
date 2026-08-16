@@ -144,6 +144,14 @@ export default function ServerDetail() {
         mem_total: server.mem_total,
         disk_used: server.disk_used,
         disk_total: server.disk_total,
+        process_count: server.process_count,
+        tcp_established: server.tcp_established,
+        tcp_listen: server.tcp_listen,
+        udp_count: server.udp_count,
+        disk_read_speed: server.disk_read_speed,
+        disk_write_speed: server.disk_write_speed,
+        disk_read_iops: server.disk_read_iops,
+        disk_write_iops: server.disk_write_iops,
       },
     ];
   }, [data, period, server]);
@@ -196,8 +204,13 @@ export default function ServerDetail() {
           { label: "负载", value: server.load1.toFixed(2) },
           { label: "下行速率", value: fmtSpeed(server.net_in_speed) },
           { label: "上行速率", value: fmtSpeed(server.net_out_speed) },
-          { label: "温度", value: server.temperature > 0 ? `${server.temperature.toFixed(1)}°C` : "不可用" },
-          { label: "GPU", value: server.gpu_util > 0 ? `${server.gpu_util.toFixed(1)}%` : "不可用" },
+          { label: "温度", value: server.temperature_availability?.available ? `${server.temperature.toFixed(1)}°C` : "不可用" },
+          { label: "GPU", value: server.gpu?.available ? `${server.gpu.devices?.length ?? 0} 卡 · ${server.gpu_util.toFixed(1)}%` : "不可用" },
+          { label: "进程", value: server.process_availability?.available ? String(server.process_count) : "不可用" },
+          { label: "TCP", value: server.socket_availability?.available ? `${server.tcp_established} established · ${server.tcp_listen} listen` : "不可用" },
+          { label: "UDP", value: server.socket_availability?.available ? String(server.udp_count) : "不可用" },
+          { label: "磁盘 IO", value: server.disk_io_availability?.available ? `读 ${fmtSpeed(server.disk_read_speed)} · 写 ${fmtSpeed(server.disk_write_speed)}` : "不可用" },
+          { label: "磁盘 IOPS", value: server.disk_io_availability?.available ? `读 ${server.disk_read_iops.toFixed(1)} · 写 ${server.disk_write_iops.toFixed(1)}` : "不可用" },
           { label: "分组", value: server.group || "默认" },
           { label: "备注", value: server.note || "—" },
         ].map(({ label, value }) => (
@@ -229,6 +242,14 @@ export default function ServerDetail() {
         <MetricChart points={points} dataKey="load1" name="负载 (1min)" color="#f59e0b" unit={(v) => v.toFixed(1)} />
         <MetricChart points={points} dataKey="net_in" name="下行速率" color="#22c55e" unit={fmtSpeed} />
         <MetricChart points={points} dataKey="net_out" name="上行速率" color="#ef4444" unit={fmtSpeed} />
+        <MetricChart points={points} dataKey="disk_read_speed" name="磁盘读取速率" color="#06b6d4" unit={fmtSpeed} />
+        <MetricChart points={points} dataKey="disk_write_speed" name="磁盘写入速率" color="#ec4899" unit={fmtSpeed} />
+        <MetricChart points={points} dataKey="disk_read_iops" name="读取 IOPS" color="#14b8a6" unit={(v) => v.toFixed(1)} />
+        <MetricChart points={points} dataKey="disk_write_iops" name="写入 IOPS" color="#f97316" unit={(v) => v.toFixed(1)} />
+        <MetricChart points={points} dataKey="process_count" name="进程数" color="#8b5cf6" unit={(v) => v.toFixed(0)} />
+        <MetricChart points={points} dataKey="tcp_established" name="TCP Established" color="#10b981" unit={(v) => v.toFixed(0)} />
+        <MetricChart points={points} dataKey="tcp_listen" name="TCP Listen" color="#84cc16" unit={(v) => v.toFixed(0)} />
+        <MetricChart points={points} dataKey="udp_count" name="UDP Socket" color="#eab308" unit={(v) => v.toFixed(0)} />
       </div>
     </div>
   );

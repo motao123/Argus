@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -159,11 +158,7 @@ func (h *Handler) handleServiceCheck(params json.RawMessage) (any, *protocol.RPC
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, protocol.NewError(protocol.ErrParams, err.Error())
 	}
-	timeout := time.Duration(p.Timeout) * time.Second
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	result := probeService(p.Type, p.Target, timeout)
+	result := probeService(p)
 	return result, nil
 }
 

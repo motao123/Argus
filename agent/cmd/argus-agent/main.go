@@ -60,15 +60,23 @@ func main() {
 	}
 
 	caps := task.DefaultCapabilities()
+	var collectorOpts collector.Options
 	if data, err := os.ReadFile(cfgFile); err == nil {
 		var saved struct {
-			Capabilities *protocol.Capabilities `json:"capabilities"`
+			Capabilities     *protocol.Capabilities `json:"capabilities"`
+			InterfaceInclude []string               `json:"interface_include"`
+			InterfaceExclude []string               `json:"interface_exclude"`
+			MountInclude     []string               `json:"mount_include"`
+			MountExclude     []string               `json:"mount_exclude"`
 		}
-		if json.Unmarshal(data, &saved) == nil && saved.Capabilities != nil {
-			caps = *saved.Capabilities
+		if json.Unmarshal(data, &saved) == nil {
+			if saved.Capabilities != nil {
+				caps = *saved.Capabilities
+			}
+			collectorOpts = collector.Options{InterfaceInclude: saved.InterfaceInclude, InterfaceExclude: saved.InterfaceExclude, MountInclude: saved.MountInclude, MountExclude: saved.MountExclude}
 		}
 	}
-	col := collector.New(version)
+	col := collector.New(version, collectorOpts)
 	for {
 		// 每次重连都重新从文件加载密钥：
 		// run() 首次注册后会保存新密钥，重连必须复用而非再次注册新服务器

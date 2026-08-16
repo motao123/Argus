@@ -83,6 +83,7 @@ func (o *OfflineNotify) OfflineAfterStr() string {
 // NotificationGroup 通知分组（多对多扇出，借鉴 nezha）。
 type NotificationGroup struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
+	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
 	Name      string    `gorm:"size:64;not null" json:"name"`
 	MemberIDs string    `gorm:"size:1024;default:''" json:"member_ids"` // 逗号分隔的 Notification ID
 	CreatedAt time.Time `json:"created_at"`
@@ -111,6 +112,7 @@ type Alert struct {
 // Type: webhook / bark / telegram / email / serverchan
 type Notification struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
+	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
 	Name      string    `gorm:"size:64;not null" json:"name"`
 	Type      string    `gorm:"size:16;default:'webhook'" json:"type"`
 	URL       string    `gorm:"size:512;not null" json:"url"`
@@ -137,21 +139,29 @@ type Cron struct {
 
 // Metric 降采样指标（granularity: 60=分钟 / 300=5分钟 / 3600=小时）。
 type Metric struct {
-	ID          int64     `gorm:"primaryKey" json:"-"`
-	ServerID    int64     `gorm:"index:idx_metric_server_ts" json:"server_id"`
-	TS          int64     `gorm:"index:idx_metric_server_ts" json:"ts"` // unix 秒（整周期）
-	Granularity int       `gorm:"index:idx_metric_gran" json:"-"`       // 60/300/3600
-	CPU         float64   `json:"cpu"`
-	MemUsed     uint64    `json:"mem_used"`
-	MemTotal    uint64    `json:"mem_total"`
-	DiskUsed    uint64    `json:"disk_used"`
-	DiskTotal   uint64    `json:"disk_total"`
-	NetInSpeed  float64   `json:"net_in_speed"`
-	NetOutSpeed float64   `json:"net_out_speed"`
-	Load1       float64   `json:"load1"`
-	Temperature float64   `json:"temperature,omitempty"`
-	GPUUtil     float64   `json:"gpu_util,omitempty"`
-	CreatedAt   time.Time `json:"-"`
+	ID             int64     `gorm:"primaryKey" json:"-"`
+	ServerID       int64     `gorm:"index:idx_metric_server_ts" json:"server_id"`
+	TS             int64     `gorm:"index:idx_metric_server_ts" json:"ts"` // unix 秒（整周期）
+	Granularity    int       `gorm:"index:idx_metric_gran" json:"-"`       // 60/300/3600
+	CPU            float64   `json:"cpu"`
+	MemUsed        uint64    `json:"mem_used"`
+	MemTotal       uint64    `json:"mem_total"`
+	DiskUsed       uint64    `json:"disk_used"`
+	DiskTotal      uint64    `json:"disk_total"`
+	NetInSpeed     float64   `json:"net_in_speed"`
+	NetOutSpeed    float64   `json:"net_out_speed"`
+	Load1          float64   `json:"load1"`
+	Temperature    float64   `json:"temperature,omitempty"`
+	GPUUtil        float64   `json:"gpu_util,omitempty"`
+	ProcessCount   float64   `json:"process_count,omitempty"`
+	TCPEstablished float64   `json:"tcp_established,omitempty"`
+	TCPListen      float64   `json:"tcp_listen,omitempty"`
+	UDPCount       float64   `json:"udp_count,omitempty"`
+	DiskReadSpeed  float64   `json:"disk_read_speed,omitempty"`
+	DiskWriteSpeed float64   `json:"disk_write_speed,omitempty"`
+	DiskReadIOPS   float64   `json:"disk_read_iops,omitempty"`
+	DiskWriteIOPS  float64   `json:"disk_write_iops,omitempty"`
+	CreatedAt      time.Time `json:"-"`
 }
 
 // APIToken 个人访问令牌（PAT），借鉴 nezha 的 scope + 白名单设计。
@@ -178,21 +188,48 @@ type Service struct {
 	Interval int    `gorm:"default:60" json:"interval"` // 秒
 	Enabled  bool   `gorm:"default:true" json:"enabled"`
 	Hidden   bool   `gorm:"default:false" json:"hidden"`
-	// 故障通知（借鉴 nezha 服务故障通知到通知组）
-	Notify          bool      `gorm:"default:false" json:"notify"`
-	NotifyWebhookID int64     `json:"notify_webhook_id"` // 0 = 无
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// 探测参数。VerifyTLS 默认 true；旧记录由哨兵按 true 处理。
+	HTTPMethod        string `gorm:"size:8;default:'GET'" json:"http_method"`
+	VerifyTLS         *bool  `gorm:"default:true" json:"verify_tls"`
+	Timeout           int    `gorm:"default:10" json:"timeout"`
+	ExpectedStatusMin int    `gorm:"default:200" json:"expected_status_min"`
+	ExpectedStatusMax int    `gorm:"default:399" json:"expected_status_max"`
+	MaxRedirects      int    `gorm:"default:3" json:"max_redirects"`
+	PingCount         int    `gorm:"default:4" json:"ping_count"`
+	CertWarn          bool   `gorm:"default:true" json:"cert_warn"`
+	// 故障/恢复通知及任务分别接线，避免恢复误执行故障任务。
+	Notify                bool      `gorm:"default:false" json:"notify"`
+	NotifyWebhookID       int64     `json:"notify_webhook_id"` // 单渠道（兼容）
+	NotificationGroupID   int64     `json:"notification_group_id"`
+	FailureTriggerCronID  int64     `json:"failure_trigger_cron_id"`
+	RecoveryTriggerCronID int64     `json:"recovery_trigger_cron_id"`
+	LastCertIdentity      string    `gorm:"size:768;default:''" json:"-"`
+	LastCertWarnDays      int       `gorm:"default:0" json:"-"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // ServiceHistory 探测历史（分钟级聚合，保留 30 天）。
 type ServiceHistory struct {
-	ID        int64 `gorm:"primaryKey" json:"-"`
-	ServiceID int64 `gorm:"index:idx_svc_hist" json:"service_id"`
-	Ts        int64 `gorm:"index:idx_svc_hist" json:"ts"`
-	UpCount   int   `json:"up_count"`
-	Total     int   `json:"total"`
-	DelaySum  int64 `json:"delay_sum"`
+	ID         int64   `gorm:"primaryKey" json:"-"`
+	ServiceID  int64   `gorm:"index:idx_svc_hist" json:"service_id"`
+	Ts         int64   `gorm:"index:idx_svc_hist" json:"ts"`
+	UpCount    int     `json:"up_count"`
+	Total      int     `json:"total"`
+	DelaySum   int64   `json:"delay_sum"`
+	DelayMin   int     `json:"delay_min"`
+	DelayMax   int     `json:"delay_max"`
+	Sent       int     `json:"sent"`
+	Received   int     `json:"received"`
+	StatusCode int     `json:"status_code"`
+	DNSMs      int     `json:"dns_ms"`
+	ConnectMs  int     `json:"connect_ms"`
+	TLSMs      int     `json:"tls_ms"`
+	TTFBMs     int     `json:"ttfb_ms"`
+	CertDays   *int    `json:"cert_days"`
+	CertIssuer string  `gorm:"size:512;default:''" json:"cert_issuer"`
+	CertExpiry int64   `json:"cert_expiry"`
+	LossSum    float64 `json:"loss_sum"`
 }
 
 // DDNSProfile 动态解析配置（借鉴 nezha DDNS）。

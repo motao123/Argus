@@ -25,9 +25,11 @@ type Rollup struct {
 func New(db *gorm.DB) *Rollup { return &Rollup{db: db} }
 
 type agg struct {
-	count                                  int
-	cpu, netIn, netOut, load, temp, gpu    float64
-	memUsed, memTotal, diskUsed, diskTotal uint64
+	count                                                      int
+	cpu, netIn, netOut, load, temp, gpu                        float64
+	process, tcpEstablished, tcpListen, udp                    float64
+	diskReadSpeed, diskWriteSpeed, diskReadIOPS, diskWriteIOPS float64
+	memUsed, memTotal, diskUsed, diskTotal                     uint64
 }
 
 // aggregate 把 srcGran 数据聚合成 dstGran。
@@ -60,6 +62,14 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 		a.load += row.Load1
 		a.temp += row.Temperature
 		a.gpu += row.GPUUtil
+		a.process += row.ProcessCount
+		a.tcpEstablished += row.TCPEstablished
+		a.tcpListen += row.TCPListen
+		a.udp += row.UDPCount
+		a.diskReadSpeed += row.DiskReadSpeed
+		a.diskWriteSpeed += row.DiskWriteSpeed
+		a.diskReadIOPS += row.DiskReadIOPS
+		a.diskWriteIOPS += row.DiskWriteIOPS
 	}
 
 	now := time.Now()
@@ -75,20 +85,22 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 				n = 1
 			}
 			row := model.Metric{
-				ServerID:    serverID,
-				TS:          ts,
-				Granularity: dstGran,
-				CPU:         a.cpu / n,
-				MemUsed:     a.memUsed,
-				MemTotal:    a.memTotal,
-				DiskUsed:    a.diskUsed,
-				DiskTotal:   a.diskTotal,
-				NetInSpeed:  a.netIn / n,
-				NetOutSpeed: a.netOut / n,
-				Load1:       a.load / n,
-				Temperature: a.temp / n,
-				GPUUtil:     a.gpu / n,
-				CreatedAt:   now,
+				ServerID:     serverID,
+				TS:           ts,
+				Granularity:  dstGran,
+				CPU:          a.cpu / n,
+				MemUsed:      a.memUsed,
+				MemTotal:     a.memTotal,
+				DiskUsed:     a.diskUsed,
+				DiskTotal:    a.diskTotal,
+				NetInSpeed:   a.netIn / n,
+				NetOutSpeed:  a.netOut / n,
+				Load1:        a.load / n,
+				Temperature:  a.temp / n,
+				GPUUtil:      a.gpu / n,
+				ProcessCount: a.process / n, TCPEstablished: a.tcpEstablished / n, TCPListen: a.tcpListen / n, UDPCount: a.udp / n,
+				DiskReadSpeed: a.diskReadSpeed / n, DiskWriteSpeed: a.diskWriteSpeed / n, DiskReadIOPS: a.diskReadIOPS / n, DiskWriteIOPS: a.diskWriteIOPS / n,
+				CreatedAt: now,
 			}
 			// 幂等覆盖：已存在则更新（原始分钟数据不变，重算结果一致）
 			res := r.db.Model(&model.Metric{}).
@@ -98,6 +110,8 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 					"disk_used": row.DiskUsed, "disk_total": row.DiskTotal,
 					"net_in_speed": row.NetInSpeed, "net_out_speed": row.NetOutSpeed,
 					"load1": row.Load1, "temperature": row.Temperature, "gpu_util": row.GPUUtil,
+					"process_count": row.ProcessCount, "tcp_established": row.TCPEstablished, "tcp_listen": row.TCPListen, "udp_count": row.UDPCount,
+					"disk_read_speed": row.DiskReadSpeed, "disk_write_speed": row.DiskWriteSpeed, "disk_read_iops": row.DiskReadIOPS, "disk_write_iops": row.DiskWriteIOPS,
 				})
 			if res.RowsAffected == 0 {
 				r.db.Create(&row)
