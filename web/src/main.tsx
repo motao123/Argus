@@ -17,6 +17,7 @@ import Files from "./pages/Files";
 import Access from "./pages/Access";
 import Sessions from "./pages/Sessions";
 import Settings from "./pages/Settings";
+import Network from "./pages/Network";
 import TerminalPage from "./pages/Terminal";
 import PublicOverview from "./pages/PublicOverview";
 import "./index.css";
@@ -68,6 +69,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/admin/files" element={<Files />} />
             <Route path="/admin/access" element={<Access />} />
             <Route path="/admin/sessions" element={<Sessions />} />
+            <Route path="/admin/network" element={<Network />} />
             <Route path="/admin/settings" element={<Settings />} />
             <Route path="/admin/terminal/:id" element={<TerminalPage />} />
           </Route>

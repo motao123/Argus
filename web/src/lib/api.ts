@@ -116,6 +116,30 @@ export interface Session {
   expires_at: string;
 }
 
+export interface DDNSProfile {
+  id: number;
+  owner_id: number;
+  server_id: number;
+  name: string;
+  provider: "cloudflare" | "webhook";
+  domains: string;
+  webhook_url: string;
+  last_ip: string;
+  last_updated: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface NATProfile {
+  id: number;
+  owner_id: number;
+  server_id: number;
+  domain: string;
+  target_addr: string;
+  enabled: boolean;
+  created_at: string;
+}
+
 export interface MetricPoint {
   ts: number;
   cpu: number;
@@ -236,6 +260,21 @@ export const api = {
     request(`/api/v1/settings`, { method: "POST", body: JSON.stringify({ settings }) }),
   sessions: () => request<{ sessions: Session[] }>("/api/v1/sessions"),
   kickSession: (id: number) => request(`/api/v1/sessions/${id}`, { method: "DELETE" }),
+
+  ddns: () => request<{ profiles: DDNSProfile[] }>("/api/v1/ddns"),
+  saveDDNS: async (p: Partial<DDNSProfile> & { id?: number; access_key?: string }): Promise<DDNSProfile | { ok: boolean }> =>
+    p.id
+      ? request<{ ok: boolean }>(`/api/v1/ddns/${p.id}`, { method: "PUT", body: JSON.stringify(p) })
+      : request<DDNSProfile>("/api/v1/ddns", { method: "POST", body: JSON.stringify(p) }),
+  deleteDDNS: (id: number) => request(`/api/v1/ddns/${id}`, { method: "DELETE" }),
+  testDDNS: (id: number) => request<{ ip: string; results: Record<string, string> }>(`/api/v1/ddns/${id}/test`, { method: "POST" }),
+
+  nats: () => request<{ nats: NATProfile[] }>("/api/v1/nats"),
+  saveNAT: async (n: Partial<NATProfile> & { id?: number }): Promise<NATProfile | { ok: boolean }> =>
+    n.id
+      ? request<{ ok: boolean }>(`/api/v1/nats/${n.id}`, { method: "PUT", body: JSON.stringify(n) })
+      : request<NATProfile>("/api/v1/nats", { method: "POST", body: JSON.stringify(n) }),
+  deleteNAT: (id: number) => request(`/api/v1/nats/${id}`, { method: "DELETE" }),
 
   tokens: () => request<{ tokens: ApiToken[] }>("/api/v1/tokens"),
   createToken: (t: { name: string; scopes: string[]; server_ids?: string; expires_in?: number }) =>

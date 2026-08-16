@@ -91,3 +91,9 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
 - 本地 Podman 构建已通过 web 阶段（2273 modules），进入 Go 阶段时因本机 Docker Hub 直连超时未拉到 golang:1.26-alpine；代码自身 go test/vet/web build 均已独立通过
 - 新增 .cnb.yml：main push 顺序执行 Go test/vet、Web build、生产镜像构建并推送 `docker.cnb.cool/<repo>:<commit>` 与 latest
 - **边界说明**：CNB 仓库/制品流水线可由 .cnb.yml 完成；CNB 不自动提供公网生产运行实例。当前已完成双远端代码同步与 CNB 发布流水线定义，公网生产 URL 仍需目标服务器/Kubernetes/云平台凭据后才能执行并验证。
+
+## 十、未完成项续做（2026-08-16）
+
+- 新增后台「网络服务」页 `/admin/network`，统一管理 DDNS 与 NAT：列表、创建、编辑、删除；DDNS 支持 Cloudflare/Webhook 与立即测试。
+- 浏览器黑盒验证：页面渲染正常；临时 NAT `nat-test.local → 127.0.0.1:3000` 创建后即时出现在列表，随后经 API 删除并确认列表为空；未调用任何真实外部 DDNS。
+- 下一批优先级：周期流量统计卡、报警联动任务表单、备份/数据库维护、2FA、插件与审计日志管理页。

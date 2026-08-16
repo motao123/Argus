@@ -1,4 +1,4 @@
-import { Activity, Bell, CalendarClock, FolderOpen, KeyRound, LayoutDashboard, LogOut, MonitorSmartphone, Moon, Radar, Settings as SettingsIcon, Sun, Users } from "lucide-react";
+import { Activity, Bell, CalendarClock, FolderOpen, KeyRound, LayoutDashboard, LogOut, MonitorSmartphone, Moon, Network as NetworkIcon, Radar, Settings as SettingsIcon, Sun, Users } from "lucide-react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
@@ -25,6 +25,7 @@ const nav = [
   { to: "/admin/files", label: "文件管理", icon: FolderOpen },
   { to: "/admin/access", label: "访问控制", icon: KeyRound },
   { to: "/admin/sessions", label: "在线会话", icon: Users },
+  { to: "/admin/network", label: "网络服务", icon: NetworkIcon },
   { to: "/admin/settings", label: "设置", icon: SettingsIcon },
 ];
 
