@@ -270,20 +270,42 @@ type ServiceHistory struct {
 	LossSum    float64 `json:"loss_sum"`
 }
 
-// DDNSProfile 动态解析配置（借鉴 nezha DDNS）。
+// DDNSProfile 动态解析配置。RecordType: A / AAAA / dual。
 type DDNSProfile struct {
-	ID          int64     `gorm:"primaryKey" json:"id"`
-	OwnerID     int64     `gorm:"index;default:0" json:"owner_id"`
-	ServerID    int64     `gorm:"index" json:"server_id"` // 监听该服务器 IP 变化
-	Name        string    `gorm:"size:64;not null" json:"name"`
-	Provider    string    `gorm:"size:32;default:'webhook'" json:"provider"` // webhook / cloudflare
-	AccessKey   string    `gorm:"size:256;default:''" json:"-"`              // API Token
-	Domains     string    `gorm:"size:1024;not null" json:"domains"`         // 逗号分隔域名
-	WebhookURL  string    `gorm:"size:512;default:''" json:"webhook_url"`    // 含 {ip} 占位符
-	LastIP      string    `gorm:"size:64;default:''" json:"last_ip"`
-	LastUpdated time.Time `json:"last_updated"`
-	Enabled     bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID             int64             `gorm:"primaryKey" json:"id"`
+	OwnerID        int64             `gorm:"index;default:0" json:"owner_id"`
+	ServerID       int64             `gorm:"index" json:"server_id"`
+	Name           string            `gorm:"size:64;not null" json:"name"`
+	Provider       string            `gorm:"size:32;default:'webhook'" json:"provider"`
+	RecordType     string            `gorm:"size:8;default:'A'" json:"record_type"`
+	AccessKey      string            `gorm:"size:256;default:''" json:"-"`
+	Domains        string            `gorm:"size:2048;not null" json:"domains"`
+	WebhookURL     string            `gorm:"size:1024;default:''" json:"webhook_url"`
+	WebhookMethod  string            `gorm:"size:8;default:'GET'" json:"webhook_method"`
+	WebhookHeaders string            `gorm:"size:4096;default:'{}'" json:"webhook_headers"`
+	WebhookBody    string            `gorm:"type:text" json:"webhook_body"`
+	LastIP         string            `gorm:"size:64;default:''" json:"last_ip"`
+	LastUpdated    time.Time         `json:"last_updated"`
+	Enabled        bool              `gorm:"default:true" json:"enabled"`
+	CreatedAt      time.Time         `json:"created_at"`
+	Records        []DDNSRecordState `gorm:"foreignKey:ProfileID" json:"records,omitempty"`
+}
+
+// DDNSRecordState 持久化每个域名和记录类型的独立状态，供部分失败与重启恢复。
+type DDNSRecordState struct {
+	ID          int64      `gorm:"primaryKey" json:"id"`
+	ProfileID   int64      `gorm:"uniqueIndex:idx_ddns_record;index;not null" json:"profile_id"`
+	OwnerID     int64      `gorm:"index;not null" json:"owner_id"`
+	Domain      string     `gorm:"size:253;uniqueIndex:idx_ddns_record;not null" json:"domain"`
+	RecordType  string     `gorm:"size:4;uniqueIndex:idx_ddns_record;not null" json:"record_type"`
+	Status      string     `gorm:"size:16;default:'pending'" json:"status"`
+	LastIP      string     `gorm:"size:64;default:''" json:"last_ip"`
+	LastAttempt *time.Time `json:"last_attempt"`
+	LastSuccess *time.Time `json:"last_success"`
+	LastError   string     `gorm:"size:1024;default:''" json:"last_error"`
+	RetryCount  int        `gorm:"default:0" json:"retry_count"`
+	NextRetry   *time.Time `gorm:"index" json:"next_retry"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // NAT 内网穿透配置（借鉴 nezha NAT）：域名 → 服务器上的内网服务。
@@ -295,6 +317,12 @@ type NAT struct {
 	TargetAddr string    `gorm:"size:256;not null" json:"target_addr"` // 内网 host:port
 	Enabled    bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt  time.Time `json:"created_at"`
+	// Runtime-only HTTP tunnel state populated by the API.
+	Status                 string `gorm:"-" json:"status,omitempty"`
+	ActiveConnections      int    `gorm:"-" json:"active_connections"`
+	ServerConnectionLimit  int    `gorm:"-" json:"server_connection_limit"`
+	OwnerActiveConnections int    `gorm:"-" json:"owner_active_connections"`
+	OwnerConnectionLimit   int    `gorm:"-" json:"owner_connection_limit"`
 }
 
 // OAuthConfig 持久化的 OAuth2 provider 配置（JSON）。
@@ -388,6 +416,34 @@ type ServerTransfer struct {
 	RollbackSecret string    `gorm:"size:64;default:''" json:"-"`             // 原密钥（取消/超时回滚）
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// UpgradeJob 是一次持久化 Agent 批量升级任务。
+type UpgradeJob struct {
+	ID          int64           `gorm:"primaryKey" json:"id"`
+	URL         string          `gorm:"size:2048;not null" json:"url"`
+	SHA256      string          `gorm:"size:64;not null" json:"sha256"`
+	Version     string          `gorm:"size:64;default:''" json:"version"`
+	Status      string          `gorm:"size:24;index;not null" json:"status"` // pending/running/completed/interrupted
+	Concurrency int             `gorm:"default:2" json:"concurrency"`
+	TargetCount int             `json:"target_count"`
+	CreatedBy   int64           `json:"created_by"`
+	StartedAt   *time.Time      `json:"started_at"`
+	FinishedAt  *time.Time      `json:"finished_at"`
+	CreatedAt   time.Time       `gorm:"index" json:"created_at"`
+	Results     []UpgradeResult `gorm:"foreignKey:JobID" json:"results"`
+}
+
+// UpgradeResult 记录升级任务中每台机器的独立结果。
+type UpgradeResult struct {
+	ID         int64      `gorm:"primaryKey" json:"id"`
+	JobID      int64      `gorm:"uniqueIndex:idx_upgrade_target;not null" json:"job_id"`
+	ServerID   int64      `gorm:"uniqueIndex:idx_upgrade_target;index;not null" json:"server_id"`
+	ServerName string     `gorm:"size:64;default:''" json:"name"`
+	Status     string     `gorm:"size:24;index;not null" json:"status"` // pending/running/success/failure/offline/interrupted
+	Error      string     `gorm:"size:2048;default:''" json:"error,omitempty"`
+	StartedAt  *time.Time `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
 }
 
 // AuditLog 审计日志（管理操作记录，借鉴 komari Log）。

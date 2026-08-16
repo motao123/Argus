@@ -111,11 +111,17 @@ export interface TransferRecord {
 }
 
 export interface UpgradeJob {
-  id: string;
+  id: number;
   url: string;
+  sha256: string;
   version: string;
+  status: string;
+  concurrency: number;
+  target_count: number;
+  started_at: string | null;
+  finished_at: string | null;
   created_at: string;
-  results: Record<string, { server_id: number; name: string; status: string; error?: string }>;
+  results: Array<{ id: number; server_id: number; name: string; status: string; error?: string; started_at: string | null; finished_at: string | null }>;
 }
 
 export interface Alert {
@@ -285,18 +291,36 @@ export interface Session {
   expires_at: string;
 }
 
+export interface DDNSRecordState {
+  id: number;
+  domain: string;
+  record_type: "A" | "AAAA";
+  status: "pending" | "success" | "retrying" | "stopped";
+  last_ip: string;
+  last_attempt: string | null;
+  last_success: string | null;
+  last_error: string;
+  retry_count: number;
+  next_retry: string | null;
+}
+
 export interface DDNSProfile {
   id: number;
   owner_id: number;
   server_id: number;
   name: string;
   provider: "cloudflare" | "webhook";
+  record_type: "A" | "AAAA" | "dual";
   domains: string;
   webhook_url: string;
+  webhook_method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  webhook_headers: string;
+  webhook_body: string;
   last_ip: string;
   last_updated: string;
   enabled: boolean;
   created_at: string;
+  records: DDNSRecordState[];
 }
 
 export interface NATProfile {
@@ -307,6 +331,22 @@ export interface NATProfile {
   target_addr: string;
   enabled: boolean;
   created_at: string;
+  /** 运行时状态（HTTP 隧道代理返回）：online / offline */
+  status?: string;
+  /** 该服务器当前活跃隧道数 */
+  active_connections?: number;
+  /** 每服务器并发隧道上限 */
+  server_connection_limit?: number;
+  /** 该 owner 当前活跃隧道数 */
+  owner_active_connections?: number;
+  /** 每用户并发隧道上限 */
+  owner_connection_limit?: number;
+}
+
+export interface NATListResponse {
+  nats: NATProfile[];
+  limits?: { server: number; user: number };
+  reserved_hosts?: string[];
 }
 
 export interface MetricPoint {
@@ -529,7 +569,7 @@ export const api = {
     request<{ transfer: TransferRecord; new_secret: string; note: string }>("/api/v1/server-transfers", { method: "POST", body: JSON.stringify({ server_id, to_user_id }) }),
   cancelTransfer: (id: number) => request<{ ok: boolean }>(`/api/v1/server-transfers/${id}/cancel`, { method: "POST" }),
   upgradeJobs: () => request<{ jobs: UpgradeJob[] }>("/api/v1/upgrade-jobs"),
-  createUpgradeJob: (j: { server_ids: number[]; url: string; sha256: string; version: string }) =>
+  createUpgradeJob: (j: { server_ids: number[]; url: string; sha256: string; version: string; concurrency: number }) =>
     request<UpgradeJob>("/api/v1/upgrade-jobs", { method: "POST", body: JSON.stringify(j) }),
 
   services: () => request<{ services: ServiceItem[] }>("/api/v1/services"),
@@ -578,9 +618,9 @@ export const api = {
       ? request<{ ok: boolean }>(`/api/v1/ddns/${p.id}`, { method: "PUT", body: JSON.stringify(p) })
       : request<DDNSProfile>("/api/v1/ddns", { method: "POST", body: JSON.stringify(p) }),
   deleteDDNS: (id: number) => request(`/api/v1/ddns/${id}`, { method: "DELETE" }),
-  testDDNS: (id: number) => request<{ ip: string; results: Record<string, string> }>(`/api/v1/ddns/${id}/test`, { method: "POST" }),
+  testDDNS: (id: number) => request<{ ipv4: string; ipv6: string; records: DDNSRecordState[] }>(`/api/v1/ddns/${id}/test`, { method: "POST" }),
 
-  nats: () => request<{ nats: NATProfile[] }>("/api/v1/nats"),
+  nats: () => request<NATListResponse>("/api/v1/nats"),
   saveNAT: async (n: Partial<NATProfile> & { id?: number }): Promise<NATProfile | { ok: boolean }> =>
     n.id
       ? request<{ ok: boolean }>(`/api/v1/nats/${n.id}`, { method: "PUT", body: JSON.stringify(n) })

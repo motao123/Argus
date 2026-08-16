@@ -13,7 +13,15 @@ import (
 	"github.com/motao123/Argus/protocol"
 )
 
+const maxUpgradeBytes int64 = 256 << 20
+
 func prepareUpgrade(p *protocol.UpgradeParams, self, newPath, backupPath string) error {
+	if strings.TrimSpace(p.URL) == "" || len(strings.TrimSpace(p.SHA256)) != 64 {
+		return fmt.Errorf("url and 64-character sha256 required")
+	}
+	if _, err := hex.DecodeString(strings.TrimSpace(p.SHA256)); err != nil {
+		return fmt.Errorf("invalid sha256: %w", err)
+	}
 	if err := downloadFile(p.URL, newPath); err != nil {
 		return fmt.Errorf("download: %w", err)
 	}
@@ -47,13 +55,22 @@ func downloadFile(url, dst string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("http %d", resp.StatusCode)
 	}
+	if resp.ContentLength > maxUpgradeBytes {
+		return fmt.Errorf("artifact exceeds %d bytes", maxUpgradeBytes)
+	}
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, resp.Body)
-	return err
+	n, err := io.Copy(out, io.LimitReader(resp.Body, maxUpgradeBytes+1))
+	if err != nil {
+		return err
+	}
+	if n > maxUpgradeBytes {
+		return fmt.Errorf("artifact exceeds %d bytes", maxUpgradeBytes)
+	}
+	return out.Sync()
 }
 
 func sha256File(path string) (string, error) {

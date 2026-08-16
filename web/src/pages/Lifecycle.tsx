@@ -9,7 +9,7 @@ export default function Lifecycle() {
   const { data: serverData } = useQuery({ queryKey: ["servers-list"], queryFn: api.servers });
   const { data: userData } = useQuery({ queryKey: ["users"], queryFn: api.users });
   const { data: transferData } = useQuery({ queryKey: ["transfers"], queryFn: api.transfers });
-  const { data: jobData } = useQuery({ queryKey: ["upgrade-jobs"], queryFn: api.upgradeJobs });
+  const { data: jobData } = useQuery({ queryKey: ["upgrade-jobs"], queryFn: api.upgradeJobs, refetchInterval: 3000 });
   const servers = serverData?.servers ?? [];
   const users = userData?.users ?? [];
   const transfers = transferData?.transfers ?? [];
@@ -17,7 +17,7 @@ export default function Lifecycle() {
 
   const [transferForm, setTransferForm] = useState<{ server_id: number; to_user_id: number } | null>(null);
   const [newSecret, setNewSecret] = useState("");
-  const [upgradeForm, setUpgradeForm] = useState<{ server_ids: number[]; url: string; sha256: string; version: string } | null>(null);
+  const [upgradeForm, setUpgradeForm] = useState<{ server_ids: number[]; url: string; sha256: string; version: string; concurrency: number } | null>(null);
   const [msg, setMsg] = useState("");
 
   const createTransfer = useMutation({
@@ -45,7 +45,7 @@ export default function Lifecycle() {
 
   const statusBadge = (s: string) => {
     const map: Record<string, string> = {
-      pending: "bg-warn/15 text-warn", verified: "bg-ok/15 text-ok", cancelled: "bg-muted/20 text-muted", failed: "bg-err/15 text-err",
+      pending: "bg-warn/15 text-warn", running: "bg-accent/15 text-accent", completed: "bg-ok/15 text-ok", interrupted: "bg-err/15 text-err", verified: "bg-ok/15 text-ok", cancelled: "bg-muted/20 text-muted", failed: "bg-err/15 text-err",
       success: "bg-ok/15 text-ok", failure: "bg-err/15 text-err", offline: "bg-muted/20 text-muted",
     };
     return <span className={`rounded-full px-2 py-0.5 text-xs ${map[s] ?? "bg-muted/20 text-muted"}`}>{s}</span>;
@@ -141,7 +141,7 @@ export default function Lifecycle() {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Agent 批量升级</h2>
           <button
-            onClick={() => setUpgradeForm({ server_ids: [], url: "", sha256: "", version: "" })}
+            onClick={() => setUpgradeForm({ server_ids: [], url: "", sha256: "", version: "", concurrency: 2 })}
             className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white"
           >
             <Rocket className="h-4 w-4" /> 发起升级
@@ -161,8 +161,17 @@ export default function Lifecycle() {
               </select>
             </div>
             <input placeholder="制品 URL（http/https）" value={upgradeForm.url} onChange={(e) => setUpgradeForm({ ...upgradeForm, url: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input placeholder="SHA-256" value={upgradeForm.sha256} onChange={(e) => setUpgradeForm({ ...upgradeForm, sha256: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 font-mono text-sm" />
+            <input placeholder="SHA-256（64 位十六进制）" value={upgradeForm.sha256} onChange={(e) => setUpgradeForm({ ...upgradeForm, sha256: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 font-mono text-sm" />
             <input placeholder="版本号（如 0.3.0）" value={upgradeForm.version} onChange={(e) => setUpgradeForm({ ...upgradeForm, version: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            <div>
+              <div className="mb-1 text-xs text-muted">并发数（1-16）</div>
+              <input
+                type="number" min={1} max={16}
+                value={upgradeForm.concurrency}
+                onChange={(e) => setUpgradeForm({ ...upgradeForm, concurrency: Math.max(1, Math.min(16, Number(e.target.value) || 1)) })}
+                className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+              />
+            </div>
             <div className="flex gap-2 md:col-span-2">
               <button
                 disabled={upgradeForm.server_ids.length === 0 || !upgradeForm.url || !upgradeForm.sha256}
@@ -176,22 +185,34 @@ export default function Lifecycle() {
           </div>
         )}
         <div className="space-y-3">
-          {jobs.map((j: UpgradeJob) => (
-            <div key={j.id} className="rounded-xl border border-border bg-panel p-4">
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span className="font-medium">{j.id} · v{j.version}</span>
-                <span className="text-xs text-muted">{fmtDateTime(j.created_at)}</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {Object.values(j.results).map((r) => (
-                  <span key={r.server_id} className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs">
-                    {r.name} {statusBadge(r.status)}
-                    {r.error && <span className="text-err" title={r.error}>!</span>}
+          {jobs.map((j: UpgradeJob) => {
+            const counts = j.results.reduce<Record<string, number>>((acc, r) => {
+              acc[r.status] = (acc[r.status] ?? 0) + 1;
+              return acc;
+            }, {});
+            const terminal = ["success", "failure", "offline", "interrupted"].reduce((n, s) => n + (counts[s] ?? 0), 0);
+            return (
+              <div key={j.id} className="rounded-xl border border-border bg-panel p-4">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+                  <span className="flex items-center gap-2 font-medium">
+                    #{j.id} · v{j.version || "?"} {statusBadge(j.status)}
                   </span>
-                ))}
+                  <span className="text-xs text-muted">
+                    {j.target_count} 台 · 并发 {j.concurrency} · 完成 {terminal}/{j.target_count} · {fmtDateTime(j.created_at)}
+                  </span>
+                </div>
+                <div className="mb-2 truncate font-mono text-xs text-muted" title={j.url}>{j.url}</div>
+                <div className="flex flex-wrap gap-2">
+                  {j.results.map((r) => (
+                    <span key={r.server_id} className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs">
+                      {r.name} {statusBadge(r.status)}
+                      {r.error && <span className="text-err" title={r.error}>!</span>}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {jobs.length === 0 && <div className="py-6 text-center text-sm text-muted">暂无升级任务</div>}
         </div>
       </section>

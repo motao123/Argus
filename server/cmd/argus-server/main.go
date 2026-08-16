@@ -193,7 +193,9 @@ func main() {
 
 	// NAT 内网穿透反向代理（默认 :9090）
 	natProxy := nat.New(gdb, agents.Peers)
-	agents.NATDataCb = natProxy.DataSink
+	natProxy.Configure(cfg.NATServerConnectionLimit, cfg.NATUserConnectionLimit, cfg.NATReservedHosts)
+	agents.NATDataCb = natProxy.PushData
+	agents.NATCloseCb = natProxy.CloseTunnel
 	go func() {
 		if err := natProxy.Start(os.Getenv("ARGUS_NAT_LISTEN")); err != nil && err != http.ErrServerClosed {
 			log.Printf("nat proxy: %v", err)
@@ -229,8 +231,12 @@ func main() {
 		OAuth:     oauth.NewClient(),
 		GeoIP:     geoipSvc,
 		Plugins:   plugins,
+		NAT:       natProxy,
 	}
 	srv.ReloadOAuthConfigs()
+	if err := srv.InitializeUpgradeJobs(); err != nil {
+		log.Fatalf("initialize upgrade jobs: %v", err)
+	}
 
 	// 每日任务：流量报告 + 到期提醒（借鉴 komari 流量报告/renewal）
 	go func() {
@@ -252,8 +258,16 @@ func main() {
 	agents.TermDataCb = srv.HandleAgentTermData
 	// 过户验证：Agent 用新密钥重连即完成
 	agents.TransferCb = srv.VerifyTransfer
-	// DDNS：服务器 IP 变化时更新解析记录
+	// DDNS：服务器 IP 变化时更新解析记录，并恢复持久化的重试。
 	agents.IPChangeCb = srv.HandleServerIPChange
+	go func() {
+		srv.RunDDNSRetries()
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			srv.RunDDNSRetries()
+		}
+	}()
 	router := api.New(srv)
 	// 可信代理：只有来自这些代理的请求才采信 X-Forwarded-For（默认空 = 直连模式）
 	if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
@@ -293,11 +307,18 @@ func main() {
 	})
 
 	// 7. Agent WebSocket 端点（不经过 JWT，走 secret 鉴权）
-	// MCP 端点（PAT 认证）
-	mcpServer := &mcp.Server{DB: gdb, Peers: agents.Peers, IdentifyPAT: srv.IdentifyPATToken}
-	router.Any("/mcp", func(c *gin.Context) {
-		mcpServer.Handler().ServeHTTP(c.Writer, c.Request)
-	})
+	// MCP 端点（默认关闭、仅 PAT、按 token 限流）
+	mcpServer := &mcp.Server{
+		DB: gdb, Peers: agents.Peers, IdentifyPAT: srv.IdentifyPATToken,
+		Enabled: cfg.MCPEnabled, RateLimit: cfg.MCPRateLimit,
+		TransferMax: cfg.MCPTransferMax, TransferTTL: cfg.MCPTransferTTL,
+		Audit: func(p *mcp.Principal, action, detail, ip string) {
+			_ = gdb.Create(&model.AuditLog{UserID: p.UserID, Action: action, Detail: detail, IP: ip, CreatedAt: time.Now()}).Error
+		},
+	}
+	mcpHandler := mcpServer.Handler()
+	router.Any("/mcp", func(c *gin.Context) { mcpHandler.ServeHTTP(c.Writer, c.Request) })
+	router.Any("/mcp/transfer/*token", func(c *gin.Context) { mcpHandler.ServeHTTP(c.Writer, c.Request) })
 
 	router.GET("/ws/agent", func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)

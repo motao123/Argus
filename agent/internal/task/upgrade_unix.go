@@ -25,7 +25,10 @@ func upgradeSelf(p *protocol.UpgradeParams) (string, error) {
 	if err := prepareUpgrade(p, self, newPath, backupPath); err != nil {
 		return "", err
 	}
-	script := fmt.Sprintf("sleep 1; mv -f -- %s %s && chmod +x -- %s && exec %s %s", shellQuote(newPath), shellQuote(self), shellQuote(self), shellQuote(self), strings.Join(quoteAll(os.Args[1:]), " "))
+	args := strings.Join(quoteAll(os.Args[1:]), " ")
+	// Keep the previous executable until the replacement has been installed. If
+	// installation or launch fails, restore it and restart the known-good agent.
+	script := fmt.Sprintf("sleep 1; if mv -f -- %s %s && chmod +x -- %s; then %s %s; fi; mv -f -- %s %s; chmod +x -- %s; exec %s %s", shellQuote(newPath), shellQuote(self), shellQuote(self), shellQuote(self), args, shellQuote(backupPath), shellQuote(self), shellQuote(self), shellQuote(self), args)
 	cmd := exec.Command("/bin/sh", "-c", script)
 	cmd.SysProcAttr = detachAttr()
 	if err := cmd.Start(); err != nil {

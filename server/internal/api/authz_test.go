@@ -37,10 +37,15 @@ func newAuthzEnv(t *testing.T) *authzTestEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// :memory: 库每个连接都是独立数据库，必须单连接才能跨 goroutine 可见。
+	if sqlDB, err := gdb.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+	}
 	if err := gdb.AutoMigrate(
 		&model.User{}, &model.Server{}, &model.Service{}, &model.ServiceHistory{},
-		&model.APIToken{}, &model.Setting{}, &model.DDNSProfile{}, &model.NAT{}, &model.Metric{},
+		&model.APIToken{}, &model.Setting{}, &model.DDNSProfile{}, &model.DDNSRecordState{}, &model.NAT{}, &model.Metric{},
 		&model.AuditLog{}, &model.ServerTransfer{}, &model.Notification{}, &model.Alert{}, &model.Cron{}, &model.TaskRun{}, &model.TaskRunResult{},
+		&model.UpgradeJob{}, &model.UpgradeResult{},
 	); err != nil {
 		t.Fatal(err)
 	}

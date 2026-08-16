@@ -1,0 +1,46 @@
+name: Release Build
+
+# 手动触发：产出 Server/Agent 多平台二进制 + SHA-256 校验文件并上传为
+# workflow artifact。刻意不创建 git tag、不发布 GitHub Release、不推送远端。
+on:
+  workflow_dispatch:
+
+jobs:
+  release-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # Server 的 SQLite 需要 cgo；安装 aarch64 交叉编译器以产出 linux/arm64。
+      - name: Install cross C toolchain (server linux/arm64)
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build frontend and embedded webdist
+        run: |
+          cd web && pnpm install --frozen-lockfile && pnpm build
+          cd ..
+          rm -rf server/cmd/argus-server/webdist
+          mkdir -p server/cmd/argus-server/webdist
+          cp -r web/dist/* server/cmd/argus-server/webdist/
+
+      - name: Run release build script
+        run: bash scripts/release-build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: argus-release-binaries
+          path: dist/release
+          if-no-files-found: error

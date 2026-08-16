@@ -331,10 +331,16 @@ type FsWriteResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-// NATConnectParams 内网穿透隧道参数（server → agent）。
+// NATConnectParams HTTP 隧道到 agent 后端的连接参数（server → agent）。
 type NATConnectParams struct {
 	SessionID string `json:"session_id"`
-	Target    string `json:"target"` // host:port
+	Target    string `json:"target"` // HTTP 后端 host:port；不对外提供通用 TCP/UDP 入口
+}
+
+// NATConnectResult reports whether the backend socket was established.
+type NATConnectResult struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
 }
 
 // FsDeleteParams 删除参数。

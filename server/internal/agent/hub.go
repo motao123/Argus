@@ -27,16 +27,18 @@ type Hub struct {
 
 	// TermDataCb Agent 终端输出回调（由 API 层注册，转发给浏览器）。
 	TermDataCb func(serverID int64, data protocol.TerminalData)
-	// IPChangeCb 服务器公网 IP 变化回调（DDNS 触发用）。
-	IPChangeCb func(serverID int64, newIP string)
-	// NATDataCb Agent 回传 NAT 隧道数据（server 侧注册到 NAT Proxy）。
-	NATDataCb func(sessionID string, data []byte)
+	// IPChangeCb 服务器 Agent 上报的公网 IPv4/IPv6 变化回调（DDNS 触发用）。
+	IPChangeCb func(serverID int64, host protocol.HostInfo)
+	// NATDataCb Agent 回传 NAT 隧道数据。回调返回后才向 agent 应答，用于背压。
+	NATDataCb func(sessionID string, data []byte) error
+	// NATCloseCb Agent 后端连接关闭通知。
+	NATCloseCb func(sessionID string)
 	// TransferCb 服务器按密钥注册成功回调（过户验证用）。
 	TransferCb func(serverID int64)
 
 	mu      sync.RWMutex
 	conns   map[int64]*rpc.Peer // serverID → 连接
-	ipCache map[int64]string    // serverID → 最近 IP
+	ipCache map[int64]string    // serverID → 最近 IPv4/IPv6 签名
 }
 
 func NewHub(db *gorm.DB, st *store.Hub, batcher *store.MetricBatcher) *Hub {
@@ -128,8 +130,20 @@ func (ch *connHandler) Handle(method string, params json.RawMessage) (any, *prot
 		if err := json.Unmarshal(params, &d); err != nil {
 			return nil, protocol.NewError(protocol.ErrParams, err.Error())
 		}
-		if ch.hub.NATDataCb != nil {
-			ch.hub.NATDataCb(d.SessionID, d.Data)
+		if ch.hub.NATDataCb == nil {
+			return nil, protocol.NewError(protocol.ErrInternal, "NAT proxy unavailable")
+		}
+		if err := ch.hub.NATDataCb(d.SessionID, d.Data); err != nil {
+			return nil, protocol.NewError(protocol.ErrNotFound, err.Error())
+		}
+		return map[string]any{"ok": true}, nil
+	case protocol.MethodNATClose:
+		var d protocol.TerminalData
+		if err := json.Unmarshal(params, &d); err != nil {
+			return nil, protocol.NewError(protocol.ErrParams, err.Error())
+		}
+		if ch.hub.NATCloseCb != nil {
+			ch.hub.NATCloseCb(d.SessionID)
 		}
 		return nil, nil
 	default:
@@ -214,11 +228,15 @@ func (ch *connHandler) handleReport(params json.RawMessage) (any, *protocol.RPCE
 			srv.Name = p.Host.Hostname
 			ch.hub.db.Model(&srv).Update("name", srv.Name)
 		}
-		// IP 变化触发 DDNS 回调（每 30s 至多一次，避免频繁）
-		if ch.hub.IPChangeCb != nil && p.Host.IP != "" {
-			if lastIP := ch.hub.lastIP(id); lastIP != p.Host.IP {
-				ch.hub.setLastIP(id, p.Host.IP)
-				go ch.hub.IPChangeCb(id, p.Host.IP)
+		// IPv4 或 IPv6 变化均触发 DDNS，传递 Agent HostInfo 而不是请求来源 IP。
+		if ch.hub.IPChangeCb != nil {
+			signature := p.Host.IPv4 + "\x00" + p.Host.IPv6
+			if p.Host.IPv4 == "" {
+				signature = p.Host.IP + "\x00" + p.Host.IPv6
+			}
+			if signature != "\x00" && ch.hub.lastIP(id) != signature {
+				ch.hub.setLastIP(id, signature)
+				go ch.hub.IPChangeCb(id, p.Host)
 			}
 		}
 	}

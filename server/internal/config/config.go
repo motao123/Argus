@@ -5,28 +5,44 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Config 服务端配置。
 type Config struct {
-	Listen         string   // HTTP 监听地址
-	DBPath         string   // SQLite 文件路径
-	JWTSecret      string   // JWT 签名密钥（自动生成并持久化）
-	AdminUser      string   // 初始管理员用户名
-	AdminPass      string   // 初始管理员密码
-	TrustedProxies []string // 可信反向代理（CIDR/IP），用于 ClientIP
+	Listen                   string   // HTTP 监听地址
+	DBPath                   string   // SQLite 文件路径
+	JWTSecret                string   // JWT 签名密钥（自动生成并持久化）
+	AdminUser                string   // 初始管理员用户名
+	AdminPass                string   // 初始管理员密码
+	TrustedProxies           []string // 可信反向代理（CIDR/IP），用于 ClientIP
+	NATReservedHosts         []string // dashboard/API 域名，禁止被 NAT Host 路由覆盖
+	NATServerConnectionLimit int      // 每服务器并发 HTTP 隧道数
+	NATUserConnectionLimit   int      // 每用户并发 HTTP 隧道数
+	MCPEnabled               bool     // MCP endpoint is disabled unless explicitly enabled
+	MCPRateLimit             int      // requests per token per minute
+	MCPTransferMax           int64    // one-time transfer maximum bytes
+	MCPTransferTTL           time.Duration
 }
 
 // Load 从环境变量/默认值加载配置。
 func Load() *Config {
 	c := &Config{
-		Listen:         getenv("ARGUS_LISTEN", "0.0.0.0:8080"),
-		DBPath:         getenv("ARGUS_DB", "./data/argus.db"),
-		JWTSecret:      os.Getenv("ARGUS_JWT_SECRET"),
-		AdminUser:      getenv("ARGUS_ADMIN_USER", "admin"),
-		AdminPass:      getenv("ARGUS_ADMIN_PASS", "argus123"),
-		TrustedProxies: splitCSV(os.Getenv("ARGUS_TRUSTED_PROXIES")),
+		Listen:                   getenv("ARGUS_LISTEN", "0.0.0.0:8080"),
+		DBPath:                   getenv("ARGUS_DB", "./data/argus.db"),
+		JWTSecret:                os.Getenv("ARGUS_JWT_SECRET"),
+		AdminUser:                getenv("ARGUS_ADMIN_USER", "admin"),
+		AdminPass:                getenv("ARGUS_ADMIN_PASS", "argus123"),
+		TrustedProxies:           splitCSV(os.Getenv("ARGUS_TRUSTED_PROXIES")),
+		NATReservedHosts:         splitCSV(os.Getenv("ARGUS_NAT_RESERVED_HOSTS")),
+		NATServerConnectionLimit: getenvInt("ARGUS_NAT_SERVER_CONNECTION_LIMIT", 16),
+		NATUserConnectionLimit:   getenvInt("ARGUS_NAT_USER_CONNECTION_LIMIT", 32),
+		MCPEnabled:               getenvBool("ARGUS_MCP_ENABLED", false),
+		MCPRateLimit:             getenvInt("ARGUS_MCP_RATE_LIMIT", 60),
+		MCPTransferMax:           int64(getenvInt("ARGUS_MCP_TRANSFER_MAX_MB", 64)) << 20,
+		MCPTransferTTL:           time.Duration(getenvInt("ARGUS_MCP_TRANSFER_TTL_SECONDS", 300)) * time.Second,
 	}
 	if c.JWTSecret == "" {
 		c.JWTSecret = loadOrGenerateJWT(c.DBPath)
@@ -42,6 +58,26 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func getenvInt(key string, def int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
+}
+
+func getenvBool(key string, def bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return def
+	}
+	return parsed
 }
 
 func getenv(key, def string) string {

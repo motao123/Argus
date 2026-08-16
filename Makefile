@@ -3,7 +3,7 @@
 GO ?= go
 PNPM ?= pnpm
 
-.PHONY: all web server agent build run clean mock
+.PHONY: all web server agent build run mock release clean
 
 all: build
 
@@ -32,6 +32,10 @@ run:
 ## 前端演示模式（无需后端）
 mock:
 	cd web && $(PNPM) dev:mock
+
+## 发布构建：多平台二进制 + SHA-256（不创建 tag/release、不推送）
+release: web
+	bash scripts/release-build.sh
 
 clean:
 	rm -f server/argus-server agent/argus-agent

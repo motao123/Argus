@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -9,11 +10,13 @@ import (
 	"github.com/motao123/Argus/protocol"
 )
 
-// natSession TCP 隧道会话（借鉴 terminal 会话模式，目标为任意 TCP 服务）。
+// natSession is an HTTP backend socket. It is only reachable through a server
+// side Host-routed HTTP request; the agent does not expose a generic listener.
 type natSession struct {
-	conn  net.Conn
-	close chan struct{}
-	once  sync.Once
+	conn   net.Conn
+	writeC chan []byte
+	close  chan struct{}
+	once   sync.Once
 }
 
 var (
@@ -31,55 +34,86 @@ func (h *Handler) handleNATConnect(params json.RawMessage) (any, *protocol.RPCEr
 	}
 	conn, err := net.DialTimeout("tcp", p.Target, 10*time.Second)
 	if err != nil {
-		return &protocol.FsDeleteResult{Error: err.Error()}, nil
+		return protocol.NATConnectResult{Error: err.Error()}, nil
 	}
-	ts := &natSession{conn: conn, close: make(chan struct{})}
+	ts := &natSession{conn: conn, writeC: make(chan []byte, 16), close: make(chan struct{})}
 	natMu.Lock()
+	if old := natSessions[p.SessionID]; old != nil {
+		natMu.Unlock()
+		_ = conn.Close()
+		return protocol.NATConnectResult{Error: "session already exists"}, nil
+	}
 	natSessions[p.SessionID] = ts
 	natMu.Unlock()
 
-	// 隧道 → server
+	// Server -> backend. The bounded queue and RPC response provide backpressure;
+	// writes never fall through a default case and never silently truncate.
 	go func() {
-		buf := make([]byte, 16384)
 		for {
-			n, err := conn.Read(buf)
-			if n > 0 {
-				_ = h.peer.Notify(protocol.MethodNATData, protocol.TerminalData{
-					SessionID: p.SessionID,
-					Data:      append([]byte(nil), buf[:n]...),
-				})
-			}
-			if err != nil {
-				h.closeNAT(p.SessionID)
+			select {
+			case data := <-ts.writeC:
+				if err := writeFull(ts.conn, data); err != nil {
+					h.closeNAT(p.SessionID, true)
+					return
+				}
+			case <-ts.close:
 				return
 			}
 		}
 	}()
-	return map[string]any{"ok": true}, nil
+
+	// Backend -> server. Call waits until the server tunnel has accepted each
+	// frame, so a slow HTTP client naturally stops reads from the backend.
+	go func() {
+		buf := make([]byte, 16*1024)
+		for {
+			n, err := conn.Read(buf)
+			if n > 0 {
+				resp, callErr := h.peer.Call(protocol.MethodNATData, protocol.TerminalData{
+					SessionID: p.SessionID,
+					Data:      append([]byte(nil), buf[:n]...),
+				}, 30*time.Second)
+				if callErr != nil || resp.Error != nil {
+					h.closeNAT(p.SessionID, true)
+					return
+				}
+			}
+			if err != nil {
+				h.closeNAT(p.SessionID, true)
+				return
+			}
+		}
+	}()
+	return protocol.NATConnectResult{OK: true}, nil
 }
 
-func (h *Handler) handleNATData(params json.RawMessage) {
+func (h *Handler) handleNATData(params json.RawMessage) *protocol.RPCError {
 	var p protocol.TerminalData
 	if err := json.Unmarshal(params, &p); err != nil {
-		return
+		return protocol.NewError(protocol.ErrParams, err.Error())
 	}
 	natMu.Lock()
 	ts := natSessions[p.SessionID]
 	natMu.Unlock()
 	if ts == nil {
-		return
+		return protocol.NewError(protocol.ErrNotFound, "tunnel session not found")
 	}
-	ts.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-	_, _ = ts.conn.Write(p.Data)
+	data := append([]byte(nil), p.Data...)
+	select {
+	case ts.writeC <- data:
+		return nil
+	case <-ts.close:
+		return protocol.NewError(protocol.ErrInternal, "tunnel session closed")
+	}
 }
 
 func (h *Handler) handleNATClose(params json.RawMessage) {
 	var p protocol.TerminalData
 	_ = json.Unmarshal(params, &p)
-	h.closeNAT(p.SessionID)
+	h.closeNAT(p.SessionID, false)
 }
 
-func (h *Handler) closeNAT(id string) {
+func (h *Handler) closeNAT(id string, notify bool) {
 	natMu.Lock()
 	ts, ok := natSessions[id]
 	if ok {
@@ -93,5 +127,21 @@ func (h *Handler) closeNAT(id string) {
 		close(ts.close)
 		_ = ts.conn.Close()
 	})
-	_ = h.peer.Notify(protocol.MethodNATClose, protocol.TerminalData{SessionID: id})
+	if notify {
+		_ = h.peer.Notify(protocol.MethodNATClose, protocol.TerminalData{SessionID: id})
+	}
+}
+
+func writeFull(w io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := w.Write(data)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
+	return nil
 }

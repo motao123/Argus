@@ -11,8 +11,10 @@ import (
 
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/config"
+	"github.com/motao123/Argus/server/internal/ddns"
 	"github.com/motao123/Argus/server/internal/geoip"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/nat"
 	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/plugin"
 	"github.com/motao123/Argus/server/internal/scheduler"
@@ -31,6 +33,11 @@ type Server struct {
 	OAuth     *oauth.Client
 	GeoIP     *geoip.Service
 	Plugins   *plugin.Manager
+	DDNS      *ddns.Client
+	NAT       *nat.Proxy
+
+	// upgradeResumeDelay 控制重启后恢复 pending 升级任务的宽限期（仅测试覆盖）。
+	upgradeResumeDelay time.Duration
 }
 
 // New 构建 gin 引擎并注册全部路由。

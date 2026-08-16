@@ -115,8 +115,10 @@ func (h *Handler) Handle(method string, params json.RawMessage) (any, *protocol.
 		if !h.caps.NAT {
 			return disabled()
 		}
-		h.handleNATData(params)
-		return nil, nil
+		if rpcErr := h.handleNATData(params); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return map[string]any{"ok": true}, nil
 	case protocol.MethodNATClose:
 		if !h.caps.NAT {
 			return disabled()

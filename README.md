@@ -63,7 +63,14 @@ docker build -f deploy/Dockerfile -t argus:local .
 | 变量 | 默认行为 | 说明 |
 |---|---|---|
 | `ARGUS_GEOIP_ENDPOINT` | 空（不查询 GeoIP） | 可选 HTTP GeoIP 基础 URL；服务端请求 `<endpoint>/<ip>`，响应需包含 `country_code` 或 `countryCode`。地图依赖 GeoIP 国家码；未配置 provider 或查询无结果时，地图会安全隐藏，而非显示错误数据。 |
-| `ARGUS_NAT_LISTEN` | `:9090` | NAT Host 反向代理监听地址；Compose 中保持为 `0.0.0.0:9090`。NAT 仅提供基于 HTTP `Host` 的简化 TCP 隧道，不含 TLS 终止、租约、配额或能力协商。 |
+| `ARGUS_NAT_LISTEN` | `:9090` | NAT HTTP 隧道监听地址；Compose 中保持为 `0.0.0.0:9090`。仅按 HTTP `Host` 路由、承载 HTTP/1.x 与 WebSocket Upgrade（不暴露通用 TCP/UDP 入口），含端到端背压（缓冲满不丢包）、连接配额与 reserved host 保护。 |
+| `ARGUS_NAT_SERVER_CONNECTION_LIMIT` | `16` | 每台服务器并发 HTTP 隧道上限。 |
+| `ARGUS_NAT_USER_CONNECTION_LIMIT` | `32` | 每用户（owner）并发 HTTP 隧道上限。 |
+| `ARGUS_NAT_RESERVED_HOSTS` | 空 | 逗号分隔的保留域名（如 dashboard 域名），禁止被 NAT Host 路由覆盖；命中返回 421。 |
+| `ARGUS_MCP_ENABLED` | `false`（默认关闭） | 是否启用 MCP 端点（`POST /mcp`）。仅接受 `Authorization: Bearer argus_*` PAT，不支持 JWT。 |
+| `ARGUS_MCP_RATE_LIMIT` | `60` | 每个 PAT 每分钟允许的 MCP 请求数（超限返回 429 与 `Retry-After`）。 |
+| `ARGUS_MCP_TRANSFER_MAX_MB` | `64` | MCP `fs.download_url` / `fs.upload_url` 一次性传输的大小上限（MB）。 |
+| `ARGUS_MCP_TRANSFER_TTL_SECONDS` | `300` | 一次性传输 URL 的有效期（秒），过期或使用后立即失效。 |
 | `ARGUS_TRUSTED_PROXIES` | 空（不信任代理头） | 逗号分隔的代理 IP/CIDR。仅在可信反向代理后部署时填写，否则不得采信客户端传入的转发头。 |
 | `ARGUS_JWT_SECRET` | 自动生成并持久化到数据库旁的 `.jwt` 文件 | 可选固定 JWT 签名密钥；生产环境设置时请使用高强度随机值，并在多实例间保持一致。不要提交真实密钥。 |
 
@@ -92,6 +99,18 @@ cd ../agent && go build -o argus-agent ./cmd/argus-agent
 cd web && pnpm install && pnpm dev:mock
 ```
 
+### 发布构建（多平台二进制 + SHA-256）
+
+```bash
+make release          # 先构建前端并内嵌，再产出 dist/release/<commit>/ 下全部二进制
+bash scripts/release-build.sh   # 仅构建（需已存在 webdist）
+```
+
+- Agent：linux/amd64、linux/arm64、windows/amd64、darwin/amd64、darwin/arm64（纯 Go）。
+- Server：linux/amd64（cgo SQLite 原生构建）；linux/arm64 需要 `aarch64-linux-gnu-gcc`；windows/darwin 需要对应 C 交叉工具链（缺省跳过并告警）。
+- 每个二进制配套 SHA-256：`checksums.txt`（`sha256sum -c` 可校验）+ `manifest.json`。
+- 脚本与 GitHub Actions（`release.yml`，手动触发）都**不创建 tag / release、不推送远端**。
+
 ## 前台 / 后台
 
 - **前台（公开，无需登录）**：服务器总览（统计卡 + 服务监控状态条 + 卡片墙）、服务器详情、实时 WS 推送——借鉴 komari 前台与 nezha dash-v2 游客模式
@@ -109,6 +128,14 @@ cd web && pnpm install && pnpm dev:mock
 - [x] 定时任务：cron 表达式向指定服务器下发命令，手动触发
 - [x] 文件管理器：远端目录浏览 / 上传 / 预览 / 删除
 - [x] 远程执行：管理台直接执行命令并查看输出
+- [x] Agent 批量升级：持久化 Job + 受控并发 + 逐机回执 + SHA-256 强制校验 + 失败回滚；Server 重启后自动恢复未完成任务
+- [x] 生命周期：服务器过户（密钥轮换 + 状态机 + 取消回滚）
+
+**MCP（默认关闭，`ARGUS_MCP_ENABLED=true` 启用）**
+- [x] JSON-RPC 2.0 over Streamable HTTP：`initialize` / `notifications/initialized` / `ping` / `tools/list` / `tools/call` / 会话终止
+- [x] 仅 PAT 认证（`argus_*`），按令牌限流，全部调用写入审计
+- [x] 工具：`server.list/get/exec`、`fs.list/read/write/delete`、`meta.whoami`
+- [x] 一次性传输：`fs.download_url` / `fs.upload_url`，带大小上限、有效期、SHA-256 与 `if-match` 条件覆盖
 
 **告警**
 - [x] 报警规则：阈值 + 持续时长状态机，触发/恢复双向提醒
