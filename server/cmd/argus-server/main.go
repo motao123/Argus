@@ -210,6 +210,11 @@ func main() {
 	agents.IPChangeCb = srv.HandleServerIPChange
 	router := api.New(srv)
 
+	// 容器编排/反向代理探活端点：不访问数据库，不泄露运行数据。
+	router.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
 	// 6. 静态资源（内嵌前端，构建时注入；目录不存在则跳过）
 	// pprof 性能剖析（借鉴 komari，受 admin 路由保护）
 	router.GET("/debug/pprof/*pprof", srv.AuthMiddlewareForPProf(), srv.PProfHandler)

@@ -103,3 +103,10 @@
 | 5. 架构设计 | ✅ integration-design.md 已实现（v2 架构 + 分层设计）；本轮补 2 个管理页 |
 | 6. 部署验证与修复 | ✅ 修复 Agent 密钥链路缺陷（admin 引导生成密钥 + GET /users/:id/secret + 存量回填 + 单测）；新增在线会话/站点设置页；go test/vet/gofmt 全绿；真实 Agent 端到端 + 浏览器实测（截图 docs/screenshots/） |
 | 7. 提交与推送 | 见当次提交信息（GitHub origin + cnb 双远端） |
+
+### CNB 线上部署边界（2026-08-16 补充）
+
+已新增 `.cnb.yml`（main push：Go test/vet → Web build → Docker build/push 到 CNB 制品库）。
+CNB 官方定位中，仓库 YAML 负责 CI、制品和部署流程编排，不会自动创建公网生产实例；
+因此当前可验证完成的是 GitHub/CNB Git 同步 + CNB 流水线定义，实际线上运行需另行提供目标
+服务器/Kubernetes/云平台与凭据。没有公开生产 URL 前，不将本地 :8080 冒充 CNB 线上部署验证。

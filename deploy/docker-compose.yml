@@ -1,30 +1,30 @@
 services:
   server:
-    image: golang:1.26-alpine
-    working_dir: /app
-    command: sh -c "cd server && go build -o /argus-server ./cmd/argus-server && /argus-server -l 0.0.0.0:8080 -d /data/argus.db"
-    volumes:
-      - .:/app
-      - argus-data:/data
-    ports:
-      - "8080:8080"
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: argus:local
     environment:
-      - ARGUS_ADMIN_USER=admin
-      - ARGUS_ADMIN_PASS=argus123
-    restart: unless-stopped
-
-  agent:
-    image: golang:1.26-alpine
-    working_dir: /app
-    command: sh -c "cd agent && go build -o /argus-agent ./cmd/argus-agent && /argus-agent -s ws://server:8080/ws/agent -c /data"
+      ARGUS_LISTEN: 0.0.0.0:8080
+      ARGUS_DB: /app/data/argus.db
+      ARGUS_ADMIN_USER: ${ARGUS_ADMIN_USER:-admin}
+      # 生产环境必须在 .env 中设置强密码，不使用仓库默认值。
+      ARGUS_ADMIN_PASS: ${ARGUS_ADMIN_PASS:?请在 deploy/.env 中设置 ARGUS_ADMIN_PASS}
     volumes:
-      - .:/app
-      - agent-data:/data
-    depends_on:
-      - server
+      - argus-data:/app/data
+    ports:
+      - "${ARGUS_HTTP_PORT:-8080}:8080"
+      - "${ARGUS_NAT_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
-    # 本示例 agent 与 server 同机演示；生产环境把 agent 部署到各被监控机器
 
+# Agent 应部署在每台被监控机器上：
+#   ./argus-agent -s wss://your-domain/ws/agent -k <服务器密钥>
+# 不在 Dashboard 容器旁自动启动 Agent，避免把容器自身误当作宿主机。
 volumes:
   argus-data:
-  agent-data:

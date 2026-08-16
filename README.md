@@ -45,8 +45,17 @@ deploy/     docker-compose / systemd 部署样例
 ### 方式一：Docker Compose
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d
-# 打开 http://localhost:8080
+cp deploy/.env.example deploy/.env
+# 修改 deploy/.env 中的 ARGUS_ADMIN_PASS 后启动
+cd deploy && docker compose up -d
+# 健康检查：http://localhost:8080/healthz
+# 打开：http://localhost:8080
+```
+
+生产镜像也可直接构建：
+
+```bash
+docker build -f deploy/Dockerfile -t argus:local .
 ```
 
 ### 方式二：本地构建

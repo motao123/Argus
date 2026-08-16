@@ -81,3 +81,13 @@
 终端、文件管理、任务、多渠道告警、多用户、PAT/OAuth2/2FA 权限、插件、
 DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺陷（Agent 密钥链路）、
 新增 2 个管理页面，后端测试/静态检查全绿，真实 Agent 端到端与浏览器实测全部通过。
+
+## 九、生产部署与 CNB 流水线复核（2026-08-16）
+
+- 新增 `/healthz` 无状态探活端点（HTTP 200 `{status:"ok"}`）
+- 修复 deploy/docker-compose.yml：改为根目录 build context + 生产 Dockerfile，不再运行时挂载错误目录现场编译；管理员密码必须由 deploy/.env 提供
+- 补齐 systemd：deploy/argus-server.service + deploy/argus.env.example
+- 生产 Dockerfile 修复：复制 pnpm-workspace.yaml/.npmrc，CI 模式安装，基础镜像使用完整 docker.io 路径
+- 本地 Podman 构建已通过 web 阶段（2273 modules），进入 Go 阶段时因本机 Docker Hub 直连超时未拉到 golang:1.26-alpine；代码自身 go test/vet/web build 均已独立通过
+- 新增 .cnb.yml：main push 顺序执行 Go test/vet、Web build、生产镜像构建并推送 `docker.cnb.cool/<repo>:<commit>` 与 latest
+- **边界说明**：CNB 仓库/制品流水线可由 .cnb.yml 完成；CNB 不自动提供公网生产运行实例。当前已完成双远端代码同步与 CNB 发布流水线定义，公网生产 URL 仍需目标服务器/Kubernetes/云平台凭据后才能执行并验证。

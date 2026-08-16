@@ -1,0 +1,26 @@
+main:
+  push:
+    - name: verify-and-publish
+      services:
+        - docker
+      stages:
+        - name: Go test and vet
+          image: golang:1.26
+          script:
+            - cd server
+            - go test ./...
+            - go vet ./...
+        - name: Web build
+          image: node:22
+          script:
+            - corepack enable
+            - cd web
+            - pnpm install --frozen-lockfile
+            - pnpm build
+        - name: Build production image
+          script:
+            - docker build -f deploy/Dockerfile -t "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT_SHORT}" -t "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest" .
+        - name: Push production image
+          script:
+            - docker push "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT_SHORT}"
+            - docker push "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
