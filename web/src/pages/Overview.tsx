@@ -69,8 +69,11 @@ export default function Overview() {
         if (typeof va === "string") return va.localeCompare(vb as string) * dir;
         return ((va as number) - (vb as number)) * dir;
       });
-      // 离线永远沉底（借鉴 dash-v2）
-      list.sort((a, b) => Number(a.online) - Number(b.online));
+      // 离线永远沉底（在线优先，借鉴 dash-v2）
+      list.sort((a, b) => Number(b.online) - Number(a.online));
+    } else {
+      // 默认排序也保持在线优先
+      list = [...list].sort((a, b) => Number(b.online) - Number(a.online));
     }
     return list;
   }, [servers, query, group, sortKey, sortDesc, status]);

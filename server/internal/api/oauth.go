@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -84,8 +86,69 @@ func (s *Server) oauthCallback(c *gin.Context) {
 		return
 	}
 	c.SetCookie("oauth_state", "", -1, "/", "", false, true)
-	// 前端通过 URL 参数接收 token（简化：重定向到前台并带 token 片段）
-	c.Redirect(http.StatusFound, "/login?oauth_token="+token)
+	// 安全交换：JWT 不出现在 URL。发放一次性短期 code，由前端交换。
+	oneTimeCode := issueOAuthCode(token, 60*time.Second)
+	c.Redirect(http.StatusFound, "/login?oauth_code="+oneTimeCode)
+}
+
+// ---- OAuth 一次性 code 交换（避免 JWT 进入浏览器历史/日志）----
+
+var oauthCodeMu sync.Mutex
+var oauthCodes = map[string]oauthCodeEntry{}
+
+type oauthCodeEntry struct {
+	token     string
+	expiresAt time.Time
+}
+
+func issueOAuthCode(token string, ttl time.Duration) string {
+	buf := make([]byte, 16)
+	_, _ = rand.Read(buf)
+	code := hex.EncodeToString(buf)
+	oauthCodeMu.Lock()
+	defer oauthCodeMu.Unlock()
+	oauthCodes[code] = oauthCodeEntry{token: token, expiresAt: time.Now().Add(ttl)}
+	// 清理过期 code，防止内存增长
+	for k, v := range oauthCodes {
+		if time.Now().After(v.expiresAt) {
+			delete(oauthCodes, k)
+		}
+	}
+	return code
+}
+
+// consumeOAuthCode 单次消费 OAuth code，返回 JWT。
+func (s *Server) consumeOAuthCode(c *gin.Context) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Code == "" {
+		fail(c, http.StatusBadRequest, "code required")
+		return
+	}
+	oauthCodeMu.Lock()
+	entry, found := oauthCodes[req.Code]
+	delete(oauthCodes, req.Code) // 单次使用
+	oauthCodeMu.Unlock()
+	if !found || time.Now().After(entry.expiresAt) {
+		fail(c, http.StatusUnauthorized, "invalid or expired code")
+		return
+	}
+	ok(c, gin.H{"token": entry.token})
+}
+
+// listPublicOAuthProviders 登录页展示已启用的 OAuth provider（仅名称，不泄露凭据）。
+func (s *Server) listPublicOAuthProviders(c *gin.Context) {
+	var cfgs []model.OAuthConfig
+	if err := s.DB.Where("enabled = ?", true).Order("id").Find(&cfgs).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	names := make([]string, 0, len(cfgs))
+	for _, cfg := range cfgs {
+		names = append(names, cfg.Name)
+	}
+	ok(c, gin.H{"providers": names})
 }
 
 // oauthConfigs 管理 API：列出/保存/删除 provider 配置。

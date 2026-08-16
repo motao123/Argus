@@ -35,6 +35,7 @@ func (s *Server) getPublicSettings(c *gin.Context) {
 	ok(c, gin.H{
 		"site_name":  s.GetSetting(SettingSiteName, "Argus"),
 		"site_desc":  s.GetSetting(SettingSiteDesc, "轻量自托管服务器监控"),
+		"favicon":    s.GetSetting(SettingFavicon, ""),
 		"force_auth": s.GetSetting(SettingForceAuth, "0") == "1",
 	})
 }

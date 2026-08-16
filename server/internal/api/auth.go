@@ -98,3 +98,22 @@ func (s *Server) login(c *gin.Context) {
 	}
 	ok(c, gin.H{"token": token, "username": user.Username})
 }
+
+// me 当前登录用户信息（含 2FA 状态）。
+func (s *Server) me(c *gin.Context) {
+	p := principalFromContext(c)
+	if p == nil {
+		fail(c, http.StatusUnauthorized, "login required")
+		return
+	}
+	var user model.User
+	if err := s.DB.First(&user, p.UserID).Error; err != nil {
+		fail(c, http.StatusUnauthorized, "user not found")
+		return
+	}
+	ok(c, gin.H{
+		"username":       user.Username,
+		"role":           user.Role,
+		"two_fa_enabled": user.TwoFAEnabled,
+	})
+}

@@ -124,3 +124,22 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
 - 隐藏服务器：guest 404、非 owner 404、owner 200
 - 单字段 PATCH 不清空 name；MCP 只读 PAT：get 放行、exec 拒绝、不存在 404
 - 空密钥 Agent：客户端与服务端双重拒绝
+
+## 十二、阶段 1：认证闭环与前端可靠性（2026-08-16）
+
+**后端**
+- OAuth 不再把 JWT 放入 URL：改为一次性短期 code 交换（`POST /auth/oauth/consume`），新增公开 `GET /auth/oauth/providers` 与 `GET /auth/me`
+- 2FA 全生命周期 API：setup/qrcode/enable/disable + 登录强制校验（me 返回 two_fa_enabled）
+- 公开设置补充 favicon 字段
+
+**前端**
+- 登录页：OAuth provider 按钮、2FA 验证码字段（登录失败含 2fa 时自动出现）、`oauth_code` 消费
+- 新增「账户安全」页（/admin/security）：TOTP 开启/关闭（二维码+密钥+验证码）、OAuth provider CRUD（admin）
+- 全局 ErrorBoundary；显式 403/404 页面（替换通配跳首页）
+- WS 连接状态提示（重连横幅）；修复「离线沉底」排序（在线优先）
+- 服务器详情/管理列表新增网页终端入口；favicon 从公开设置应用
+- 后台响应式：<1024px 顶部栏+抽屉导航，表格与内容适配移动端
+
+**验证**
+- API：TOTP 生成→启用→无码登录 401→带码 200→错码 401→关闭，全链路通过；OAuth code 单次/过期/无效测试通过（oauth_test.go）
+- 浏览器：登录页 GitHub 按钮、安全页 2FA 二维码/密钥/验证码、OAuth provider 表格、404 页、390x844 移动端抽屉导航，全部通过

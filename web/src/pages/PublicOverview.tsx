@@ -52,7 +52,7 @@ function ServiceStatusStrip() {
 }
 
 export default function PublicOverview() {
-  const { servers, online, total } = useServers();
+  const { servers, online, total, wsStatus } = useServers();
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("全部");
   const [sortKey, setSortKey] = useState<SortKey>("default");
@@ -98,13 +98,20 @@ export default function PublicOverview() {
         if (typeof va === "string") return va.localeCompare(vb as string) * dir;
         return ((va as number) - (vb as number)) * dir;
       });
-      list.sort((a, b) => Number(a.online) - Number(b.online)); // 离线沉底
+      list.sort((a, b) => Number(b.online) - Number(a.online)); // 在线优先、离线沉底
+    } else {
+      list = [...list].sort((a, b) => Number(b.online) - Number(a.online));
     }
     return list;
   }, [servers, query, group, sortKey, sortDesc, status]);
 
   return (
     <div>
+      {wsStatus === "reconnecting" && (
+        <div className="mb-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+          实时连接中断，正在重连…
+        </div>
+      )}
       <div className="mb-5">
         <h1 className="text-xl font-semibold">服务器总览</h1>
         <p className="text-sm text-muted">

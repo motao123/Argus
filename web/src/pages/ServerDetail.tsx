@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, TerminalSquare } from "lucide-react";
 import {
   CartesianGrid,
   Line,
@@ -12,7 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { useState } from "react";
-import { api, type MetricPoint } from "../lib/api";
+import { api, getToken, type MetricPoint } from "../lib/api";
 import { useServers } from "../context/servers";
 import { fmtBytes, fmtSpeed, fmtTime, fmtUptime } from "../lib/format";
 
@@ -114,7 +114,21 @@ export default function ServerDetail() {
             </p>
           </div>
         </div>
-
+        {getToken() ? (
+          <Link
+            to={`/admin/terminal/${serverId}`}
+            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-fg"
+            title={server.online ? "打开网页终端" : "服务器离线"}
+          >
+            <TerminalSquare className="h-4 w-4" />
+            终端
+          </Link>
+        ) : (
+          <Link to="/login" className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-fg">
+            <TerminalSquare className="h-4 w-4" />
+            登录后使用终端
+          </Link>
+        )}
       </div>
 
       {/* 实时指标 */}

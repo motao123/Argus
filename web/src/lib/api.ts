@@ -152,6 +152,29 @@ export interface MetricPoint {
   disk_total: number;
 }
 
+export interface Me {
+  username: string;
+  role: string;
+  two_fa_enabled: boolean;
+}
+
+export interface TwoFASetup {
+  secret: string;
+  otpauth_url: string;
+}
+
+export interface OAuthConfig {
+  id: number;
+  name: string;
+  client_id: string;
+  auth_url: string;
+  token_url: string;
+  user_info_url: string;
+  username_field: string;
+  admin_logins: string;
+  enabled: boolean;
+}
+
 let token: string | null = localStorage.getItem("argus-token");
 
 export function setToken(t: string | null) {
@@ -175,7 +198,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(path, { ...options, headers });
-  if (res.status === 401) {
+  if (res.status === 401 && !path.includes("/auth/login") && !path.includes("/auth/oauth")) {
     setToken(null);
     window.location.href = "/login";
     throw new Error("unauthorized");
@@ -187,12 +210,40 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return body.data;
 }
 
+// requestBlob 用于二维码 PNG、备份下载等非 JSON 响应。
+async function requestBlob(path: string, options: RequestInit = {}): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(path, { ...options, headers });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.blob();
+}
+
 export const api = {
-  login: (username: string, password: string) =>
+  login: (username: string, password: string, twoFACode = "") =>
     request<{ token: string; username: string }>("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, two_fa_code: twoFACode }),
     }).then((r) => r),
+
+  me: () => request<Me>("/api/v1/auth/me"),
+  oauthProviders: () => request<{ providers: string[] }>("/api/v1/auth/oauth/providers"),
+  consumeOAuthCode: (code: string) =>
+    request<{ token: string }>("/api/v1/auth/oauth/consume", { method: "POST", body: JSON.stringify({ code }) }),
+
+  twoFASetup: () => request<TwoFASetup>("/api/v1/auth/2fa/setup"),
+  twoFAQRCode: () => requestBlob("/api/v1/auth/2fa/qrcode"),
+  twoFAEnable: (code: string) =>
+    request<{ ok: boolean }>("/api/v1/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code }) }),
+  twoFADisable: (code: string) =>
+    request<{ ok: boolean }>("/api/v1/auth/2fa/disable", { method: "POST", body: JSON.stringify({ code }) }),
+
+  oauthConfigs: () => request<{ providers: OAuthConfig[] }>("/api/v1/oauth/providers"),
+  saveOAuthConfig: (cfg: Partial<OAuthConfig> & { name: string; client_secret?: string }) =>
+    request<{ ok: boolean }>("/api/v1/oauth/providers", { method: "POST", body: JSON.stringify(cfg) }),
+  deleteOAuthConfig: (name: string) => request(`/api/v1/oauth/providers/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
   servers: () => request<{ servers: Server[] }>("/api/v1/servers"),
   createServer: (s: { name: string; group: string; note: string }) =>

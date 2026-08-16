@@ -18,6 +18,9 @@ import Access from "./pages/Access";
 import Sessions from "./pages/Sessions";
 import Settings from "./pages/Settings";
 import Network from "./pages/Network";
+import Security from "./pages/Security";
+import { NotFound, Forbidden } from "./pages/Status";
+import ErrorBoundary from "./components/ErrorBoundary";
 import TerminalPage from "./pages/Terminal";
 import PublicOverview from "./pages/PublicOverview";
 import "./index.css";
@@ -33,8 +36,9 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
         <Routes>
           {/* 前台（公开，无需登录）—— 借鉴 komari 前台 + nezha 游客模式 */}
           <Route
@@ -70,13 +74,30 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/admin/access" element={<Access />} />
             <Route path="/admin/sessions" element={<Sessions />} />
             <Route path="/admin/network" element={<Network />} />
+            <Route path="/admin/security" element={<Security />} />
             <Route path="/admin/settings" element={<Settings />} />
             <Route path="/admin/terminal/:id" element={<TerminalPage />} />
+            <Route path="/admin/403" element={<Forbidden />} />
           </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/403" element={<Forbidden />} />
+          <Route path="/404" element={<NotFound />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );
+
+// 应用站点 favicon（来自公开设置）
+fetch("/api/v1/public/settings")
+  .then((r) => r.json())
+  .then((d) => {
+    const fav = d?.data?.favicon;
+    if (fav) {
+      const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+      if (link) link.href = fav;
+    }
+  })
+  .catch(() => {});

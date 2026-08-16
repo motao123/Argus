@@ -41,8 +41,11 @@ func New(s *Server) *gin.Engine {
 	api := r.Group("/api/v1")
 	{
 		api.POST("/auth/login", s.login)
+		api.POST("/auth/oauth/consume", s.consumeOAuthCode)
+		api.GET("/auth/oauth/providers", s.listPublicOAuthProviders)
 		api.GET("/auth/oauth/:provider", s.oauthRedirect)
 		api.GET("/auth/oauth/:provider/callback", s.oauthCallback)
+		api.GET("/auth/me", s.authMiddleware(), s.me)
 		api.GET("/auth/2fa/setup", s.authMiddleware(), s.twoFASetup)
 		api.GET("/auth/2fa/qrcode", s.authMiddleware(), s.twoFAQRCode)
 		api.POST("/auth/2fa/enable", s.authMiddleware(), s.twoFAEnable)

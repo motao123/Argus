@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, KeyRound, Pencil, Plus, TerminalSquare, Trash2 } from "lucide-react";
 import { api, type Server } from "../lib/api";
 import { useServers } from "../context/servers";
 
@@ -153,6 +154,13 @@ export default function Servers() {
                 <td className="px-4 py-3 text-muted">{s.note || "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
+                    <Link
+                      to={`/admin/terminal/${s.id}`}
+                      title={s.online ? "打开终端" : "服务器离线"}
+                      className={`rounded p-1.5 ${s.online ? "hover:bg-black/5 dark:hover:bg-white/5" : "pointer-events-none opacity-40"}`}
+                    >
+                      <TerminalSquare className="h-4 w-4" />
+                    </Link>
                     <button
                       onClick={() => {
                         setExecTarget(s);
