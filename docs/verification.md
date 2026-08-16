@@ -191,3 +191,15 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
 - 端到端验证：CSS/JS/页脚注入生效；未批准插件 fetch 拒绝、批准后成功（httptest）；
   插件状态重启持久化（单测）
 - 新增 plugin_test.go（TestPluginPermissionDeniedThenApproved）
+
+## 十七、阶段 6：全量回归与发布核验（2026-08-16）
+
+- 全模块：go test（alert/api/mcp/plugin/store）全绿、go vet 干净、gofmt 0 待格式化
+- 前端：tsc typecheck + vite build 通过
+- 浏览器全页面回归：后台 13 页（总览/服务器/服务/报警/任务/文件/访问/会话/网络/安全/插件/维护/设置）
+  全部 OK；前台总览/详情/404/移动端抽屉 OK
+- 修复：前台与详情改用 REST 合并 WS，离线服务器（无 Agent 连接）也能显示与打开
+- 权限矩阵 10 项复核通过：跨租户 update/exec/terminal/DDNS、guest hidden、
+  非 admin 插件/建用户/过户均拒绝；admin/owner 放行
+- 生产镜像：web 阶段 podman 构建验证通过；golang 阶段因本机 Docker Hub 直连超时
+  （环境网络限制，非 Dockerfile 问题），CNB 流水线在可达 registry 下完成镜像构建

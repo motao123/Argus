@@ -108,10 +108,18 @@ function MetricChart({
 export default function ServerDetail() {
   const { id } = useParams();
   const serverId = Number(id);
-  const { servers } = useServers();
+  const { servers: liveServers } = useServers();
   const [period, setPeriod] = useState<(typeof periods)[number]["key"]>("1h");
 
-  const server = servers.find((s) => s.id === serverId);
+  // 合并 WS 实时与 REST（离线服务器也能打开详情）
+  const { data: restData } = useQuery({ queryKey: ["servers-public"], queryFn: api.servers });
+  const restServers = restData?.servers ?? [];
+  const server = useMemo(() => {
+    const live = liveServers.find((s) => s.id === serverId);
+    const rest = restServers.find((s) => s.id === serverId);
+    if (live && rest) return { ...rest, ...live };
+    return live ?? rest;
+  }, [liveServers, restServers, serverId]);
   const { data } = useQuery({
     queryKey: ["metrics", serverId, period],
     queryFn: () => api.metrics(serverId, period),

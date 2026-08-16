@@ -52,7 +52,16 @@ function ServiceStatusStrip() {
 }
 
 export default function PublicOverview() {
-  const { servers, online, total, wsStatus } = useServers();
+  const { servers: liveServers, wsStatus } = useServers();
+  // 合并 REST 列表（含离线）与 WS 实时值：以 REST 为底，WS 覆盖在线服务器实时字段
+  const { data: restData } = useQuery({ queryKey: ["servers-public"], queryFn: api.servers, refetchInterval: 30000 });
+  const restServers = restData?.servers ?? [];
+  const servers = useMemo(() => {
+    const liveById = new Map(liveServers.map((s) => [s.id, s]));
+    return restServers.map((s) => (liveById.has(s.id) ? { ...s, ...liveById.get(s.id) } : s));
+  }, [restServers, liveServers]);
+  const online = servers.filter((s) => s.online).length;
+  const total = servers.length;
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("全部");
   const [sortKey, setSortKey] = useState<SortKey>("default");
