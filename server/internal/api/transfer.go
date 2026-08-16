@@ -9,24 +9,7 @@ import (
 	"github.com/motao123/Argus/server/internal/model"
 )
 
-// FlushTransfers 消费流量差值队列并落库（由 main 定期调用，每小时一次）。
-func (s *Server) FlushTransfers() {
-	for _, d := range s.Store.TakeTransferQueue() {
-		var existing model.Transfer
-		err := s.DB.Where("server_id = ? AND ts = ?", d.ServerID, d.Ts).First(&existing).Error
-		if err == nil {
-			s.DB.Model(&existing).Updates(map[string]any{
-				"in":  existing.In + d.In,
-				"out": existing.Out + d.Out,
-			})
-		} else {
-			s.DB.Create(&model.Transfer{ServerID: d.ServerID, Ts: d.Ts, In: d.In, Out: d.Out})
-		}
-	}
-}
-
-// serverTransfer 查询服务器周期流量。
-// period: day（24 点）/ month（30 点）/ year（12 点）。
+// serverTransfer 查询服务器周期流量（日历桶：24h 小时桶 / 30d 自然日 / 12m 自然月）。
 func (s *Server) serverTransfer(c *gin.Context) {
 	id := mustID(c)
 	if _, ok := s.authorizePublicServer(c, id); !ok {
@@ -36,43 +19,67 @@ func (s *Server) serverTransfer(c *gin.Context) {
 	period := c.DefaultQuery("period", "day")
 	now := time.Now()
 
-	var step, points int64
+	// 按自然日历对齐起点与步长
+	var step int64
+	var points int64
 	switch period {
 	case "month":
-		step, points = 24*3600, 30
-	case "year":
 		step, points = 30*24*3600, 12
+		// 起点对齐到自然月：12 个月
+		first := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, -(int(points) - 1), 0)
+		from := first.Unix()
+		rows := s.queryTransfers(id, from)
+		out := make([]gin.H, 0, points)
+		for i := int64(0); i < points; i++ {
+			bStart := first.AddDate(0, int(i), 0)
+			bEnd := bStart.AddDate(0, 1, 0)
+			in, outB := sumRange(rows, bStart.Unix(), bEnd.Unix())
+			out = append(out, gin.H{"ts": bStart.Unix(), "in": in, "out": outB})
+		}
+		ok(c, gin.H{"period": "month", "points": out})
+		return
+	case "year":
+		step, points = 365*24*3600, 1
+		// 自然年
+		first := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
+		rows := s.queryTransfers(id, first.Unix())
+		in, outB := sumRange(rows, first.Unix(), first.AddDate(1, 0, 0).Unix())
+		ok(c, gin.H{"period": "year", "points": []gin.H{{"ts": first.Unix(), "in": in, "out": outB}}})
+		return
 	default:
 		period = "day"
 		step, points = 3600, 24
 	}
 
-	from := now.Add(-time.Duration(points) * time.Duration(step) * time.Second).Unix()
-	var rows []model.Transfer
-	if err := s.DB.Where("server_id = ? AND ts >= ?", id, from).Order("ts").Find(&rows).Error; err != nil {
-		fail(c, http.StatusInternalServerError, err.Error())
-		return
+	// 24 小时：对齐到整点
+	start := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location()).Add(-time.Duration(points-1) * time.Hour)
+	rows := s.queryTransfers(id, start.Unix())
+	out := make([]gin.H, 0, points)
+	for i := int64(0); i < points; i++ {
+		bStart := start.Add(time.Duration(i) * time.Hour)
+		bEnd := bStart.Add(time.Hour)
+		in, outB := sumRange(rows, bStart.Unix(), bEnd.Unix())
+		out = append(out, gin.H{"ts": bStart.Unix(), "in": in, "out": outB})
 	}
+	ok(c, gin.H{"period": "day", "points": out})
+	_ = step
+}
 
-	// 聚合到步长
-	type agg struct{ in, out uint64 }
-	buckets := map[int64]*agg{}
-	var order []int64
+// queryTransfers 查询指定服务器 from 之后的小时桶。
+func (s *Server) queryTransfers(serverID, from int64) []model.Transfer {
+	var rows []model.Transfer
+	s.DB.Where("server_id = ? AND ts >= ?", serverID, from).Order("ts").Find(&rows)
+	return rows
+}
+
+// sumRange 汇总 [start,end) 小时内桶的流量。
+func sumRange(rows []model.Transfer, start, end int64) (uint64, uint64) {
+	var in, out uint64
 	for _, r := range rows {
-		bts := r.Ts / step * step
-		a, ok := buckets[bts]
-		if !ok {
-			a = &agg{}
-			buckets[bts] = a
-			order = append(order, bts)
+		if r.Ts >= start && r.Ts < end {
+			in += r.In
+			out += r.Out
 		}
-		a.in += r.In
-		a.out += r.Out
 	}
-	out := make([]gin.H, 0, len(order))
-	for _, bts := range order {
-		a := buckets[bts]
-		out = append(out, gin.H{"ts": bts, "in": a.in, "out": a.out})
-	}
-	ok(c, gin.H{"period": period, "points": out})
+	return in, out
 }

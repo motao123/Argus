@@ -19,6 +19,7 @@ import Sessions from "./pages/Sessions";
 import Settings from "./pages/Settings";
 import Network from "./pages/Network";
 import Security from "./pages/Security";
+import Maintenance from "./pages/Maintenance";
 import { NotFound, Forbidden } from "./pages/Status";
 import ErrorBoundary from "./components/ErrorBoundary";
 import TerminalPage from "./pages/Terminal";
@@ -75,6 +76,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/admin/sessions" element={<Sessions />} />
             <Route path="/admin/network" element={<Network />} />
             <Route path="/admin/security" element={<Security />} />
+            <Route path="/admin/maintenance" element={<Maintenance />} />
             <Route path="/admin/settings" element={<Settings />} />
             <Route path="/admin/terminal/:id" element={<TerminalPage />} />
             <Route path="/admin/403" element={<Forbidden />} />

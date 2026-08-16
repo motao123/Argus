@@ -195,8 +195,10 @@ interface ApiResponse<T> {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
+  // FormData 让浏览器自动设置 multipart boundary
+  if (!(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
   const res = await fetch(path, { ...options, headers });
   if (res.status === 401 && !path.includes("/auth/login") && !path.includes("/auth/oauth")) {
     setToken(null);
@@ -244,6 +246,22 @@ export const api = {
   saveOAuthConfig: (cfg: Partial<OAuthConfig> & { name: string; client_secret?: string }) =>
     request<{ ok: boolean }>("/api/v1/oauth/providers", { method: "POST", body: JSON.stringify(cfg) }),
   deleteOAuthConfig: (name: string) => request(`/api/v1/oauth/providers/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
+  dbSize: () => request<{ db_size: number; wal_size: number; total: number }>("/api/v1/admin/db/size"),
+  dbVacuum: () => request<{ ok: boolean }>("/api/v1/admin/db/vacuum", { method: "POST" }),
+  backupDownload: () => requestBlob("/api/v1/admin/backup"),
+  backupRestore: (file: File, uploadId: string, offset: number, final: boolean, totalHash: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("upload_id", uploadId);
+    form.append("offset", String(offset));
+    form.append("final", final ? "1" : "0");
+    form.append("total_hash", totalHash);
+    return request<{ ok: boolean; written: number; final: boolean; note?: string }>("/api/v1/admin/backup/restore", {
+      method: "POST",
+      body: form,
+    });
+  },
 
   servers: () => request<{ servers: Server[] }>("/api/v1/servers"),
   createServer: (s: { name: string; group: string; note: string }) =>

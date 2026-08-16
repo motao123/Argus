@@ -26,29 +26,13 @@ type State struct {
 type Hub struct {
 	mu      sync.RWMutex
 	servers map[int64]*State
-	// 流量打点：serverID → (小时桶, 累计入, 累计出)
-	lastTransferIn   map[int64]uint64
-	lastTransferOut  map[int64]uint64
-	lastTransferHour map[int64]int64
-	transferQueue    []TransferDelta
+	// 流量账本（reset-aware 小时桶，重启恢复）
+	Ledger *TrafficLedger
 }
 
-// TakeTransferQueue 取走待落库的流量差值（由调度器定期消费）。
-func (h *Hub) TakeTransferQueue() []TransferDelta {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	q := h.transferQueue
-	h.transferQueue = nil
-	return q
-}
-
+// NewHub 构造 Hub（流量账本由 main 注入，因为需要 DB）。
 func NewHub() *Hub {
-	return &Hub{
-		servers:          make(map[int64]*State),
-		lastTransferIn:   make(map[int64]uint64),
-		lastTransferOut:  make(map[int64]uint64),
-		lastTransferHour: make(map[int64]int64),
-	}
+	return &Hub{servers: make(map[int64]*State)}
 }
 
 // Upsert 注册或更新服务器配置（Agent 注册时调用）。
@@ -93,25 +77,10 @@ func (h *Hub) SetReport(id int64, host protocol.HostInfo, r *protocol.ReportPara
 	st.Online = true
 	st.LastSeen = time.Now()
 
-	// 流量打点：小时桶差值（借鉴 nezha Transfer）
-	hour := r.Timestamp / 3600 * 3600
-	prevIn, seen := h.lastTransferIn[id]
-	prevOut := h.lastTransferOut[id]
-	prevHour := h.lastTransferHour[id]
-	if seen && prevHour > 0 && prevHour != hour {
-		// 小时切换：上一小时差值入队列（计数器回绕则跳过）
-		if r.NetInTransfer >= prevIn && r.NetOutTransfer >= prevOut {
-			h.transferQueue = append(h.transferQueue, TransferDelta{
-				ServerID: id,
-				Ts:       prevHour,
-				In:       r.NetInTransfer - prevIn,
-				Out:      r.NetOutTransfer - prevOut,
-			})
-		}
+	// 流量账本：reset-aware 增量累加（Ledger 由 main 注入）
+	if h.Ledger != nil {
+		h.Ledger.Feed(id, r.Timestamp, r.NetInTransfer, r.NetOutTransfer)
 	}
-	h.lastTransferIn[id] = r.NetInTransfer
-	h.lastTransferOut[id] = r.NetOutTransfer
-	h.lastTransferHour[id] = hour
 }
 
 // MarkOffline 标记服务器离线（检测到连接断开时调用）。
@@ -149,14 +118,6 @@ func (h *Hub) Snapshot() map[int64]State {
 	return out
 }
 
-// TransferDelta 小时流量差值（导出供 API 层消费）。
-type TransferDelta struct {
-	ServerID int64
-	Ts       int64
-	In       uint64
-	Out      uint64
-}
-
 // ---- 指标降采样 ----
 
 // bucket 单服务器一分钟内的聚合缓冲。
@@ -172,6 +133,8 @@ type bucket struct {
 	netInSum  float64
 	netOutSum float64
 	load1Sum  float64
+	tempSum   float64
+	gpuSum    float64
 }
 
 // MetricBatcher 聚合 Agent 上报为分钟级指标并批量落库。
@@ -222,6 +185,8 @@ func (m *MetricBatcher) Feed(serverID int64, r *protocol.ReportParams) {
 	b.netInSum += r.NetInSpeed
 	b.netOutSum += r.NetOutSpeed
 	b.load1Sum += r.Load1
+	b.tempSum += r.Temperature
+	b.gpuSum += r.GPUUtil
 }
 
 // Run 每 60s flush 一次已完成的分钟桶。
@@ -258,6 +223,8 @@ func (b *bucket) toRow() *metricRow {
 		NetInSpeed:  b.netInSum / n,
 		NetOutSpeed: b.netOutSum / n,
 		Load1:       b.load1Sum / n,
+		Temperature: b.tempSum / n,
+		GPUUtil:     b.gpuSum / n,
 	}
 }
 

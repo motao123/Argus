@@ -46,6 +46,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.Session{},
 		&model.NotificationGroup{},
 		&model.Transfer{},
+		&model.TrafficBaseline{},
 		&model.AuditLog{},
 		&model.Clipboard{},
 		&model.Setting{},

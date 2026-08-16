@@ -70,6 +70,17 @@ func main() {
 	go batcher.Run()
 	defer batcher.Stop()
 
+	// 流量账本（reset-aware，重启恢复）
+	ledger := store.NewTrafficLedger(gdb)
+	st.Ledger = ledger
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			ledger.Flush()
+		}
+	}()
+
 	// 3. Agent 连接中心
 	agents := agent.NewHub(gdb, st, batcher)
 
@@ -196,14 +207,7 @@ func main() {
 		}
 	}()
 
-	// 周期流量落库（每小时消费差值队列，借鉴 nezha Transfer）
-	go func() {
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			srv.FlushTransfers()
-		}
-	}()
+	// 周期流量落库改为 TrafficLedger 的 30s flush（见上文），此处移除旧小时 ticker。
 
 	agents.TermDataCb = srv.HandleAgentTermData
 	// DDNS：服务器 IP 变化时更新解析记录

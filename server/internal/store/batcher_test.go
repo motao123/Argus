@@ -14,6 +14,7 @@ import (
 )
 
 func TestBatcher(t *testing.T) {
+	_ = os.MkdirAll("/tmp/batcher-test", 0o755)
 	_ = os.Remove("/tmp/batcher-test/test.db")
 	gdb, err := gorm.Open(sqlite.Open("/tmp/batcher-test/test.db"), &gorm.Config{})
 	if err != nil {

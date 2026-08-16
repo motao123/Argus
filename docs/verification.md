@@ -143,3 +143,18 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
 **验证**
 - API：TOTP 生成→启用→无码登录 401→带码 200→错码 401→关闭，全链路通过；OAuth code 单次/过期/无效测试通过（oauth_test.go）
 - 浏览器：登录页 GitHub 按钮、安全页 2FA 二维码/密钥/验证码、OAuth provider 表格、404 页、390x844 移动端抽屉导航，全部通过
+
+## 十三、阶段 2：数据正确性与安全维护（2026-08-16）
+
+- 流量账本重写（TrafficLedger）：每次上报 reset-aware 增量累加至小时桶，幂等 upsert，
+  持久化计数基线（traffic_baselines）支持重启恢复，断档>5min 不产生虚假尖峰；
+  旧实现「只在跨小时记一次差值、多数增量丢失」已修复
+- /servers/:id/traffic 改为自然日历桶（24 小时整点 / 30 自然日 / 12 自然月）
+- rollup 只聚合已完成桶（进行中桶跳过，等待补齐），幂等覆盖不再固化不完整桶；
+  Metric/批处理/rollup/API 全链路补充 temperature/gpu_util 历史字段
+- 备份重做：VACUUM INTO 一致性快照 + SHA-256/大小响应头；恢复走 staging 分片
+  （upload_id/offset 顺序校验）→ SQLite 头 + integrity_check + 总哈希校验 →
+  备份当前库后原子切换，无效/乱序文件拒绝
+- 新增「备份维护」页（/admin/maintenance）：下载备份、分片恢复（浏览器分片+进度）、DB 体积、VACUUM
+- 验证：备份 SHA 与下载文件一致；恢复→重启→数据完整；无效文件拒绝；pre-restore 回滚点生成；
+  重启无流量虚假尖峰；store 新增 4 个账本单测

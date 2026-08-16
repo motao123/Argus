@@ -295,7 +295,7 @@ func (s *Server) serverMetrics(c *gin.Context) {
 	// 内存聚合降采样到 step
 	type agg struct {
 		count                                  int
-		cpu, netIn, netOut, load1              float64
+		cpu, netIn, netOut, load1, temp, gpu   float64
 		memUsed, memTotal, diskUsed, diskTotal uint64
 	}
 	buckets := map[int64]*agg{}
@@ -313,6 +313,8 @@ func (s *Server) serverMetrics(c *gin.Context) {
 		a.netIn += r.NetInSpeed
 		a.netOut += r.NetOutSpeed
 		a.load1 += r.Load1
+		a.temp += r.Temperature
+		a.gpu += r.GPUUtil
 		a.memUsed = r.MemUsed
 		a.memTotal = r.MemTotal
 		a.diskUsed = r.DiskUsed
@@ -324,15 +326,17 @@ func (s *Server) serverMetrics(c *gin.Context) {
 		a := buckets[bts]
 		n := float64(a.count)
 		out = append(out, gin.H{
-			"ts":         bts,
-			"cpu":        round2(a.cpu / n),
-			"net_in":     round2(a.netIn / n),
-			"net_out":    round2(a.netOut / n),
-			"load1":      round2(a.load1 / n),
-			"mem_used":   a.memUsed,
-			"mem_total":  a.memTotal,
-			"disk_used":  a.diskUsed,
-			"disk_total": a.diskTotal,
+			"ts":          bts,
+			"cpu":         round2(a.cpu / n),
+			"net_in":      round2(a.netIn / n),
+			"net_out":     round2(a.netOut / n),
+			"load1":       round2(a.load1 / n),
+			"temperature": round2(a.temp / n),
+			"gpu_util":    round2(a.gpu / n),
+			"mem_used":    a.memUsed,
+			"mem_total":   a.memTotal,
+			"disk_used":   a.diskUsed,
+			"disk_total":  a.diskTotal,
 		})
 	}
 	ok(c, gin.H{"period": period, "points": out})

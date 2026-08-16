@@ -141,6 +141,8 @@ type Metric struct {
 	NetInSpeed  float64   `json:"net_in_speed"`
 	NetOutSpeed float64   `json:"net_out_speed"`
 	Load1       float64   `json:"load1"`
+	Temperature float64   `json:"temperature,omitempty"`
+	GPUUtil     float64   `json:"gpu_util,omitempty"`
 	CreatedAt   time.Time `json:"-"`
 }
 
@@ -260,6 +262,14 @@ type Transfer struct {
 	Ts       int64  `gorm:"index:idx_transfer" json:"ts"` // 小时（unix/3600*3600）
 	In       uint64 `json:"in"`
 	Out      uint64 `json:"out"`
+}
+
+// TrafficBaseline 流量计数基线（重启恢复：Agent 累计计数器的最后已知值）。
+type TrafficBaseline struct {
+	ServerID int64  `gorm:"primaryKey" json:"server_id"`
+	In       uint64 `json:"in"`
+	Out      uint64 `json:"out"`
+	TS       int64  `json:"ts"`
 }
 
 // AuditLog 审计日志（管理操作记录，借鉴 komari Log）。
