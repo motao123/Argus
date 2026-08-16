@@ -12,9 +12,57 @@ import {
   YAxis,
 } from "recharts";
 import { useState } from "react";
-import { api, getToken, type MetricPoint } from "../lib/api";
+import { api, getToken, type MetricPoint, type TrafficPoint } from "../lib/api";
 import { useServers } from "../context/servers";
 import { fmtBytes, fmtSpeed, fmtTime, fmtUptime } from "../lib/format";
+
+// 周期流量卡（24h/30d/12m，借鉴 dash-v2 CycleTransferStats）
+function CycleTraffic({ serverId }: { serverId: number }) {
+  const [period, setPeriod] = useState<"day" | "month" | "year">("day");
+  const { data } = useQuery({
+    queryKey: ["traffic", serverId, period],
+    queryFn: () => api.serverTraffic(serverId, period),
+    refetchInterval: 60000,
+  });
+  const points = data?.points ?? [];
+  const totalIn = points.reduce((a, p) => a + p.in, 0);
+  const totalOut = points.reduce((a, p) => a + p.out, 0);
+  const maxV = Math.max(1, ...points.map((p) => p.in + p.out));
+  const label = (ts: number) => (period === "day" ? fmtTime(ts) : new Date(ts * 1000).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }));
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-panel p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-medium">周期流量</span>
+        <div className="flex gap-1 text-xs">
+          {([["day", "24 小时"], ["month", "30 天"], ["year", "12 月"]] as const).map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setPeriod(k)}
+              className={`rounded-full px-2.5 py-1 ${period === k ? "bg-accent text-white" : "bg-black/5 dark:bg-white/10 text-muted"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mb-3 flex gap-4 text-xs text-muted">
+        <span>↓ 累计 {fmtBytes(totalIn)}</span>
+        <span>↑ 累计 {fmtBytes(totalOut)}</span>
+      </div>
+      <div className="flex h-24 items-end gap-[2px]">
+        {points.map((p: TrafficPoint) => (
+          <div key={p.ts} className="group relative flex-1" title={`${label(p.ts)}\n↓ ${fmtBytes(p.in)} ↑ ${fmtBytes(p.out)}`}>
+            <div className="flex h-full w-full flex-col justify-end gap-px">
+              <div className="w-full rounded-t-sm bg-ok/70 transition-all" style={{ height: `${(p.in / maxV) * 100}%` }} />
+              <div className="w-full rounded-t-sm bg-accent/70 transition-all" style={{ height: `${(p.out / maxV) * 100}%` }} />
+            </div>
+          </div>
+        ))}
+        {points.length === 0 && <div className="w-full text-center text-xs text-muted">暂无流量数据</div>}
+      </div>
+    </div>
+  );
+}
 
 const periods = [
   { key: "1h", label: "1 小时" },
@@ -140,6 +188,8 @@ export default function ServerDetail() {
           { label: "负载", value: server.load1.toFixed(2) },
           { label: "下行速率", value: fmtSpeed(server.net_in_speed) },
           { label: "上行速率", value: fmtSpeed(server.net_out_speed) },
+          { label: "温度", value: server.temperature > 0 ? `${server.temperature.toFixed(1)}°C` : "不可用" },
+          { label: "GPU", value: server.gpu_util > 0 ? `${server.gpu_util.toFixed(1)}%` : "不可用" },
           { label: "分组", value: server.group || "默认" },
           { label: "备注", value: server.note || "—" },
         ].map(({ label, value }) => (
@@ -149,6 +199,8 @@ export default function ServerDetail() {
           </div>
         ))}
       </div>
+
+      <CycleTraffic serverId={serverId} />
 
       {/* 历史图表 */}
       <div className="mb-3 flex gap-2">

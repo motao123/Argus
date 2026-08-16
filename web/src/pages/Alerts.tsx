@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { api, type Alert, type Notification } from "../lib/api";
 
 const metrics = [
@@ -10,21 +10,33 @@ const metrics = [
   { key: "net_in_speed", label: "下行速率 (B/s)" },
   { key: "net_out_speed", label: "上行速率 (B/s)" },
   { key: "load1", label: "负载 (1min)" },
+  { key: "temperature", label: "温度 (°C)" },
+  { key: "gpu", label: "GPU 使用率 (%)" },
   { key: "offline", label: "离线" },
 ];
 
-const emptyAlert = { name: "", metric: "cpu", min: null as number | null, max: null as number | null, duration: 30, notify: true, webhook_id: 0, enabled: true };
+const notifTypes = ["webhook", "bark", "telegram", "email", "serverchan"];
+
+const emptyAlert = {
+  name: "", metric: "cpu", min: null as number | null, max: null as number | null, duration: 30,
+  notify: true, webhook_id: 0, group_id: 0, trigger_cron_id: 0, trigger_ratio: null as number | null, enabled: true,
+};
 
 export default function Alerts() {
   const qc = useQueryClient();
   const { data: alertData } = useQuery({ queryKey: ["alerts"], queryFn: api.alerts });
   const { data: notifData } = useQuery({ queryKey: ["notifications"], queryFn: api.notifications });
+  const { data: cronData } = useQuery({ queryKey: ["crons"], queryFn: api.crons });
+  const { data: groupData } = useQuery({ queryKey: ["notification-groups"], queryFn: api.notificationGroups });
   const alerts = alertData?.alerts ?? [];
   const notifications = notifData?.notifications ?? [];
+  const crons = cronData?.crons ?? [];
+  const notifGroups = groupData?.groups ?? [];
 
   const [form, setForm] = useState<(typeof emptyAlert) & { id?: number } | null>(null);
   const [nForm, setNForm] = useState<Partial<Notification> | null>(null);
   const [error, setError] = useState("");
+  const [testResult, setTestResult] = useState("");
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["alerts"] });
@@ -50,6 +62,11 @@ export default function Alerts() {
     onError: (e) => setError((e as Error).message),
   });
   const deleteN = useMutation({ mutationFn: api.deleteNotification, onSuccess: invalidate });
+  const testN = useMutation({
+    mutationFn: (id: number) => api.testMessage(id),
+    onSuccess: (r) => setTestResult(`已投递至 ${r.sent_to}（异步发送，请查收）`),
+    onError: (e) => setTestResult("发送失败: " + (e as Error).message),
+  });
 
   return (
     <div>
@@ -137,6 +154,39 @@ export default function Alerts() {
               启用
             </label>
           </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
+            <select
+              value={form.trigger_cron_id}
+              onChange={(e) => setForm({ ...form, trigger_cron_id: Number(e.target.value) })}
+              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+            >
+              <option value={0}>触发任务：无</option>
+              {crons.map((c) => (
+                <option key={c.id} value={c.id}>
+                  触发「{c.name}」
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              placeholder="采样达标比例 % (1-100，留空=全部采样)"
+              value={form.trigger_ratio ?? ""}
+              onChange={(e) => setForm({ ...form, trigger_ratio: e.target.value === "" ? null : Number(e.target.value) })}
+              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+            />
+            <select
+              value={form.group_id}
+              onChange={(e) => setForm({ ...form, group_id: Number(e.target.value) })}
+              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+            >
+              <option value={0}>通知分组：无</option>
+              {notifGroups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="mt-3 flex gap-2">
             <button
               onClick={() => saveAlert.mutate(form)}
@@ -212,7 +262,7 @@ export default function Alerts() {
       <div className="mb-3 mt-8 flex items-center justify-between">
         <h2 className="text-lg font-semibold">通知渠道</h2>
         <button
-          onClick={() => setNForm({ name: "", url: "", method: "POST", headers: "{}", body: '{"title":"{{title}}","content":"{{content}}"}' })}
+          onClick={() => setNForm({ name: "", type: "webhook", url: "", method: "POST", headers: "{}", body: '{"title":"{{title}}","content":"{{content}}"}', chat_id: "" })}
           className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5"
         >
           <Plus className="h-4 w-4" />
@@ -222,7 +272,7 @@ export default function Alerts() {
 
       {nForm && (
         <div className="mb-5 rounded-xl border border-border bg-panel p-4">
-          <h3 className="mb-3 text-sm font-medium">Webhook</h3>
+          <h3 className="mb-3 text-sm font-medium">通知渠道（{nForm.type ?? "webhook"}）</h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <input
               placeholder="名称"
@@ -230,10 +280,25 @@ export default function Alerts() {
               onChange={(e) => setNForm({ ...nForm, name: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             />
+            <select
+              value={nForm.type ?? "webhook"}
+              onChange={(e) => setNForm({ ...nForm, type: e.target.value })}
+              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+            >
+              {notifTypes.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
             <input
-              placeholder="URL"
+              placeholder="URL（webhook/bark/serverchan）"
               value={nForm.url ?? ""}
               onChange={(e) => setNForm({ ...nForm, url: e.target.value })}
+              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+            />
+            <input
+              placeholder="目标（telegram chat_id / email 收件人）"
+              value={nForm.chat_id ?? ""}
+              onChange={(e) => setNForm({ ...nForm, chat_id: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             />
             <input
@@ -263,12 +328,14 @@ export default function Alerts() {
           </div>
         </div>
       )}
+      {testResult && <p className="mb-3 text-sm text-muted">{testResult}</p>}
 
       <div className="overflow-hidden rounded-xl border border-border bg-panel">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted">
               <th className="px-4 py-3 font-normal">名称</th>
+              <th className="px-4 py-3 font-normal">类型</th>
               <th className="px-4 py-3 font-normal">URL</th>
               <th className="px-4 py-3 text-right font-normal">操作</th>
             </tr>
@@ -277,8 +344,16 @@ export default function Alerts() {
             {notifications.map((n) => (
               <tr key={n.id} className="border-b border-border last:border-0">
                 <td className="px-4 py-3 font-medium">{n.name}</td>
+                <td className="px-4 py-3 text-xs text-muted">{n.type}</td>
                 <td className="max-w-md truncate px-4 py-3 text-muted">{n.url}</td>
                 <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => testN.mutate(n.id)}
+                    title="发送测试消息"
+                    className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
                   <button
                     onClick={() => setNForm(n)}
                     className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"

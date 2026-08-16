@@ -25,9 +25,30 @@ export interface Server {
   net_in_speed: number;
   net_out_speed: number;
   load1: number;
+  temperature: number;
+  gpu_util: number;
   uptime: number;
   online: boolean;
   last_seen: string;
+  price: number;
+  cycle_days: number;
+  expire_at: string | null;
+  auto_renew: boolean;
+  tags: string;
+  sort_order: number;
+  hidden: boolean;
+  owner_id: number;
+}
+
+export interface TrafficPoint {
+  ts: number;
+  in: number;
+  out: number;
+}
+
+export interface ServerGroup {
+  id: number;
+  name: string;
 }
 
 export interface Alert {
@@ -39,16 +60,21 @@ export interface Alert {
   duration: number;
   notify: boolean;
   webhook_id: number;
+  group_id: number;
+  trigger_cron_id: number;
+  trigger_ratio: number | null;
   enabled: boolean;
 }
 
 export interface Notification {
   id: number;
   name: string;
+  type: string;
   url: string;
   method: string;
   headers: string;
   body: string;
+  chat_id: string;
 }
 
 export interface Cron {
@@ -163,6 +189,12 @@ export interface TwoFASetup {
   otpauth_url: string;
 }
 
+export interface NotificationGroup {
+  id: number;
+  name: string;
+  member_ids: string;
+}
+
 export interface OAuthConfig {
   id: number;
   name: string;
@@ -266,9 +298,20 @@ export const api = {
   servers: () => request<{ servers: Server[] }>("/api/v1/servers"),
   createServer: (s: { name: string; group: string; note: string }) =>
     request<{ server: Server; secret: string }>("/api/v1/servers", { method: "POST", body: JSON.stringify(s) }),
-  updateServer: (id: number, s: { name: string; group: string; note: string }) =>
+  updateServer: (id: number, s: Partial<Server>) =>
     request<Server>(`/api/v1/servers/${id}`, { method: "PUT", body: JSON.stringify(s) }),
   deleteServer: (id: number) => request(`/api/v1/servers/${id}`, { method: "DELETE" }),
+  serverTraffic: (id: number, period: "day" | "month" | "year") =>
+    request<{ period: string; points: TrafficPoint[] }>(`/api/v1/servers/${id}/traffic?period=${period}`),
+  batchDeleteServers: (ids: number[]) =>
+    request<{ ok: boolean; deleted: number }>("/api/v1/batch-delete/servers", { method: "POST", body: JSON.stringify({ ids }) }),
+  batchMoveServers: (ids: number[], group: string) =>
+    request<{ ok: boolean; moved: number }>("/api/v1/batch-move/servers", { method: "POST", body: JSON.stringify({ ids, group }) }),
+  groups: () => request<{ groups: ServerGroup[] }>("/api/v1/groups"),
+  createGroup: (name: string) => request<ServerGroup>("/api/v1/groups", { method: "POST", body: JSON.stringify({ name }) }),
+  deleteGroup: (id: number) => request(`/api/v1/groups/${id}`, { method: "DELETE" }),
+  applyServerConfig: (id: number, cfg: { server_url?: string; interval?: number; secret?: string }) =>
+    request<{ ok: boolean }>(`/api/v1/servers/${id}/config`, { method: "POST", body: JSON.stringify(cfg) }),
   exec: (id: number, command: string, timeout = 30) =>
     request<{ output: string; code: number; error?: string }>(`/api/v1/servers/${id}/exec`, {
       method: "POST",
@@ -290,6 +333,9 @@ export const api = {
       ? request<Notification>(`/api/v1/notifications/${n.id}`, { method: "PUT", body: JSON.stringify(n) })
       : request<Notification>("/api/v1/notifications", { method: "POST", body: JSON.stringify(n) }),
   deleteNotification: (id: number) => request(`/api/v1/notifications/${id}`, { method: "DELETE" }),
+  testMessage: (webhook_id: number, title?: string, content?: string) =>
+    request<{ ok: boolean; sent_to: string }>("/api/v1/test-message", { method: "POST", body: JSON.stringify({ webhook_id, title, content }) }),
+  notificationGroups: () => request<{ groups: NotificationGroup[] }>("/api/v1/notification-groups"),
 
   services: () => request<{ services: ServiceItem[] }>("/api/v1/services"),
   saveService: (svc: Partial<ServiceItem> & { id?: number }) =>
