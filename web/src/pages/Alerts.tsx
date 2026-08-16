@@ -2,19 +2,20 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { api, type Alert, type Notification } from "../lib/api";
+import { useI18n, type TKey } from "../lib/i18n";
 
-const metrics = [
-  { key: "cpu", label: "CPU 使用率 (%)" },
-  { key: "mem", label: "内存使用率 (%)" },
-  { key: "disk", label: "磁盘使用率 (%)" },
-  { key: "net_in_speed", label: "下行速率 (B/s)" },
-  { key: "net_out_speed", label: "上行速率 (B/s)" },
-  { key: "load1", label: "负载 (1min)" },
-  { key: "temperature", label: "温度 (°C)" },
-  { key: "gpu", label: "GPU 使用率 (%)" },
-  { key: "traffic_in_cycle", label: "本月入向流量 (字节)" },
-  { key: "traffic_out_cycle", label: "本月出向流量 (字节)" },
-  { key: "offline", label: "离线" },
+const metrics: { key: string; label: TKey }[] = [
+  { key: "cpu", label: "alerts.metricCpu" },
+  { key: "mem", label: "alerts.metricMem" },
+  { key: "disk", label: "alerts.metricDisk" },
+  { key: "net_in_speed", label: "alerts.metricNetIn" },
+  { key: "net_out_speed", label: "alerts.metricNetOut" },
+  { key: "load1", label: "alerts.metricLoad" },
+  { key: "temperature", label: "alerts.metricTemp" },
+  { key: "gpu", label: "alerts.metricGpu" },
+  { key: "traffic_in_cycle", label: "alerts.metricTrafficIn" },
+  { key: "traffic_out_cycle", label: "alerts.metricTrafficOut" },
+  { key: "offline", label: "alerts.metricOffline" },
 ];
 
 const notifTypes = ["webhook", "bark", "telegram", "email", "serverchan"];
@@ -25,6 +26,7 @@ const emptyAlert = {
 };
 
 export default function Alerts() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const { data: alertData } = useQuery({ queryKey: ["alerts"], queryFn: api.alerts });
   const { data: notifData } = useQuery({ queryKey: ["notifications"], queryFn: api.notifications });
@@ -78,23 +80,23 @@ export default function Alerts() {
   const deleteN = useMutation({ mutationFn: api.deleteNotification, onSuccess: invalidate });
   const testN = useMutation({
     mutationFn: (id: number) => api.testMessage(id),
-    onSuccess: (r) => setTestResult(`已投递至 ${r.sent_to}（异步发送，请查收）`),
-    onError: (e) => setTestResult("发送失败: " + (e as Error).message),
+    onSuccess: (r) => setTestResult(t("alerts.testSent", { target: r.sent_to })),
+    onError: (e) => setTestResult(t("alerts.testFailed", { error: (e as Error).message })),
   });
 
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">报警规则</h1>
-          <p className="text-sm text-muted">指标超出阈值并持续设定时长后触发通知</p>
+          <h1 className="text-xl font-semibold">{t("alerts.title")}</h1>
+          <p className="text-sm text-muted">{t("alerts.subtitle")}</p>
         </div>
         <button
           onClick={() => setForm(emptyAlert)}
           className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
-          新建规则
+          {t("alerts.newRule")}
         </button>
       </div>
 
@@ -102,10 +104,10 @@ export default function Alerts() {
 
       {form && (
         <div className="mb-5 rounded-xl border border-border bg-panel p-4">
-          <h2 className="mb-3 text-sm font-medium">{form.id ? "编辑规则" : "新建规则"}</h2>
+          <h2 className="mb-3 text-sm font-medium">{form.id ? t("alerts.editRule") : t("alerts.newRule")}</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <input
-              placeholder="规则名称"
+              placeholder={t("alerts.ruleName")}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
@@ -117,20 +119,20 @@ export default function Alerts() {
             >
               {metrics.map((m) => (
                 <option key={m.key} value={m.key}>
-                  {m.label}
+                  {t(m.label)}
                 </option>
               ))}
             </select>
             <input
               type="number"
-              placeholder="下限 (可选)"
+              placeholder={t("alerts.min")}
               value={form.min ?? ""}
               onChange={(e) => setForm({ ...form, min: e.target.value === "" ? null : Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
             />
             <input
               type="number"
-              placeholder="上限 (可选)"
+              placeholder={t("alerts.max")}
               value={form.max ?? ""}
               onChange={(e) => setForm({ ...form, max: e.target.value === "" ? null : Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
@@ -138,21 +140,21 @@ export default function Alerts() {
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <label className="flex items-center gap-2 text-sm">
-              持续
+              {t("alerts.durationLabel")}
               <input
                 type="number"
                 value={form.duration}
                 onChange={(e) => setForm({ ...form, duration: Number(e.target.value) })}
                 className="w-20 rounded-lg border border-border bg-bg px-2 py-1.5 text-sm outline-none"
               />
-              秒
+              {t("alerts.seconds")}
             </label>
             <select
               value={form.webhook_id}
               onChange={(e) => setForm({ ...form, webhook_id: Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
-              <option value={0}>不通知</option>
+              <option value={0}>{t("alerts.noNotify")}</option>
               {notifications.map((n) => (
                 <option key={n.id} value={n.id}>
                   {n.name}
@@ -165,7 +167,7 @@ export default function Alerts() {
                 checked={form.enabled}
                 onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
               />
-              启用
+              {t("common.enabled")}
             </label>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
@@ -174,16 +176,16 @@ export default function Alerts() {
               onChange={(e) => setForm({ ...form, trigger_cron_id: Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
-              <option value={0}>触发任务：无</option>
+              <option value={0}>{t("alerts.triggerCronNone")}</option>
               {crons.map((c) => (
                 <option key={c.id} value={c.id}>
-                  触发「{c.name}」
+                  {t("alerts.triggerCron", { name: c.name })}
                 </option>
               ))}
             </select>
             <input
               type="number"
-              placeholder="采样达标比例 % (1-100，留空=全部采样)"
+              placeholder={t("alerts.triggerRatio")}
               value={form.trigger_ratio ?? ""}
               onChange={(e) => setForm({ ...form, trigger_ratio: e.target.value === "" ? null : Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
@@ -193,7 +195,7 @@ export default function Alerts() {
               onChange={(e) => setForm({ ...form, group_id: Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
-              <option value={0}>通知分组：无</option>
+              <option value={0}>{t("alerts.notifGroupNone")}</option>
               {notifGroups.map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.name}
@@ -206,10 +208,10 @@ export default function Alerts() {
               onClick={() => saveAlert.mutate(form)}
               className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90"
             >
-              保存
+              {t("common.save")}
             </button>
             <button onClick={() => setForm(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">
-              取消
+              {t("common.cancel")}
             </button>
           </div>
         </div>
@@ -219,28 +221,28 @@ export default function Alerts() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted">
-              <th className="px-4 py-3 font-normal">名称</th>
-              <th className="px-4 py-3 font-normal">指标</th>
-              <th className="px-4 py-3 font-normal">阈值</th>
-              <th className="px-4 py-3 font-normal">持续</th>
-              <th className="px-4 py-3 font-normal">通知</th>
-              <th className="px-4 py-3 font-normal">状态</th>
-              <th className="px-4 py-3 text-right font-normal">操作</th>
+              <th className="px-4 py-3 font-normal">{t("servers.name")}</th>
+              <th className="px-4 py-3 font-normal">{t("alerts.metric")}</th>
+              <th className="px-4 py-3 font-normal">{t("alerts.threshold")}</th>
+              <th className="px-4 py-3 font-normal">{t("alerts.duration")}</th>
+              <th className="px-4 py-3 font-normal">{t("alerts.notify")}</th>
+              <th className="px-4 py-3 font-normal">{t("alerts.status")}</th>
+              <th className="px-4 py-3 text-right font-normal">{t("alerts.actions")}</th>
             </tr>
           </thead>
           <tbody>
             {alerts.map((a: Alert) => (
               <tr key={a.id} className="border-b border-border last:border-0 hover:bg-black/2 dark:hover:bg-white/2">
                 <td className="px-4 py-3 font-medium">{a.name}</td>
-                <td className="px-4 py-3">{metrics.find((m) => m.key === a.metric)?.label ?? a.metric}</td>
+                <td className="px-4 py-3">{metrics.find((m) => m.key === a.metric)?.label ? t(metrics.find((m) => m.key === a.metric)!.label) : a.metric}</td>
                 <td className="px-4 py-3 tabular">
-                  {a.metric === "offline" ? "离线即触发" : `${a.min ?? "—"} ~ ${a.max ?? "—"}`}
+                  {a.metric === "offline" ? t("alerts.offlineTrigger") : t("alerts.range", { min: a.min ?? "—", max: a.max ?? "—" })}
                 </td>
                 <td className="px-4 py-3 tabular">{a.duration}s</td>
-                <td className="px-4 py-3">{a.notify ? notifications.find((n) => n.id === a.webhook_id)?.name ?? `#${a.webhook_id}` : "关闭"}</td>
+                <td className="px-4 py-3">{a.notify ? notifications.find((n) => n.id === a.webhook_id)?.name ?? `#${a.webhook_id}` : t("alerts.notifOff")}</td>
                 <td className="px-4 py-3">
                   <span className={`rounded-full px-2 py-0.5 text-xs ${a.enabled ? "bg-ok/15 text-ok" : "bg-muted/20 text-muted"}`}>
-                    {a.enabled ? "启用" : "停用"}
+                    {a.enabled ? t("common.enabled") : t("common.disabled")}
                   </span>
                 </td>
                 <td className="px-4 py-3">
@@ -252,7 +254,7 @@ export default function Alerts() {
                       <Pencil className="h-4 w-4" />
                     </button>
                     <button
-                      onClick={() => confirm(`删除规则「${a.name}」？`) && deleteAlert.mutate(a.id)}
+                      onClick={() => confirm(t("alerts.confirmDeleteRule", { name: a.name })) && deleteAlert.mutate(a.id)}
                       className="rounded p-1.5 text-err hover:bg-err/10"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -264,7 +266,7 @@ export default function Alerts() {
             {alerts.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-10 text-center text-muted">
-                  暂无报警规则
+                  {t("alerts.noRules")}
                 </td>
               </tr>
             )}
@@ -274,22 +276,22 @@ export default function Alerts() {
 
       {/* 通知渠道 */}
       <div className="mb-3 mt-8 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">通知渠道</h2>
+        <h2 className="text-lg font-semibold">{t("alerts.notifChannels")}</h2>
         <button
           onClick={() => setNForm({ name: "", type: "webhook", url: "", method: "POST", headers: "{}", body: '{"title":"{{title}}","content":"{{content}}"}', chat_id: "" })}
           className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5"
         >
           <Plus className="h-4 w-4" />
-          添加
+          {t("alerts.add")}
         </button>
       </div>
 
       {nForm && (
         <div className="mb-5 rounded-xl border border-border bg-panel p-4">
-          <h3 className="mb-3 text-sm font-medium">通知渠道（{nForm.type ?? "webhook"}）</h3>
+          <h3 className="mb-3 text-sm font-medium">{t("alerts.channelOf", { type: nForm.type ?? "webhook" })}</h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <input
-              placeholder="名称"
+              placeholder={t("servers.name")}
               value={nForm.name ?? ""}
               onChange={(e) => setNForm({ ...nForm, name: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
@@ -299,30 +301,30 @@ export default function Alerts() {
               onChange={(e) => setNForm({ ...nForm, type: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
-              {notifTypes.map((t) => (
-                <option key={t} value={t}>{t}</option>
+              {notifTypes.map((type) => (
+                <option key={type} value={type}>{type}</option>
               ))}
             </select>
             <input
-              placeholder="URL（webhook/bark/serverchan）"
+              placeholder={t("alerts.url")}
               value={nForm.url ?? ""}
               onChange={(e) => setNForm({ ...nForm, url: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             />
             <input
-              placeholder="目标（telegram chat_id / email 收件人）"
+              placeholder={t("alerts.chatId")}
               value={nForm.chat_id ?? ""}
               onChange={(e) => setNForm({ ...nForm, chat_id: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             />
             <input
-              placeholder='请求头 JSON，如 {"X-Token":"abc"}'
+              placeholder={t("alerts.headers")}
               value={nForm.headers ?? ""}
               onChange={(e) => setNForm({ ...nForm, headers: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"
             />
             <textarea
-              placeholder='Body 模板，支持 {{title}} / {{content}}'
+              placeholder={t("alerts.body")}
               value={nForm.body ?? ""}
               onChange={(e) => setNForm({ ...nForm, body: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"
@@ -334,10 +336,10 @@ export default function Alerts() {
               onClick={() => saveN.mutate(nForm)}
               className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90"
             >
-              保存
+              {t("common.save")}
             </button>
             <button onClick={() => setNForm(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">
-              取消
+              {t("common.cancel")}
             </button>
           </div>
         </div>
@@ -348,10 +350,10 @@ export default function Alerts() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted">
-              <th className="px-4 py-3 font-normal">名称</th>
-              <th className="px-4 py-3 font-normal">类型</th>
+              <th className="px-4 py-3 font-normal">{t("servers.name")}</th>
+              <th className="px-4 py-3 font-normal">{t("alerts.type")}</th>
               <th className="px-4 py-3 font-normal">URL</th>
-              <th className="px-4 py-3 text-right font-normal">操作</th>
+              <th className="px-4 py-3 text-right font-normal">{t("alerts.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -363,7 +365,7 @@ export default function Alerts() {
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => testN.mutate(n.id)}
-                    title="发送测试消息"
+                    title={t("alerts.sendTestTitle")}
                     className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
                   >
                     <Send className="h-4 w-4" />
@@ -375,7 +377,7 @@ export default function Alerts() {
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => confirm(`删除渠道「${n.name}」？`) && deleteN.mutate(n.id)}
+                    onClick={() => confirm(t("alerts.confirmDeleteChannel", { name: n.name })) && deleteN.mutate(n.id)}
                     className="rounded p-1.5 text-err hover:bg-err/10"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -385,8 +387,8 @@ export default function Alerts() {
             ))}
             {notifications.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-4 py-8 text-center text-muted">
-                  暂无通知渠道
+                <td colSpan={4} className="px-4 py-8 text-center text-muted">
+                  {t("alerts.noChannels")}
                 </td>
               </tr>
             )}

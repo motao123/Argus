@@ -5,8 +5,10 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { getToken, wsUrl } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 
 export default function TerminalPage() {
+  const { t } = useI18n();
   const { id } = useParams();
   const ref = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
@@ -50,7 +52,7 @@ export default function TerminalPage() {
     ws.onopen = () => {
       setConnected(true);
       setCompatMode(false);
-      term.write("\x1b[32m已连接服务器终端...\x1b[0m\r\n");
+      term.write(`\x1b[32m${t("terminal.banner")}\x1b[0m\r\n`);
       sendResize();
     };
     ws.onmessage = (e) => {
@@ -59,9 +61,9 @@ export default function TerminalPage() {
     };
     ws.onclose = () => {
       setConnected(false);
-      term.write("\r\n\x1b[31m连接已断开\x1b[0m\r\n");
+      term.write(`\r\n\x1b[31m${t("terminal.closed")}\x1b[0m\r\n`);
     };
-    ws.onerror = () => setError("终端连接失败");
+    ws.onerror = () => setError(t("terminal.failed"));
 
     const onData = (data: string) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
@@ -83,7 +85,7 @@ export default function TerminalPage() {
       ws.close();
       term.dispose();
     };
-  }, [id]);
+  }, [id, t]);
 
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col">
@@ -91,13 +93,13 @@ export default function TerminalPage() {
         <Link to={`/server/${id}`} className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5">
           <ArrowLeft className="h-4 w-4" />
         </Link>
-        <h1 className="text-lg font-semibold">服务器 #{id} 终端</h1>
+        <h1 className="text-lg font-semibold">{t("terminal.title", { id: id ?? "" })}</h1>
         <span
           className={`rounded-full px-2 py-0.5 text-xs ${
             connected ? "bg-ok/15 text-ok" : error ? "bg-err/15 text-err" : "bg-muted/20 text-muted"
           }`}
         >
-          {error ? "连接失败" : compatMode ? "兼容模式" : connected ? "已连接" : "连接中…"}
+          {error ? t("terminal.failed") : compatMode ? t("terminal.compat") : connected ? t("terminal.connected") : t("terminal.connecting")}
         </span>
       </div>
       <div ref={ref} className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border" />

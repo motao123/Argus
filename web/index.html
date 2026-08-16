@@ -12,6 +12,18 @@
           document.documentElement.classList.add("dark");
         }
       } catch {}
+      // 挂载前应用语言（localStorage → 浏览器语言回退 → zh-CN），防止语言闪烁
+      try {
+        const l = localStorage.getItem("argus-lang");
+        document.documentElement.lang =
+          l === "en" || l === "zh-CN"
+            ? l
+            : (navigator.language || "").toLowerCase().startsWith("en")
+              ? "en"
+              : "zh-CN";
+      } catch {
+        document.documentElement.lang = "zh-CN";
+      }
     </script>
   </head>
   <body>

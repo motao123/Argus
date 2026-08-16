@@ -14,10 +14,12 @@ import {
 import { useState } from "react";
 import { api, getToken, type MetricPoint, type TrafficPoint } from "../lib/api";
 import { useServers } from "../context/servers";
-import { fmtBytes, fmtSpeed, fmtTime, fmtUptime } from "../lib/format";
+import { fmtBytes, fmtSpeed } from "../lib/format";
+import { useI18n, type TKey } from "../lib/i18n";
 
 // 周期流量卡（24h/30d/12m，借鉴 dash-v2 CycleTransferStats）
 function CycleTraffic({ serverId }: { serverId: number }) {
+  const { t, fmtDateTime, fmtTime, fmtDate } = useI18n();
   const [period, setPeriod] = useState<"day" | "month" | "year">("day");
   const { data } = useQuery({
     queryKey: ["traffic", serverId, period],
@@ -27,30 +29,31 @@ function CycleTraffic({ serverId }: { serverId: number }) {
   const points = data?.points ?? [];
   const usage = data?.usage;
   const maxV = Math.max(1, ...points.map((p) => p.in + p.out));
-  const label = (ts: number) => (period === "day" ? fmtTime(ts) : new Date(ts * 1000).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }));
+  const label = (ts: number) =>
+    period === "day" ? fmtTime(ts) : fmtDate(ts, { month: "short", day: "numeric" });
   return (
     <div className="mb-4 rounded-xl border border-border bg-panel p-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-medium">周期流量</span>
+        <span className="text-sm font-medium">{t("serverDetail.cycleTraffic")}</span>
         <div className="flex gap-1 text-xs">
-          {([["day", "24 小时"], ["month", "30 天"], ["year", "12 月"]] as const).map(([k, label]) => (
+          {([["day", t("serverDetail.periodDay")], ["month", t("serverDetail.periodMonth")], ["year", t("serverDetail.periodYear")]] as const).map(([k, labelText]) => (
             <button
               key={k}
               onClick={() => setPeriod(k)}
               className={`rounded-full px-2.5 py-1 ${period === k ? "bg-accent text-white" : "bg-black/5 dark:bg-white/10 text-muted"}`}
             >
-              {label}
+              {labelText}
             </button>
           ))}
         </div>
       </div>
       {usage && (
         <div className="mb-3 space-y-2 text-xs text-muted">
-          <div>{new Date(usage.cycle_start).toLocaleString("zh-CN")} — {new Date(usage.cycle_end).toLocaleString("zh-CN")} · {usage.timezone}</div>
+          <div>{fmtDateTime(usage.cycle_start)} — {fmtDateTime(usage.cycle_end)} · {usage.timezone}</div>
           <div className="flex flex-wrap gap-4">
             <span>↓ {fmtBytes(usage.in_bytes)}</span><span>↑ {fmtBytes(usage.out_bytes)}</span>
-            <span>计费 {fmtBytes(usage.accounted_bytes)}</span>
-            {usage.quota_bytes > 0 && <><span>剩余 {fmtBytes(usage.remaining_bytes)}</span><span>{usage.percentage?.toFixed(1)}%</span></>}
+            <span>{t("serverDetail.accounted", { bytes: fmtBytes(usage.accounted_bytes) })}</span>
+            {usage.quota_bytes > 0 && <><span>{t("serverDetail.remaining", { bytes: fmtBytes(usage.remaining_bytes) })}</span><span>{usage.percentage?.toFixed(1)}%</span></>}
           </div>
           {usage.quota_bytes > 0 && <div className="h-2 overflow-hidden rounded-full bg-black/5 dark:bg-white/10"><div className="h-full bg-accent" style={{ width: `${Math.min(100, usage.percentage ?? 0)}%` }} /></div>}
         </div>
@@ -64,17 +67,17 @@ function CycleTraffic({ serverId }: { serverId: number }) {
             </div>
           </div>
         ))}
-        {points.length === 0 && <div className="w-full text-center text-xs text-muted">暂无流量数据</div>}
+        {points.length === 0 && <div className="w-full text-center text-xs text-muted">{t("serverDetail.noTraffic")}</div>}
       </div>
     </div>
   );
 }
 
-const periods = [
-  { key: "1h", label: "1 小时" },
-  { key: "24h", label: "24 小时" },
-  { key: "7d", label: "7 天" },
-] as const;
+const periods: { key: "1h" | "24h" | "7d"; label: TKey }[] = [
+  { key: "1h", label: "serverDetail.period1h" },
+  { key: "24h", label: "serverDetail.period24h" },
+  { key: "7d", label: "serverDetail.period7d" },
+];
 
 function MetricChart({
   points,
@@ -89,6 +92,7 @@ function MetricChart({
   color: string;
   unit: (v: number) => string;
 }) {
+  const { fmtDateTime } = useI18n();
   return (
     <div className="rounded-xl border border-border bg-panel p-4">
       <div className="mb-2 text-sm font-medium">{name}</div>
@@ -96,10 +100,10 @@ function MetricChart({
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={points} margin={{ top: 5, right: 5, bottom: 0, left: -10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-c)" />
-            <XAxis dataKey="ts" tickFormatter={(v: number) => fmtTime(v)} tick={{ fontSize: 11, fill: "var(--muted)" }} />
+            <XAxis dataKey="ts" tickFormatter={(v: number) => fmtDateTime(v)} tick={{ fontSize: 11, fill: "var(--muted)" }} />
             <YAxis tick={{ fontSize: 11, fill: "var(--muted)" }} tickFormatter={(v: number) => unit(v)} width={64} />
             <Tooltip
-              labelFormatter={(v: number) => new Date(v * 1000).toLocaleString("zh-CN", { hour12: false })}
+              labelFormatter={(v: number) => fmtDateTime(v)}
               formatter={(v) => [unit(Number(v)), name]}
               contentStyle={{ background: "var(--panel)", border: "1px solid var(--border-c)", borderRadius: 8 }}
             />
@@ -115,6 +119,7 @@ export default function ServerDetail() {
   const { id } = useParams();
   const serverId = Number(id);
   const { servers: liveServers } = useServers();
+  const { t, fmtDuration } = useI18n();
   const [period, setPeriod] = useState<(typeof periods)[number]["key"]>("1h");
 
   // 合并 WS 实时与 REST（离线服务器也能打开详情）
@@ -163,8 +168,25 @@ export default function ServerDetail() {
   }, [data, period, server]);
 
   if (!server) {
-    return <div className="text-sm text-muted">服务器不存在或已删除</div>;
+    return <div className="text-sm text-muted">{t("serverDetail.notFound")}</div>;
   }
+
+  const unavailable = t("serverDetail.unavailable");
+  const temp = server.temperature_availability?.available ? `${server.temperature.toFixed(1)}°C` : unavailable;
+  const gpu = server.gpu?.available
+    ? t("serverDetail.gpuValue", { count: server.gpu.devices?.length ?? 0, util: server.gpu_util.toFixed(1) })
+    : unavailable;
+  const process = server.process_availability?.available ? String(server.process_count) : unavailable;
+  const tcp = server.socket_availability?.available
+    ? t("serverDetail.tcpValue", { established: server.tcp_established, listen: server.tcp_listen })
+    : unavailable;
+  const udp = server.socket_availability?.available ? String(server.udp_count) : unavailable;
+  const diskIo = server.disk_io_availability?.available
+    ? t("serverDetail.diskIoValue", { read: fmtSpeed(server.disk_read_speed), write: fmtSpeed(server.disk_write_speed) })
+    : unavailable;
+  const diskIops = server.disk_io_availability?.available
+    ? t("serverDetail.diskIopsValue", { read: server.disk_read_iops.toFixed(1), write: server.disk_write_iops.toFixed(1) })
+    : unavailable;
 
   return (
     <div>
@@ -179,8 +201,8 @@ export default function ServerDetail() {
               <span className={`h-2.5 w-2.5 rounded-full ${server.online ? "bg-ok" : "bg-err"}`} />
             </h1>
             <p className="text-xs text-muted">
-              {server.host?.platform ?? "未知系统"}
-              {server.host?.cpu_model ? ` · ${server.host.cpu_model}` : ""} · 已运行 {fmtUptime(server.uptime)}
+              {server.host?.platform ?? t("serverDetail.unknownPlatform")}
+              {server.host?.cpu_model ? ` · ${server.host.cpu_model}` : ""} · {t("serverDetail.uptime", { uptime: fmtDuration(server.uptime) })}
             </p>
           </div>
         </div>
@@ -188,15 +210,15 @@ export default function ServerDetail() {
           <Link
             to={`/admin/terminal/${serverId}`}
             className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-fg"
-            title={server.online ? "打开网页终端" : "服务器离线"}
+            title={server.online ? t("serverDetail.terminalOnline") : t("serverDetail.terminalOffline")}
           >
             <TerminalSquare className="h-4 w-4" />
-            终端
+            {t("serverDetail.terminal")}
           </Link>
         ) : (
           <Link to="/login" className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-fg">
             <TerminalSquare className="h-4 w-4" />
-            登录后使用终端
+            {t("serverDetail.loginForTerminal")}
           </Link>
         )}
       </div>
@@ -204,21 +226,21 @@ export default function ServerDetail() {
       {/* 实时指标 */}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: "CPU", value: `${server.cpu.toFixed(1)}%` },
-          { label: "内存", value: `${fmtBytes(server.mem_used)} / ${fmtBytes(server.mem_total)}` },
-          { label: "磁盘", value: `${fmtBytes(server.disk_used)} / ${fmtBytes(server.disk_total)}` },
-          { label: "负载", value: server.load1.toFixed(2) },
-          { label: "下行速率", value: fmtSpeed(server.net_in_speed) },
-          { label: "上行速率", value: fmtSpeed(server.net_out_speed) },
-          { label: "温度", value: server.temperature_availability?.available ? `${server.temperature.toFixed(1)}°C` : "不可用" },
-          { label: "GPU", value: server.gpu?.available ? `${server.gpu.devices?.length ?? 0} 卡 · ${server.gpu_util.toFixed(1)}%` : "不可用" },
-          { label: "进程", value: server.process_availability?.available ? String(server.process_count) : "不可用" },
-          { label: "TCP", value: server.socket_availability?.available ? `${server.tcp_established} established · ${server.tcp_listen} listen` : "不可用" },
-          { label: "UDP", value: server.socket_availability?.available ? String(server.udp_count) : "不可用" },
-          { label: "磁盘 IO", value: server.disk_io_availability?.available ? `读 ${fmtSpeed(server.disk_read_speed)} · 写 ${fmtSpeed(server.disk_write_speed)}` : "不可用" },
-          { label: "磁盘 IOPS", value: server.disk_io_availability?.available ? `读 ${server.disk_read_iops.toFixed(1)} · 写 ${server.disk_write_iops.toFixed(1)}` : "不可用" },
-          { label: "分组", value: server.group || "默认" },
-          { label: "备注", value: server.note || "—" },
+          { label: t("serverDetail.cpu"), value: `${server.cpu.toFixed(1)}%` },
+          { label: t("serverDetail.mem"), value: `${fmtBytes(server.mem_used)} / ${fmtBytes(server.mem_total)}` },
+          { label: t("serverDetail.disk"), value: `${fmtBytes(server.disk_used)} / ${fmtBytes(server.disk_total)}` },
+          { label: t("serverDetail.load"), value: server.load1.toFixed(2) },
+          { label: t("serverDetail.netIn"), value: fmtSpeed(server.net_in_speed) },
+          { label: t("serverDetail.netOut"), value: fmtSpeed(server.net_out_speed) },
+          { label: t("serverDetail.temperature"), value: temp },
+          { label: t("serverDetail.gpu"), value: gpu },
+          { label: t("serverDetail.process"), value: process },
+          { label: t("serverDetail.tcp"), value: tcp },
+          { label: t("serverDetail.udp"), value: udp },
+          { label: t("serverDetail.diskIo"), value: diskIo },
+          { label: t("serverDetail.diskIops"), value: diskIops },
+          { label: t("serverDetail.group"), value: server.group || t("common.default") },
+          { label: t("serverDetail.note"), value: server.note || "—" },
         ].map(({ label, value }) => (
           <div key={label} className="rounded-xl border border-border bg-panel p-3">
             <div className="text-xs text-muted">{label}</div>
@@ -239,23 +261,23 @@ export default function ServerDetail() {
               period === p.key ? "bg-accent text-white" : "bg-panel border border-border text-muted hover:text-fg"
             }`}
           >
-            {p.label}
+            {t(p.label)}
           </button>
         ))}
       </div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <MetricChart points={points} dataKey="cpu" name="CPU 使用率" color="#6366f1" unit={(v) => `${v.toFixed(0)}%`} />
-        <MetricChart points={points} dataKey="load1" name="负载 (1min)" color="#f59e0b" unit={(v) => v.toFixed(1)} />
-        <MetricChart points={points} dataKey="net_in" name="下行速率" color="#22c55e" unit={fmtSpeed} />
-        <MetricChart points={points} dataKey="net_out" name="上行速率" color="#ef4444" unit={fmtSpeed} />
-        <MetricChart points={points} dataKey="disk_read_speed" name="磁盘读取速率" color="#06b6d4" unit={fmtSpeed} />
-        <MetricChart points={points} dataKey="disk_write_speed" name="磁盘写入速率" color="#ec4899" unit={fmtSpeed} />
-        <MetricChart points={points} dataKey="disk_read_iops" name="读取 IOPS" color="#14b8a6" unit={(v) => v.toFixed(1)} />
-        <MetricChart points={points} dataKey="disk_write_iops" name="写入 IOPS" color="#f97316" unit={(v) => v.toFixed(1)} />
-        <MetricChart points={points} dataKey="process_count" name="进程数" color="#8b5cf6" unit={(v) => v.toFixed(0)} />
-        <MetricChart points={points} dataKey="tcp_established" name="TCP Established" color="#10b981" unit={(v) => v.toFixed(0)} />
-        <MetricChart points={points} dataKey="tcp_listen" name="TCP Listen" color="#84cc16" unit={(v) => v.toFixed(0)} />
-        <MetricChart points={points} dataKey="udp_count" name="UDP Socket" color="#eab308" unit={(v) => v.toFixed(0)} />
+        <MetricChart points={points} dataKey="cpu" name={t("serverDetail.chartCpu")} color="#6366f1" unit={(v) => `${v.toFixed(0)}%`} />
+        <MetricChart points={points} dataKey="load1" name={t("serverDetail.chartLoad")} color="#f59e0b" unit={(v) => v.toFixed(1)} />
+        <MetricChart points={points} dataKey="net_in" name={t("serverDetail.netIn")} color="#22c55e" unit={fmtSpeed} />
+        <MetricChart points={points} dataKey="net_out" name={t("serverDetail.netOut")} color="#ef4444" unit={fmtSpeed} />
+        <MetricChart points={points} dataKey="disk_read_speed" name={t("serverDetail.chartDiskRead")} color="#06b6d4" unit={fmtSpeed} />
+        <MetricChart points={points} dataKey="disk_write_speed" name={t("serverDetail.chartDiskWrite")} color="#ec4899" unit={fmtSpeed} />
+        <MetricChart points={points} dataKey="disk_read_iops" name={t("serverDetail.chartReadIops")} color="#14b8a6" unit={(v) => v.toFixed(1)} />
+        <MetricChart points={points} dataKey="disk_write_iops" name={t("serverDetail.chartWriteIops")} color="#f97316" unit={(v) => v.toFixed(1)} />
+        <MetricChart points={points} dataKey="process_count" name={t("serverDetail.chartProcess")} color="#8b5cf6" unit={(v) => v.toFixed(0)} />
+        <MetricChart points={points} dataKey="tcp_established" name={t("serverDetail.chartTcpEstablished")} color="#10b981" unit={(v) => v.toFixed(0)} />
+        <MetricChart points={points} dataKey="tcp_listen" name={t("serverDetail.chartTcpListen")} color="#84cc16" unit={(v) => v.toFixed(0)} />
+        <MetricChart points={points} dataKey="udp_count" name={t("serverDetail.chartUdp")} color="#eab308" unit={(v) => v.toFixed(0)} />
       </div>
     </div>
   );

@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Play, ShieldCheck, Trash2, Zap } from "lucide-react";
 import { api, type PluginInfo } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 
 export default function Plugins() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["plugins"], queryFn: api.plugins });
   const { data: marketData } = useQuery({ queryKey: ["plugin-market"], queryFn: api.pluginMarket });
@@ -25,13 +27,13 @@ export default function Plugins() {
   return (
     <div>
       <h1 className="mb-1 flex items-center gap-2 text-xl font-semibold">
-        <Zap className="h-5 w-5 text-accent" /> 插件
+        <Zap className="h-5 w-5 text-accent" /> {t("plugins.title")}
       </h1>
       <p className="mb-4 text-sm text-muted">
-        插件为 JS 沙箱（goja）。网络请求需声明 <code>allow_fetch</code> 且由管理员批准，防止 SSRF。
+        {t("plugins.subtitle")}
       </p>
       <div className="mb-4 flex gap-1">
-        {([["installed", "已安装"], ["market", "市场"]] as const).map(([k, label]) => (
+        {([["installed", t("plugins.installed")], ["market", t("plugins.market")]] as const).map(([k, label]) => (
           <button
             key={k}
             onClick={() => setTab(k)}
@@ -52,42 +54,42 @@ export default function Plugins() {
                     {p.name}
                     <span className="text-xs text-muted">v{p.version}</span>
                     {p.permissions_allow_fetch && (
-                      <span className="rounded-full bg-warn/15 px-2 py-0.5 text-xs text-warn">需网络</span>
+                      <span className="rounded-full bg-warn/15 px-2 py-0.5 text-xs text-warn">{t("plugins.needNetwork")}</span>
                     )}
                     {p.approved ? (
-                      <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs text-ok">已批准</span>
+                      <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs text-ok">{t("plugins.approved")}</span>
                     ) : p.permissions_allow_fetch ? (
-                      <span className="rounded-full bg-err/15 px-2 py-0.5 text-xs text-err">待批准</span>
+                      <span className="rounded-full bg-err/15 px-2 py-0.5 text-xs text-err">{t("plugins.pendingApproval")}</span>
                     ) : null}
                   </div>
                   <p className="mt-1 text-xs text-muted">{p.description}</p>
-                  <p className="mt-1 text-xs text-muted">cron: {p.cron || "无"} · 上次运行: {p.last_run || "—"}</p>
+                  <p className="mt-1 text-xs text-muted">{t("plugins.cronInfo", { cron: p.cron || t("plugins.noCron"), lastRun: p.last_run || "—" })}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {p.permissions_allow_fetch && (
                     <button
                       onClick={() => approve.mutate({ name: p.name, approved: !p.approved })}
-                      title="批准/撤销网络权限"
+                      title={t("plugins.approveTitle")}
                       className={`rounded p-1.5 ${p.approved ? "text-ok" : "text-muted"}`}
                     >
                       <ShieldCheck className="h-4 w-4" />
                     </button>
                   )}
-                  <button onClick={() => setLogs(p)} title="查看日志" className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
+                  <button onClick={() => setLogs(p)} title={t("plugins.viewLogs")} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
                     <CheckCircle2 className="h-4 w-4" />
                   </button>
-                  <button onClick={() => run.mutate(p.name)} title="立即运行" className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
+                  <button onClick={() => run.mutate(p.name)} title={t("plugins.runNow")} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
                     <Play className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => toggle.mutate({ name: p.name, enabled: !p.enabled })}
                     className={`rounded-full px-3 py-1 text-xs ${p.enabled ? "bg-ok/15 text-ok" : "bg-muted/20 text-muted"}`}
                   >
-                    {p.enabled ? "已启用" : "已停用"}
+                    {p.enabled ? t("common.enabled") : t("common.disabled")}
                   </button>
                   <button
-                    onClick={() => confirm(`删除插件「${p.name}」？`) && del.mutate(p.name)}
-                    title="删除"
+                    onClick={() => confirm(t("plugins.confirmDelete", { name: p.name })) && del.mutate(p.name)}
+                    title={t("common.delete")}
                     className="rounded p-1.5 text-err hover:bg-err/10"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -96,7 +98,7 @@ export default function Plugins() {
               </div>
             </div>
           ))}
-          {plugins.length === 0 && <div className="py-8 text-center text-sm text-muted">暂无已安装插件</div>}
+          {plugins.length === 0 && <div className="py-8 text-center text-sm text-muted">{t("plugins.noneInstalled")}</div>}
         </div>
       )}
 
@@ -113,22 +115,22 @@ export default function Plugins() {
                 onClick={() => install.mutate(m.name)}
                 className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white disabled:opacity-40"
               >
-                {m.installed ? "已安装" : "安装"}
+                {m.installed ? t("plugins.installed") : t("plugins.install")}
               </button>
             </div>
           ))}
-          {market.length === 0 && <div className="py-8 text-center text-sm text-muted">市场为空（将插件目录放入 data/market/plugins）</div>}
+          {market.length === 0 && <div className="py-8 text-center text-sm text-muted">{t("plugins.marketEmpty")}</div>}
         </div>
       )}
 
       {logs && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setLogs(null)}>
           <div className="w-full max-w-lg rounded-xl border border-border bg-panel p-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 text-sm font-medium">「{logs.name}」日志</h3>
+            <h3 className="mb-3 text-sm font-medium">{t("plugins.logsTitle", { name: logs.name })}</h3>
             <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-3 text-xs">
-              {logs.logs?.join("\n") || "暂无日志"}
+              {logs.logs?.join("\n") || t("plugins.noLogs")}
             </pre>
-            <button onClick={() => setLogs(null)} className="mt-3 rounded-lg border border-border px-4 py-1.5 text-sm">关闭</button>
+            <button onClick={() => setLogs(null)} className="mt-3 rounded-lg border border-border px-4 py-1.5 text-sm">{t("common.close")}</button>
           </div>
         </div>
       )}

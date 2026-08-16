@@ -47,7 +47,7 @@ func (s *Server) twoFAQRCode(c *gin.Context) {
 	}
 	var user model.User
 	if err := s.DB.First(&user, p.UserID).Error; err != nil || user.TwoFASecret == "" {
-		fail(c, http.StatusNotFound, "2fa not setup")
+		fail(c, http.StatusNotFound, "2fa not setup", "auth.2fa_not_setup")
 		return
 	}
 	key, err := totp.Generate(totp.GenerateOpts{
@@ -88,11 +88,11 @@ func (s *Server) twoFAEnable(c *gin.Context) {
 		return
 	}
 	if user.TwoFASecret == "" {
-		fail(c, http.StatusBadRequest, "run setup first")
+		fail(c, http.StatusBadRequest, "run setup first", "auth.2fa_not_setup")
 		return
 	}
 	if !totp.Validate(req.Code, user.TwoFASecret) {
-		fail(c, http.StatusBadRequest, "invalid code")
+		fail(c, http.StatusBadRequest, "invalid code", "auth.2fa_invalid")
 		return
 	}
 	s.DB.Model(&user).Update("two_fa_enabled", true)
@@ -119,7 +119,7 @@ func (s *Server) twoFADisable(c *gin.Context) {
 		return
 	}
 	if !totp.Validate(req.Code, user.TwoFASecret) {
-		fail(c, http.StatusBadRequest, "invalid code")
+		fail(c, http.StatusBadRequest, "invalid code", "auth.2fa_invalid")
 		return
 	}
 	s.DB.Model(&user).Update("two_fa_enabled", false)

@@ -71,23 +71,23 @@ func (s *Server) login(c *gin.Context) {
 	ip := currentIP(c)
 	allowed, _ := loginAllowed(ip)
 	if !allowed {
-		fail(c, http.StatusTooManyRequests, "too many attempts, locked 5 minutes")
+		fail(c, http.StatusTooManyRequests, "too many attempts, locked 5 minutes", "auth.too_many_attempts")
 		return
 	}
 	var user model.User
 	if err := s.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
 		loginFail(ip)
-		fail(c, http.StatusUnauthorized, "invalid credentials")
+		fail(c, http.StatusUnauthorized, "invalid credentials", "auth.invalid_credentials")
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
 		loginFail(ip)
-		fail(c, http.StatusUnauthorized, "invalid credentials")
+		fail(c, http.StatusUnauthorized, "invalid credentials", "auth.invalid_credentials")
 		return
 	}
 	if !verifyTwoFA(&user, req.TwoFACode) {
 		loginFail(ip)
-		fail(c, http.StatusUnauthorized, "invalid 2fa code")
+		fail(c, http.StatusUnauthorized, "invalid 2fa code", "auth.2fa_invalid")
 		return
 	}
 	loginSuccess(ip)

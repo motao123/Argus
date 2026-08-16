@@ -155,7 +155,7 @@ func (s *Server) terminalWS(c *gin.Context) {
 		return
 	}
 	if s.Agents.Peer(serverID) == nil {
-		fail(c, http.StatusConflict, "server offline")
+		fail(c, http.StatusConflict, "server offline", "server.offline")
 		return
 	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)

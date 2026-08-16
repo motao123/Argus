@@ -26,9 +26,15 @@ func okPage(c *gin.Context, data any, total int64, offset, limit int) {
 	})
 }
 
-// fail 失败响应：{"success":false,"error":"..."}
-func fail(c *gin.Context, code int, msg string) {
-	c.JSON(code, gin.H{"success": false, "error": msg})
+// fail 失败响应：{"success":false,"error":"...","code":"..."}
+// apiCode 为可选的稳定错误码（如 "server.offline"），前端可按 code 翻译；
+// 未提供时不输出 code 字段，兼容旧调用与旧客户端。
+func fail(c *gin.Context, code int, msg string, apiCode ...string) {
+	body := gin.H{"success": false, "error": msg}
+	if len(apiCode) > 0 && apiCode[0] != "" {
+		body["code"] = apiCode[0]
+	}
+	c.JSON(code, body)
 }
 
 // ---- 统一错误 ----

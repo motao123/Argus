@@ -7,32 +7,34 @@ import WorldMap from "../components/WorldMap";
 import { useServers } from "../context/servers";
 import { api } from "../lib/api";
 import { fmtBytes } from "../lib/format";
+import { useI18n, type TKey } from "../lib/i18n";
 
 type SortKey =
   | "default" | "name" | "cpu" | "mem" | "disk" | "load"
   | "net_in" | "net_out" | "uptime" | "platform";
 
-const sortOptions: { key: SortKey; label: string }[] = [
-  { key: "default", label: "默认" },
-  { key: "name", label: "名称" },
-  { key: "cpu", label: "CPU" },
-  { key: "mem", label: "内存" },
-  { key: "disk", label: "磁盘" },
-  { key: "load", label: "负载" },
-  { key: "net_in", label: "下行速率" },
-  { key: "net_out", label: "上行速率" },
-  { key: "uptime", label: "运行时间" },
-  { key: "platform", label: "系统" },
+const sortOptions: { key: SortKey; label: TKey }[] = [
+  { key: "default", label: "overview.sortDefault" },
+  { key: "name", label: "overview.sortName" },
+  { key: "cpu", label: "overview.sortCpu" },
+  { key: "mem", label: "overview.sortMem" },
+  { key: "disk", label: "overview.sortDisk" },
+  { key: "load", label: "overview.sortLoad" },
+  { key: "net_in", label: "overview.sortNetIn" },
+  { key: "net_out", label: "overview.sortNetOut" },
+  { key: "uptime", label: "overview.sortUptime" },
+  { key: "platform", label: "overview.sortPlatform" },
 ];
 
 // 服务监控状态条（公开展示，借鉴 dash-v2 ServiceTracker 简化版）
 function ServiceStatusStrip() {
+  const { t } = useI18n();
   const { data } = useQuery({ queryKey: ["services"], queryFn: api.services, refetchInterval: 15000 });
   const services = data?.services ?? [];
   if (services.length === 0) return null;
   return (
     <div className="mb-4 rounded-xl border border-border bg-panel p-3">
-      <div className="mb-2 text-xs font-medium text-muted">服务监控状态</div>
+      <div className="mb-2 text-xs font-medium text-muted">{t("services.statusTitle")}</div>
       <div className="flex flex-wrap gap-2">
         {services.map((s) => (
           <span
@@ -40,7 +42,7 @@ function ServiceStatusStrip() {
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
               s.last_up === null ? "bg-black/5 text-muted" : s.last_up ? "bg-ok/10 text-ok" : "bg-err/10 text-err"
             }`}
-            title={`${s.target} · 今日可用率 ${s.today_up_rate === null ? "未知" : `${s.today_up_rate.toFixed(1)}%`}`}
+            title={`${s.target} · ${t("services.todayRate")} ${s.today_up_rate === null ? t("common.unknown") : `${s.today_up_rate.toFixed(1)}%`}`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${s.last_up === null ? "bg-muted" : s.last_up ? "bg-ok" : "bg-err"}`} />
             {s.name}
@@ -54,6 +56,7 @@ function ServiceStatusStrip() {
 
 export default function PublicOverview() {
   const { servers: liveServers, wsStatus } = useServers();
+  const { t, fmtNumber } = useI18n();
   // 合并 REST 列表（含离线）与 WS 实时值：以 REST 为底，WS 覆盖在线服务器实时字段
   const { data: restData } = useQuery({ queryKey: ["servers-public"], queryFn: api.servers, refetchInterval: 30000 });
   const restServers = restData?.servers ?? [];
@@ -64,15 +67,17 @@ export default function PublicOverview() {
   const online = servers.filter((s) => s.online).length;
   const total = servers.length;
   const [query, setQuery] = useState("");
-  const [group, setGroup] = useState("全部");
+  const [group, setGroup] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("default");
   const [sortDesc, setSortDesc] = useState(false);
   const [status, setStatus] = useState<"all" | "online" | "offline">("all");
 
+  const allLabel = t("common.all");
+  const defaultGroupLabel = t("common.default");
   const groups = useMemo(() => {
-    const set = new Set<string>(servers.map((s) => s.group || "默认").filter(Boolean));
-    return ["全部", ...Array.from(set)];
-  }, [servers]);
+    const set = new Set<string>(servers.map((s) => s.group || defaultGroupLabel).filter(Boolean));
+    return Array.from(set);
+  }, [servers, defaultGroupLabel]);
 
   const totalNet = useMemo(() => {
     return servers.reduce(
@@ -83,7 +88,7 @@ export default function PublicOverview() {
 
   const filtered = useMemo(() => {
     let list = servers.filter((s) => {
-      if (group !== "全部" && (s.group || "默认") !== group) return false;
+      if (group !== "" && (s.group || defaultGroupLabel) !== group) return false;
       if (status === "online" && !s.online) return false;
       if (status === "offline" && s.online) return false;
       if (query && !s.name.toLowerCase().includes(query.toLowerCase())) return false;
@@ -113,20 +118,20 @@ export default function PublicOverview() {
       list = [...list].sort((a, b) => Number(b.online) - Number(a.online));
     }
     return list;
-  }, [servers, query, group, sortKey, sortDesc, status]);
+  }, [servers, query, group, sortKey, sortDesc, status, defaultGroupLabel]);
 
   return (
     <div>
       <WorldMap servers={servers} />
       {wsStatus === "reconnecting" && (
         <div className="mb-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
-          实时连接中断，正在重连…
+          {t("overview.wsReconnecting")}
         </div>
       )}
       <div className="mb-5">
-        <h1 className="text-xl font-semibold">服务器总览</h1>
+        <h1 className="text-xl font-semibold">{t("overview.title")}</h1>
         <p className="text-sm text-muted">
-          实时监控 <span className="text-ok font-medium">{online}</span> 台在线 / 共 {total} 台
+          {t("overview.publicSubtitle", { online: fmtNumber(online), total: fmtNumber(total) })}
         </p>
       </div>
 
@@ -134,31 +139,31 @@ export default function PublicOverview() {
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="rounded-xl border border-border bg-panel p-4">
           <div className="flex items-center gap-2 text-xs text-muted">
-            <ServerIcon className="h-4 w-4" /> 总服务器
+            <ServerIcon className="h-4 w-4" /> {t("overview.statTotal")}
           </div>
-          <div className="tabular mt-1 text-2xl font-semibold">{total}</div>
+          <div className="tabular mt-1 text-2xl font-semibold">{fmtNumber(total)}</div>
         </div>
         <button
           onClick={() => setStatus(status === "online" ? "all" : "online")}
           className={`rounded-xl border p-4 text-left ${status === "online" ? "border-ok/40 bg-ok/5" : "border-border bg-panel"} hover:bg-black/2 dark:hover:bg-white/2`}
         >
           <div className="flex items-center gap-2 text-xs text-muted">
-            <Wifi className="h-4 w-4 text-ok" /> 在线
+            <Wifi className="h-4 w-4 text-ok" /> {t("common.online")}
           </div>
-          <div className="tabular mt-1 text-2xl font-semibold">{online}</div>
+          <div className="tabular mt-1 text-2xl font-semibold">{fmtNumber(online)}</div>
         </button>
         <button
           onClick={() => setStatus(status === "offline" ? "all" : "offline")}
           className={`rounded-xl border p-4 text-left ${status === "offline" ? "border-err/40 bg-err/5" : "border-border bg-panel"} hover:bg-black/2 dark:hover:bg-white/2`}
         >
           <div className="flex items-center gap-2 text-xs text-muted">
-            <WifiOff className="h-4 w-4 text-err" /> 离线
+            <WifiOff className="h-4 w-4 text-err" /> {t("common.offline")}
           </div>
-          <div className="tabular mt-1 text-2xl font-semibold">{total - online}</div>
+          <div className="tabular mt-1 text-2xl font-semibold">{fmtNumber(total - online)}</div>
         </button>
         <div className="rounded-xl border border-border bg-panel p-4">
           <div className="flex items-center gap-2 text-xs text-muted">
-            <ArrowUpDown className="h-4 w-4" /> 实时流量
+            <ArrowUpDown className="h-4 w-4" /> {t("overview.statTraffic")}
           </div>
           <div className="tabular mt-1 text-lg font-semibold">
             ↓ {fmtBytes(totalNet.in)}/s <span className="text-muted">·</span> ↑ {fmtBytes(totalNet.out)}/s
@@ -178,7 +183,7 @@ export default function PublicOverview() {
               onClick={() => setStatus(k)}
               className={`px-3 py-1.5 text-sm ${status === k ? "bg-accent text-white" : "bg-panel text-muted hover:text-fg"}`}
             >
-              {k === "all" ? "全部" : k === "online" ? "在线" : "离线"}
+              {k === "all" ? t("common.all") : k === "online" ? t("common.online") : t("common.offline")}
             </button>
           ))}
         </div>
@@ -187,8 +192,9 @@ export default function PublicOverview() {
           onChange={(e) => setGroup(e.target.value)}
           className="rounded-lg border border-border bg-panel px-3 py-1.5 text-sm outline-none"
         >
+          <option value="">{allLabel}</option>
           {groups.map((g) => (
-            <option key={g}>{g}</option>
+            <option key={g} value={g}>{g}</option>
           ))}
         </select>
         <select
@@ -198,7 +204,7 @@ export default function PublicOverview() {
         >
           {sortOptions.map((o) => (
             <option key={o.key} value={o.key}>
-              {o.label}
+              {t(o.label)}
             </option>
           ))}
         </select>
@@ -206,14 +212,14 @@ export default function PublicOverview() {
           onClick={() => setSortDesc(!sortDesc)}
           className={`rounded-lg border px-3 py-1.5 text-sm ${sortDesc ? "border-accent text-accent" : "border-border text-muted hover:text-fg"}`}
         >
-          {sortDesc ? "降序 ↓" : "升序 ↑"}
+          {sortDesc ? t("overview.sortDesc") : t("overview.sortAsc")}
         </button>
         <div className="relative ml-auto">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索服务器…"
+            placeholder={t("common.search")}
             className="w-44 rounded-lg border border-border bg-panel py-2 pl-9 pr-3 text-sm outline-none focus:border-accent"
           />
         </div>
@@ -221,7 +227,7 @@ export default function PublicOverview() {
 
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border py-20 text-center text-sm text-muted">
-          {servers.length === 0 ? "暂无服务器数据" : "没有匹配的服务器"}
+          {servers.length === 0 ? t("overview.emptyPublic") : t("common.noMatch")}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">

@@ -4,37 +4,41 @@ import ServerCard from "../components/ServerCard";
 import WorldMap from "../components/WorldMap";
 import { useServers } from "../context/servers";
 import { fmtBytes } from "../lib/format";
+import { useI18n, type TKey } from "../lib/i18n";
 
 type SortKey =
   | "default" | "name" | "cpu" | "mem" | "disk" | "load"
   | "net_in" | "net_out" | "uptime" | "platform";
 type StatusFilter = "all" | "online" | "offline";
 
-const sortOptions: { key: SortKey; label: string }[] = [
-  { key: "default", label: "默认" },
-  { key: "name", label: "名称" },
-  { key: "cpu", label: "CPU" },
-  { key: "mem", label: "内存" },
-  { key: "disk", label: "磁盘" },
-  { key: "load", label: "负载" },
-  { key: "net_in", label: "下行速率" },
-  { key: "net_out", label: "上行速率" },
-  { key: "uptime", label: "运行时间" },
-  { key: "platform", label: "系统" },
+const sortOptions: { key: SortKey; label: TKey }[] = [
+  { key: "default", label: "overview.sortDefault" },
+  { key: "name", label: "overview.sortName" },
+  { key: "cpu", label: "overview.sortCpu" },
+  { key: "mem", label: "overview.sortMem" },
+  { key: "disk", label: "overview.sortDisk" },
+  { key: "load", label: "overview.sortLoad" },
+  { key: "net_in", label: "overview.sortNetIn" },
+  { key: "net_out", label: "overview.sortNetOut" },
+  { key: "uptime", label: "overview.sortUptime" },
+  { key: "platform", label: "overview.sortPlatform" },
 ];
 
 export default function Overview() {
   const { servers, online, total } = useServers();
+  const { t, fmtNumber } = useI18n();
   const [query, setQuery] = useState("");
-  const [group, setGroup] = useState("全部");
+  const [group, setGroup] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("default");
   const [sortDesc, setSortDesc] = useState(false);
   const [status, setStatus] = useState<StatusFilter>("all");
 
+  const allLabel = t("common.all");
+  const defaultGroupLabel = t("common.default");
   const groups = useMemo(() => {
-    const set = new Set<string>(servers.map((s) => s.group || "默认").filter(Boolean));
-    return ["全部", ...Array.from(set)];
-  }, [servers]);
+    const set = new Set<string>(servers.map((s) => s.group || defaultGroupLabel).filter(Boolean));
+    return Array.from(set);
+  }, [servers, defaultGroupLabel]);
 
   const totalNet = useMemo(() => {
     return servers.reduce(
@@ -45,7 +49,7 @@ export default function Overview() {
 
   const filtered = useMemo(() => {
     let list = servers.filter((s) => {
-      if (group !== "全部" && (s.group || "默认") !== group) return false;
+      if (group !== "" && (s.group || defaultGroupLabel) !== group) return false;
       if (status === "online" && !s.online) return false;
       if (status === "offline" && s.online) return false;
       if (query && !s.name.toLowerCase().includes(query.toLowerCase())) return false;
@@ -77,7 +81,7 @@ export default function Overview() {
       list = [...list].sort((a, b) => Number(b.online) - Number(a.online));
     }
     return list;
-  }, [servers, query, group, sortKey, sortDesc, status]);
+  }, [servers, query, group, sortKey, sortDesc, status, defaultGroupLabel]);
 
   const offline = total - online;
 
@@ -86,9 +90,9 @@ export default function Overview() {
       <WorldMap servers={servers} />
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">服务器总览</h1>
+          <h1 className="text-xl font-semibold">{t("overview.title")}</h1>
           <p className="text-sm text-muted">
-            在线 <span className="text-ok font-medium">{online}</span> / 共 {total} 台
+            {t("overview.subtitle", { online: fmtNumber(online), total: fmtNumber(total) })}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -97,8 +101,9 @@ export default function Overview() {
             onChange={(e) => setGroup(e.target.value)}
             className="rounded-lg border border-border bg-panel px-3 py-2 text-sm outline-none"
           >
+            <option value="">{allLabel}</option>
             {groups.map((g) => (
-              <option key={g}>{g}</option>
+              <option key={g} value={g}>{g}</option>
             ))}
           </select>
           <div className="relative">
@@ -106,7 +111,7 @@ export default function Overview() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索服务器…"
+              placeholder={t("common.search")}
               className="w-40 rounded-lg border border-border bg-panel py-2 pl-9 pr-3 text-sm outline-none focus:border-accent"
             />
           </div>
@@ -120,9 +125,9 @@ export default function Overview() {
           className="rounded-xl border border-border bg-panel p-4 text-left hover:bg-black/2 dark:hover:bg-white/2"
         >
           <div className="flex items-center gap-2 text-xs text-muted">
-            <ServerIcon className="h-4 w-4" /> 总服务器
+            <ServerIcon className="h-4 w-4" /> {t("overview.statTotal")}
           </div>
-          <div className="tabular mt-1 text-2xl font-semibold">{total}</div>
+          <div className="tabular mt-1 text-2xl font-semibold">{fmtNumber(total)}</div>
         </button>
         <button
           onClick={() => setStatus(status === "online" ? "all" : "online")}
@@ -131,9 +136,9 @@ export default function Overview() {
           } hover:bg-black/2 dark:hover:bg-white/2`}
         >
           <div className="flex items-center gap-2 text-xs text-muted">
-            <Wifi className="h-4 w-4 text-ok" /> 在线
+            <Wifi className="h-4 w-4 text-ok" /> {t("common.online")}
           </div>
-          <div className="tabular mt-1 text-2xl font-semibold">{online}</div>
+          <div className="tabular mt-1 text-2xl font-semibold">{fmtNumber(online)}</div>
         </button>
         <button
           onClick={() => setStatus(status === "offline" ? "all" : "offline")}
@@ -142,13 +147,13 @@ export default function Overview() {
           } hover:bg-black/2 dark:hover:bg-white/2`}
         >
           <div className="flex items-center gap-2 text-xs text-muted">
-            <WifiOff className="h-4 w-4 text-err" /> 离线
+            <WifiOff className="h-4 w-4 text-err" /> {t("common.offline")}
           </div>
-          <div className="tabular mt-1 text-2xl font-semibold">{offline}</div>
+          <div className="tabular mt-1 text-2xl font-semibold">{fmtNumber(offline)}</div>
         </button>
         <div className="rounded-xl border border-border bg-panel p-4">
           <div className="flex items-center gap-2 text-xs text-muted">
-            <ArrowUpDown className="h-4 w-4" /> 实时流量
+            <ArrowUpDown className="h-4 w-4" /> {t("overview.statTraffic")}
           </div>
           <div className="tabular mt-1 text-lg font-semibold">
             ↓ {fmtBytes(totalNet.in)}/s <span className="text-muted">·</span> ↑ {fmtBytes(totalNet.out)}/s
@@ -167,7 +172,7 @@ export default function Overview() {
                 status === k ? "bg-accent text-white" : "bg-panel text-muted hover:text-fg"
               }`}
             >
-              {k === "all" ? "全部" : k === "online" ? "在线" : "离线"}
+              {k === "all" ? t("common.all") : k === "online" ? t("common.online") : t("common.offline")}
             </button>
           ))}
         </div>
@@ -178,7 +183,7 @@ export default function Overview() {
         >
           {sortOptions.map((o) => (
             <option key={o.key} value={o.key}>
-              {o.label}
+              {t(o.label)}
             </option>
           ))}
         </select>
@@ -188,15 +193,15 @@ export default function Overview() {
             sortDesc ? "border-accent text-accent" : "border-border text-muted hover:text-fg"
           }`}
         >
-          {sortDesc ? "降序 ↓" : "升序 ↑"}
+          {sortDesc ? t("overview.sortDesc") : t("overview.sortAsc")}
         </button>
       </div>
 
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border py-20 text-center text-sm text-muted">
           {servers.length === 0
-            ? "还没有服务器 —— 在「服务器」页创建，或直接部署 agent 自动注册"
-            : "没有匹配的服务器"}
+            ? t("overview.emptyNoServers")
+            : t("common.noMatch")}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">

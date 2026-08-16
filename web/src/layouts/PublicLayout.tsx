@@ -4,7 +4,7 @@ import { Outlet, Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
 import { getToken, setToken } from "../lib/api";
-import { getLang, setLang, t } from "../lib/i18n";
+import { useI18n } from "../lib/i18n";
 import { useQuery } from "@tanstack/react-query";
 import CommandPalette from "../components/CommandPalette";
 
@@ -21,6 +21,7 @@ function useTheme() {
 
 // 实时时钟（借鉴 dash-v2 Header）
 function Clock() {
+  const { lang } = useI18n();
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -28,7 +29,7 @@ function Clock() {
   }, []);
   return (
     <span className="tabular text-sm text-muted">
-      {now.toLocaleTimeString("zh-CN", { hour12: false })}
+      {now.toLocaleTimeString(lang, { hour12: false })}
     </span>
   );
 }
@@ -36,16 +37,16 @@ function Clock() {
 export default function PublicLayout() {
   const [theme, setTheme] = useTheme();
   const { online, total } = useServers();
+  const { lang, setLang, t } = useI18n();
   const navigate = useNavigate();
   const loggedIn = !!getToken();
-  const [lang, setLangState] = useState<"zh-CN" | "en">(getLang());
   const { data: pub } = useQuery({
     queryKey: ["public-settings"],
     queryFn: () => fetch("/api/v1/public/settings").then((r) => r.json()).then((d) => d.data),
     staleTime: 60000,
   });
   const siteName = pub?.site_name || "Argus";
-  const siteDesc = pub?.site_desc || "轻量自托管服务器监控";
+  const siteDesc = pub?.site_desc || t("common.poweredBy");
 
   return (
     <div className="flex min-h-screen flex-col bg-bg">
@@ -60,16 +61,12 @@ export default function PublicLayout() {
             <Clock />
             <span className="flex items-center gap-1.5 text-sm text-muted">
               <span className="h-2 w-2 rounded-full bg-ok shadow-[0_0_5px] shadow-ok" />
-              在线 {online}/{total}
+              {t("common.onlineOf", { online, total })}
             </span>
             <button
-              onClick={() => {
-                const next = lang === "zh-CN" ? "en" : "zh-CN";
-                setLang(next);
-                setLangState(next);
-              }}
+              onClick={() => setLang(lang === "zh-CN" ? "en" : "zh-CN")}
               className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted hover:bg-black/5 dark:hover:bg-white/5"
-              title="切换语言"
+              title={t("common.switchLang")}
             >
               <Globe className="h-3.5 w-3.5" />
               {lang === "zh-CN" ? "EN" : "中文"}

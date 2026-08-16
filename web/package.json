@@ -9,6 +9,7 @@
     "dev:mock": "node scripts/dev-mock.mjs",
     "mock:server": "node scripts/mock-server.mjs",
     "build": "tsc -b && vite build",
+    "check:i18n": "node --experimental-strip-types scripts/check-i18n.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

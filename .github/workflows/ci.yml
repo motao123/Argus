@@ -49,3 +49,9 @@ jobs:
       - name: Install & build
         run: |
           cd web && pnpm install --frozen-lockfile && pnpm build
+      - name: i18n key consistency
+        run: |
+          cd web && node --experimental-strip-types scripts/check-i18n.mjs
+      - name: Frontend tests
+        run: |
+          cd web && pnpm test

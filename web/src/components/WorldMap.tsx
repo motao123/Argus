@@ -3,6 +3,7 @@ import * as echarts from "echarts";
 import { feature } from "topojson-client";
 
 import { countryFlag, type Server } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 
 let worldRegistered = false;
 let registerPromise: Promise<boolean> | null = null;
@@ -114,6 +115,7 @@ async function ensureWorldMap(): Promise<boolean> {
 // 世界地图：按服务器国家码聚合打点。需服务器带 country_code
 // （服务端配置 ARGUS_GEOIP_ENDPOINT 提供 GeoIP 数据源）。
 export default function WorldMap({ servers }: { servers: Server[] }) {
+  const { t, lang, fmtNumber } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -142,7 +144,7 @@ export default function WorldMap({ servers }: { servers: Server[] }) {
         tooltip: {
           formatter: (params: any) => {
             const data = params.data as WorldMapPoint & { value: number[] };
-            return `${countryFlag(data.country)} ${data.country} · 在线 ${data.online}/${data.total}<br/>${data.names.join(", ")}`;
+            return `${countryFlag(data.country)} ${data.country} · ${t("worldMap.onlineOf", { online: data.online, total: data.total })}<br/>${data.names.join(", ")}`;
           },
         },
         geo: {
@@ -171,16 +173,16 @@ export default function WorldMap({ servers }: { servers: Server[] }) {
       chartRef.current?.dispose();
       chartRef.current = null;
     };
-  }, [collapsed, points, retryVersion]);
+  }, [collapsed, points, retryVersion, lang, t]);
 
   if (points.length === 0) return null;
 
   return (
     <div className="mb-4 rounded-xl border border-border bg-panel p-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-medium">世界地图</span>
+        <span className="text-sm font-medium">{t("worldMap.title")}</span>
         <button onClick={() => setCollapsed((value) => !value)} className="text-xs text-muted hover:text-fg">
-          {collapsed ? "展开 ▼" : "收起 ▲"}
+          {collapsed ? t("worldMap.expand") : t("worldMap.collapse")}
         </button>
       </div>
       {!collapsed && (
@@ -188,14 +190,14 @@ export default function WorldMap({ servers }: { servers: Server[] }) {
           <div ref={containerRef} className="h-full w-full" />
           {loadFailed && (
             <div className="absolute inset-0 flex items-center justify-center bg-panel/90 text-sm text-muted">
-              地图加载失败，
-              <button className="text-accent hover:underline" onClick={() => setRetryVersion((value) => value + 1)}>点击重试</button>
+              {t("worldMap.loadFailed")}
+              <button className="text-accent hover:underline" onClick={() => setRetryVersion((value) => value + 1)}>{t("worldMap.retry")}</button>
             </div>
           )}
         </div>
       )}
       {collapsed && (
-        <p className="text-xs text-muted">{points.length} 个国家 · {points.reduce((sum, point) => sum + point.total, 0)} 台服务器</p>
+        <p className="text-xs text-muted">{t("worldMap.summary", { countries: fmtNumber(points.length), servers: fmtNumber(points.reduce((sum, point) => sum + point.total, 0)) })}</p>
       )}
     </div>
   );

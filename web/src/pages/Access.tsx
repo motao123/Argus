@@ -2,23 +2,24 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api, type ApiToken, type User } from "../lib/api";
-import { fmtDateTime } from "../lib/format";
-const allScopes = [
-  { key: "argus:server:read", label: "服务器读取" },
-  { key: "argus:server:write", label: "服务器写入" },
-  { key: "argus:server:delete", label: "服务器删除" },
-  { key: "argus:server:exec", label: "远程执行" },
-  { key: "argus:service:read", label: "服务监控读取" },
-  { key: "argus:service:write", label: "服务监控写入" },
-  { key: "argus:alert:read", label: "报警读取" },
-  { key: "argus:alert:write", label: "报警写入" },
-  { key: "argus:cron:read", label: "任务读取" },
-  { key: "argus:cron:write", label: "任务写入" },
-  { key: "argus:notification:read", label: "通知读取" },
-  { key: "argus:notification:write", label: "通知写入" },
+import { useI18n, type TKey } from "../lib/i18n";
+const allScopes: { key: string; label: TKey }[] = [
+  { key: "argus:server:read", label: "access.scopeServerRead" },
+  { key: "argus:server:write", label: "access.scopeServerWrite" },
+  { key: "argus:server:delete", label: "access.scopeServerDelete" },
+  { key: "argus:server:exec", label: "access.scopeServerExec" },
+  { key: "argus:service:read", label: "access.scopeServiceRead" },
+  { key: "argus:service:write", label: "access.scopeServiceWrite" },
+  { key: "argus:alert:read", label: "access.scopeAlertRead" },
+  { key: "argus:alert:write", label: "access.scopeAlertWrite" },
+  { key: "argus:cron:read", label: "access.scopeCronRead" },
+  { key: "argus:cron:write", label: "access.scopeCronWrite" },
+  { key: "argus:notification:read", label: "access.scopeNotifRead" },
+  { key: "argus:notification:write", label: "access.scopeNotifWrite" },
 ];
 
 export default function Access() {
+  const { t, fmtDateTime } = useI18n();
   const qc = useQueryClient();
   const { data: tokenData } = useQuery({ queryKey: ["tokens"], queryFn: api.tokens });
   const { data: userData } = useQuery({ queryKey: ["users"], queryFn: api.users });
@@ -62,20 +63,20 @@ export default function Access() {
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold">访问控制</h1>
-      <p className="mb-5 text-sm text-muted">个人访问令牌（PAT）与用户管理</p>
+      <h1 className="mb-1 text-xl font-semibold">{t("access.title")}</h1>
+      <p className="mb-5 text-sm text-muted">{t("access.subtitle")}</p>
 
       {/* PAT */}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <KeyRound className="h-4 w-4 text-accent" /> 访问令牌
+          <KeyRound className="h-4 w-4 text-accent" /> {t("access.tokens")}
         </h2>
         <button
           onClick={() => setTkForm({ name: "", scopes: ["argus:server:read"], expires_in: 30 })}
           className="flex items-center gap-2 rounded-lg bg-accent px-3 py-1.5 text-sm text-white hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
-          创建令牌
+          {t("access.createToken")}
         </button>
       </div>
 
@@ -96,14 +97,14 @@ export default function Access() {
         <div className="mb-4 rounded-xl border border-border bg-panel p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <input
-              placeholder="令牌名称"
+              placeholder={t("access.tokenName")}
               value={tkForm.name}
               onChange={(e) => setTkForm({ ...tkForm, name: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             />
             <input
               type="number"
-              placeholder="有效期（天，0=永久）"
+              placeholder={t("access.expiresIn")}
               value={tkForm.expires_in}
               onChange={(e) => setTkForm({ ...tkForm, expires_in: Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
@@ -124,7 +125,7 @@ export default function Access() {
                     })
                   }
                 />
-                {sc.label}
+                {t(sc.label)}
               </label>
             ))}
           </div>
@@ -134,10 +135,10 @@ export default function Access() {
               disabled={!tkForm.name || tkForm.scopes.length === 0}
               className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-40"
             >
-              创建（明文仅显示一次）
+              {t("access.createOnce")}
             </button>
             <button onClick={() => setTkForm(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">
-              取消
+              {t("common.cancel")}
             </button>
           </div>
         </div>
@@ -147,28 +148,28 @@ export default function Access() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted">
-              <th className="px-4 py-2.5 font-normal">名称</th>
-              <th className="px-4 py-2.5 font-normal">权限</th>
-              <th className="px-4 py-2.5 font-normal">过期</th>
-              <th className="px-4 py-2.5 font-normal">状态</th>
-              <th className="px-4 py-2.5 text-right font-normal">操作</th>
+              <th className="px-4 py-2.5 font-normal">{t("common.name")}</th>
+              <th className="px-4 py-2.5 font-normal">{t("access.scopes")}</th>
+              <th className="px-4 py-2.5 font-normal">{t("access.expires")}</th>
+              <th className="px-4 py-2.5 font-normal">{t("common.status")}</th>
+              <th className="px-4 py-2.5 text-right font-normal">{t("common.actions")}</th>
             </tr>
           </thead>
           <tbody>
-            {tokens.map((t: ApiToken) => (
-              <tr key={t.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-2.5 font-medium">{t.name}</td>
-                <td className="max-w-xs truncate px-4 py-2.5 text-xs text-muted">{t.scopes}</td>
-                <td className="px-4 py-2.5 tabular text-xs text-muted">{t.expires_at ? fmtDateTime(t.expires_at) : "永久"}</td>
+            {tokens.map((tk: ApiToken) => (
+              <tr key={tk.id} className="border-b border-border last:border-0">
+                <td className="px-4 py-2.5 font-medium">{tk.name}</td>
+                <td className="max-w-xs truncate px-4 py-2.5 text-xs text-muted">{tk.scopes}</td>
+                <td className="px-4 py-2.5 tabular text-xs text-muted">{tk.expires_at ? fmtDateTime(tk.expires_at) : t("access.forever")}</td>
                 <td className="px-4 py-2.5">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${t.revoked ? "bg-err/15 text-err" : "bg-ok/15 text-ok"}`}>
-                    {t.revoked ? "已吊销" : "有效"}
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${tk.revoked ? "bg-err/15 text-err" : "bg-ok/15 text-ok"}`}>
+                    {tk.revoked ? t("access.revoked") : t("access.active")}
                   </span>
                 </td>
                 <td className="px-4 py-2.5 text-right">
-                  {!t.revoked && (
+                  {!tk.revoked && (
                     <button
-                      onClick={() => confirm(`吊销令牌「${t.name}」？`) && revoke.mutate(t.id)}
+                      onClick={() => confirm(t("access.confirmRevoke", { name: tk.name })) && revoke.mutate(tk.id)}
                       className="rounded p-1.5 text-err hover:bg-err/10"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -180,7 +181,7 @@ export default function Access() {
             {tokens.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-muted">
-                  暂无令牌
+                  {t("access.noTokens")}
                 </td>
               </tr>
             )}
@@ -190,20 +191,20 @@ export default function Access() {
 
       {/* 用户管理（admin） */}
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">用户管理</h2>
+        <h2 className="text-lg font-semibold">{t("access.users")}</h2>
         <button
           onClick={() => setUserForm({ username: "", password: "", role: "user" })}
           className="flex items-center gap-2 rounded-lg bg-accent px-3 py-1.5 text-sm text-white hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
-          创建用户
+          {t("access.createUser")}
         </button>
       </div>
 
       {createdUser && (
         <div className="mb-4 flex items-center gap-2 rounded-lg bg-ok/10 p-3 text-sm">
           <ShieldCheck className="h-4 w-4 shrink-0 text-ok" />
-          <span className="text-xs">用户 Agent 密钥：</span>
+          <span className="text-xs">{t("access.userSecret")}</span>
           <span className="break-all font-mono text-xs">{createdUser}</span>
           <button onClick={() => setCreatedUser("")} className="ml-auto shrink-0 text-muted hover:text-fg">
             ✕
@@ -214,7 +215,7 @@ export default function Access() {
       {viewedSecret && (
         <div className="mb-4 flex items-center gap-2 rounded-lg bg-ok/10 p-3 text-sm">
           <ShieldCheck className="h-4 w-4 shrink-0 text-ok" />
-          <span className="text-xs">「{viewedSecret.username}」Agent 密钥：</span>
+          <span className="text-xs">{t("access.secretOf", { name: viewedSecret.username })}</span>
           <span className="break-all font-mono text-xs">{viewedSecret.secret}</span>
           <button onClick={() => navigator.clipboard?.writeText(viewedSecret.secret)} className="ml-auto shrink-0 text-muted hover:text-fg">
             <Copy className="h-4 w-4" />
@@ -229,14 +230,14 @@ export default function Access() {
         <div className="mb-4 rounded-xl border border-border bg-panel p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <input
-              placeholder="用户名"
+              placeholder={t("common.username")}
               value={userForm.username}
               onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             />
             <input
               type="password"
-              placeholder="密码（≥6位）"
+              placeholder={t("access.passwordMin")}
               value={userForm.password}
               onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
@@ -246,15 +247,15 @@ export default function Access() {
               onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
-              <option value="user">普通用户</option>
-              <option value="admin">管理员</option>
+              <option value="user">{t("access.roleUser")}</option>
+              <option value="admin">{t("access.roleAdmin")}</option>
             </select>
             <button
               onClick={() => createUser.mutate(userForm)}
               disabled={!userForm.username || userForm.password.length < 6}
               className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-40"
             >
-              创建
+              {t("common.create")}
             </button>
           </div>
         </div>
@@ -264,11 +265,11 @@ export default function Access() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted">
-              <th className="px-4 py-2.5 font-normal">ID</th>
-              <th className="px-4 py-2.5 font-normal">用户名</th>
-              <th className="px-4 py-2.5 font-normal">角色</th>
-              <th className="px-4 py-2.5 font-normal">创建时间</th>
-              <th className="px-4 py-2.5 text-right font-normal">操作</th>
+              <th className="px-4 py-2.5 font-normal">{t("common.id")}</th>
+              <th className="px-4 py-2.5 font-normal">{t("common.username")}</th>
+              <th className="px-4 py-2.5 font-normal">{t("access.role")}</th>
+              <th className="px-4 py-2.5 font-normal">{t("access.createdAt")}</th>
+              <th className="px-4 py-2.5 text-right font-normal">{t("common.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -278,20 +279,20 @@ export default function Access() {
                 <td className="px-4 py-2.5 font-medium">{u.username}</td>
                 <td className="px-4 py-2.5">
                   <span className={`rounded-full px-2 py-0.5 text-xs ${u.role === "admin" ? "bg-accent/15 text-accent" : "bg-muted/20 text-muted"}`}>
-                    {u.role === "admin" ? "管理员" : "普通用户"}
+                    {u.role === "admin" ? t("access.roleAdmin") : t("access.roleUser")}
                   </span>
                 </td>
                 <td className="px-4 py-2.5 text-xs text-muted">{fmtDateTime(u.created_at)}</td>
                 <td className="px-4 py-2.5 text-right">
                   <button
                     onClick={() => viewSecret.mutate(u)}
-                    title="查看 Agent 密钥"
+                    title={t("access.viewSecret")}
                     className="mr-1 rounded p-1.5 text-muted hover:bg-accent/10 hover:text-accent"
                   >
                     <KeyRound className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => confirm(`删除用户「${u.username}」？其名下服务器将一并删除！`) && delUser.mutate(u.id)}
+                    onClick={() => confirm(t("access.confirmDeleteUser", { name: u.username })) && delUser.mutate(u.id)}
                     className="rounded p-1.5 text-err hover:bg-err/10"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -302,7 +303,7 @@ export default function Access() {
             {users.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-muted">
-                  暂无用户
+                  {t("access.noUsers")}
                 </td>
               </tr>
             )}

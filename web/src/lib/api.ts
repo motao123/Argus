@@ -427,7 +427,21 @@ interface ApiResponse<T> {
   success: boolean;
   data: T;
   error?: string;
+  /** 稳定错误码（后端可选输出，如 "server.offline"），前端按 code 翻译、未知回退 error 原文。 */
+  code?: string;
   pagination?: { offset: number; limit: number; total: number };
+}
+
+/** 带稳定错误码的 API 错误：code 缺失或未知时按 message（后端原文）展示。 */
+export class ApiError extends Error {
+  readonly code?: string;
+  readonly status?: number;
+  constructor(message: string, code?: string, status?: number) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.status = status;
+  }
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -443,7 +457,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   const body = (await res.json().catch(() => ({}))) as ApiResponse<T>;
   if (!res.ok || body.success === false) {
-    throw new Error(body.error || `HTTP ${res.status}`);
+    throw new ApiError(body.error || `HTTP ${res.status}`, body.code, res.status);
   }
   return body.data;
 }

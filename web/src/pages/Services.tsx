@@ -6,26 +6,28 @@ import {
 } from "recharts";
 import { api, type ServiceHistoryPoint, type ServiceItem } from "../lib/api";
 import { useServers } from "../context/servers";
+import { useI18n } from "../lib/i18n";
 
 // 延迟趋势折线图（1d 分钟级延迟，借鉴 dash-v2 ServiceTracker）
 function DelayTrend({ svcId, name }: { svcId: number; name: string }) {
+  const { t, fmtTime, fmtDateTime } = useI18n();
   const { data } = useQuery({
     queryKey: ["svc-history", svcId, "1d"],
     queryFn: () => api.serviceHistory(svcId, "1d"),
     staleTime: 2 * 60 * 1000,
   });
   const points = data?.points ?? [];
-  if (points.length === 0) return <div className="py-4 text-center text-xs text-muted">暂无延迟数据</div>;
+  if (points.length === 0) return <div className="py-4 text-center text-xs text-muted">{t("services.noDelayData")}</div>;
   return (
     <div className="mt-3 h-32">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={points} margin={{ top: 5, right: 5, bottom: 0, left: -15 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-c)" />
-          <XAxis dataKey="ts" tickFormatter={(v: number) => new Date(v * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} tick={{ fontSize: 10, fill: "var(--muted)" }} />
+          <XAxis dataKey="ts" tickFormatter={(v: number) => fmtTime(v)} tick={{ fontSize: 10, fill: "var(--muted)" }} />
           <YAxis tick={{ fontSize: 10, fill: "var(--muted)" }} width={50} />
           <Tooltip
-            labelFormatter={(v: number) => new Date(v * 1000).toLocaleString("zh-CN", { hour12: false })}
-            formatter={(v) => [`${Number(v).toFixed(1)}ms 可用率 ${points.find((p: ServiceHistoryPoint) => p.ts === v)?.up_rate ?? ""}%`, name]}
+            labelFormatter={(v: number) => fmtDateTime(v)}
+            formatter={(v) => [t("services.tooltipRate", { delay: Number(v).toFixed(1), rate: points.find((p: ServiceHistoryPoint) => p.ts === v)?.up_rate ?? "" }), name]}
             contentStyle={{ background: "var(--panel)", border: "1px solid var(--border-c)", borderRadius: 8 }}
           />
           <Line type="monotone" dataKey="delay" stroke="var(--color-accent)" strokeWidth={1.5} dot={false} isAnimationActive={false} />
@@ -37,6 +39,7 @@ function DelayTrend({ svcId, name }: { svcId: number; name: string }) {
 
 // 最近 30 天可用率色块（真实数据，借鉴 dash-v2 ServiceTracker）
 function UptimeBlocks({ svcId }: { svcId: number }) {
+  const { t } = useI18n();
   const { data } = useQuery({
     queryKey: ["svc-history", svcId, "30d"],
     queryFn: () => api.serviceHistory(svcId, "30d"),
@@ -54,7 +57,7 @@ function UptimeBlocks({ svcId }: { svcId: number }) {
   }
   const days = Array.from(byDay.values()).slice(-30);
   return (
-    <div className="flex gap-[2px]" title="最近 30 天可用率">
+    <div className="flex gap-[2px]" title={t("services.uptime30d")}>
       {days.map((d, i) => {
         const rate = d.total ? (d.up / d.total) * 100 : 0;
         return (
@@ -73,6 +76,7 @@ function UptimeBlocks({ svcId }: { svcId: number }) {
 const typeLabels: Record<string, string> = { http: "HTTP", tcp: "TCP", ping: "Ping" };
 
 export default function Services() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const { servers } = useServers();
   const { data } = useQuery({ queryKey: ["services"], queryFn: api.services, refetchInterval: 10000 });
@@ -111,15 +115,15 @@ export default function Services() {
     <div>
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">服务监控</h1>
-          <p className="text-sm text-muted">HTTP / TCP / Ping 探测，由指定服务器上的 Agent 执行</p>
+          <h1 className="text-xl font-semibold">{t("services.title")}</h1>
+          <p className="text-sm text-muted">{t("services.subtitle")}</p>
         </div>
         <button
           onClick={() => setForm({ server_id: servers[0]?.id ?? 0, name: "", type: "http", target: "", interval: 60, enabled: true, hidden: false, notify: false, http_method: "GET", verify_tls: true, timeout: 10, expected_status_min: 200, expected_status_max: 399, ping_count: 4, cert_warn: true })}
           className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
-          新建服务
+          {t("services.newService")}
         </button>
       </div>
 
@@ -127,14 +131,14 @@ export default function Services() {
 
       {form && (
         <div className="mb-5 rounded-xl border border-border bg-panel p-4">
-          <h2 className="mb-3 text-sm font-medium">服务配置</h2>
+          <h2 className="mb-3 text-sm font-medium">{t("services.config")}</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
             <select
               value={form.server_id ?? 0}
               onChange={(e) => setForm({ ...form, server_id: Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
-              <option value={0}>选择探测服务器</option>
+              <option value={0}>{t("services.pickServer")}</option>
               {servers.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -142,7 +146,7 @@ export default function Services() {
               ))}
             </select>
             <input
-              placeholder="名称"
+              placeholder={t("services.name")}
               value={form.name ?? ""}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
@@ -157,14 +161,14 @@ export default function Services() {
               <option value="ping">Ping</option>
             </select>
             <input
-              placeholder="目标（URL / host:port / host）"
+              placeholder={t("services.target")}
               value={form.target ?? ""}
               onChange={(e) => setForm({ ...form, target: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"
             />
             <input
               type="number"
-              placeholder="间隔秒"
+              placeholder={t("services.intervalSec")}
               value={form.interval ?? 60}
               onChange={(e) => setForm({ ...form, interval: Number(e.target.value) })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
@@ -173,19 +177,19 @@ export default function Services() {
           <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
             {form.type === "http" && <>
               <select value={form.http_method ?? "GET"} onChange={(e) => setForm({ ...form, http_method: e.target.value as "GET" | "HEAD" })} className="rounded-lg border border-border bg-bg px-3 py-2"><option>GET</option><option>HEAD</option></select>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={form.verify_tls !== false} onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })} />验证 TLS</label>
-              <input type="number" title="期望状态下限" value={form.expected_status_min ?? 200} onChange={(e) => setForm({ ...form, expected_status_min: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
-              <input type="number" title="期望状态上限" value={form.expected_status_max ?? 399} onChange={(e) => setForm({ ...form, expected_status_max: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
-              <label className="flex items-center gap-2"><input type="checkbox" checked={form.cert_warn ?? true} onChange={(e) => setForm({ ...form, cert_warn: e.target.checked })} />证书告警</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={form.verify_tls !== false} onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })} />{t("services.verifyTls")}</label>
+              <input type="number" title={t("services.expectedMin")} value={form.expected_status_min ?? 200} onChange={(e) => setForm({ ...form, expected_status_min: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
+              <input type="number" title={t("services.expectedMax")} value={form.expected_status_max ?? 399} onChange={(e) => setForm({ ...form, expected_status_max: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
+              <label className="flex items-center gap-2"><input type="checkbox" checked={form.cert_warn ?? true} onChange={(e) => setForm({ ...form, cert_warn: e.target.checked })} />{t("services.certWarn")}</label>
             </>}
-            {form.type === "ping" && <input type="number" title="Ping 包数" value={form.ping_count ?? 4} onChange={(e) => setForm({ ...form, ping_count: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />}
-            <input type="number" title="超时秒数" value={form.timeout ?? 10} onChange={(e) => setForm({ ...form, timeout: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
-            <label className="flex items-center gap-2"><input type="checkbox" checked={form.hidden ?? false} onChange={(e) => setForm({ ...form, hidden: e.target.checked })} />隐藏</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={form.notify ?? false} onChange={(e) => setForm({ ...form, notify: e.target.checked })} />通知</label>
-            <select value={form.notification_group_id ?? 0} onChange={(e) => setForm({ ...form, notification_group_id: Number(e.target.value), notify_webhook_id: 0 })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>通知组</option>{notificationGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
-            <select value={form.notify_webhook_id ?? 0} onChange={(e) => setForm({ ...form, notify_webhook_id: Number(e.target.value), notification_group_id: 0 })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>Webhook</option>{notifications.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}</select>
-            <select value={form.failure_trigger_cron_id ?? 0} onChange={(e) => setForm({ ...form, failure_trigger_cron_id: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>故障任务</option>{crons.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-            <select value={form.recovery_trigger_cron_id ?? 0} onChange={(e) => setForm({ ...form, recovery_trigger_cron_id: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>恢复任务</option>{crons.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            {form.type === "ping" && <input type="number" title={t("services.pingCount")} value={form.ping_count ?? 4} onChange={(e) => setForm({ ...form, ping_count: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />}
+            <input type="number" title={t("services.timeoutSec")} value={form.timeout ?? 10} onChange={(e) => setForm({ ...form, timeout: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.hidden ?? false} onChange={(e) => setForm({ ...form, hidden: e.target.checked })} />{t("common.hidden")}</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.notify ?? false} onChange={(e) => setForm({ ...form, notify: e.target.checked })} />{t("services.notify")}</label>
+            <select value={form.notification_group_id ?? 0} onChange={(e) => setForm({ ...form, notification_group_id: Number(e.target.value), notify_webhook_id: 0 })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>{t("services.notifGroup")}</option>{notificationGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
+            <select value={form.notify_webhook_id ?? 0} onChange={(e) => setForm({ ...form, notify_webhook_id: Number(e.target.value), notification_group_id: 0 })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>{t("services.webhook")}</option>{notifications.map(n => <option key={n.id} value={n.id}>{n.name}</option>)}</select>
+            <select value={form.failure_trigger_cron_id ?? 0} onChange={(e) => setForm({ ...form, failure_trigger_cron_id: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>{t("services.failureCron")}</option>{crons.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            <select value={form.recovery_trigger_cron_id ?? 0} onChange={(e) => setForm({ ...form, recovery_trigger_cron_id: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>{t("services.recoveryCron")}</option>{crons.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           </div>
           <div className="mt-3 flex gap-2">
             <button
@@ -193,10 +197,10 @@ export default function Services() {
               disabled={!form.server_id || !form.name || !form.target}
               className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-40"
             >
-              保存
+              {t("common.save")}
             </button>
             <button onClick={() => setForm(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">
-              取消
+              {t("common.cancel")}
             </button>
           </div>
         </div>
@@ -215,18 +219,18 @@ export default function Services() {
                   {typeLabels[svc.type] ?? svc.type}
                 </span>
                 <span className="text-xs text-muted">
-                  {svc.target} · 每 {svc.interval}s
+                  {svc.target} · {t("services.every", { interval: svc.interval })}
                 </span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="tabular text-sm text-muted">
-                  {svc.last_up === null ? "未知" : svc.last_up ? "正常" : "异常"} · {svc.last_delay === null ? "—" : `${svc.last_delay}ms`}
+                  {svc.last_up === null ? t("common.unknown") : svc.last_up ? t("services.statusOk") : t("services.statusDown")} · {svc.last_delay === null ? "—" : `${svc.last_delay}ms`}
                 </span>
                 <span className={`tabular rounded-full px-2 py-0.5 text-xs ${(svc.today_up_rate ?? -1) >= 99 ? "bg-ok/15 text-ok" : (svc.today_up_rate ?? -1) >= 90 ? "bg-warn/15 text-warn" : svc.today_up_rate === null ? "bg-black/5 text-muted" : "bg-err/15 text-err"}`}>
-                  今日 {svc.today_up_rate === null ? "—" : `${svc.today_up_rate.toFixed(1)}%`}
+                  {t("services.today")} {svc.today_up_rate === null ? "—" : `${svc.today_up_rate.toFixed(1)}%`}
                 </span>
                 <UptimeBlocks svcId={svc.id} />
-                <span className="text-xs text-muted">{expanded === svc.id ? "收起 ▲" : "延迟趋势 ▼"}</span>
+                <span className="text-xs text-muted">{expanded === svc.id ? t("services.expandCollapse") : t("services.expandTrend")}</span>
               </div>
             </button>
             <div className="flex justify-end gap-1 pr-1 pt-2">
@@ -234,7 +238,7 @@ export default function Services() {
                 <Pencil className="h-4 w-4" />
               </button>
               <button
-                onClick={() => confirm(`删除服务「${svc.name}」？`) && remove.mutate(svc.id)}
+                onClick={() => confirm(t("services.deleteConfirm", { name: svc.name })) && remove.mutate(svc.id)}
                 className="rounded p-1.5 text-err hover:bg-err/10"
               >
                 <Trash2 className="h-4 w-4" />
@@ -242,18 +246,18 @@ export default function Services() {
             </div>
             {expanded === svc.id && <div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted sm:grid-cols-6">
-                <span>可用率 {svc.availability === null ? "—" : `${svc.availability}%`}</span>
-                <span>延迟 {svc.min_delay === null ? "—" : `${svc.min_delay}/${svc.avg_delay}/${svc.max_delay}ms`}</span>
-                <span>丢包 {svc.loss_rate === null ? "—" : `${svc.loss_rate}%`}</span>
-                <span>状态 {svc.status_code ?? "—"}</span><span>证书 {svc.cert_days === null ? "—" : `${svc.cert_days}天`}</span>
-                <span>阶段 DNS/连接/TLS/TTFB {([svc.dns_ms, svc.connect_ms, svc.tls_ms, svc.ttfb_ms].map(v => v === null ? "—" : `${v}ms`).join(" / "))}</span>
+                <span>{t("services.availability", { value: svc.availability === null ? "—" : `${svc.availability}%` })}</span>
+                <span>{t("services.delay", { value: svc.min_delay === null ? "—" : `${svc.min_delay}/${svc.avg_delay}/${svc.max_delay}ms` })}</span>
+                <span>{t("services.packetLoss", { value: svc.loss_rate === null ? "—" : `${svc.loss_rate}%` })}</span>
+                <span>{t("services.statusCode", { value: svc.status_code ?? "—" })}</span><span>{t("services.cert", { value: svc.cert_days === null ? "—" : t("services.certDays", { days: svc.cert_days }) })}</span>
+                <span>{t("services.phases", { value: [svc.dns_ms, svc.connect_ms, svc.tls_ms, svc.ttfb_ms].map(v => v === null ? "—" : `${v}ms`).join(" / ") })}</span>
               </div><DelayTrend svcId={svc.id} name={svc.name} />
             </div>}
           </div>
         ))}
         {services.length === 0 && (
           <div className="rounded-xl border border-dashed border-border py-16 text-center text-sm text-muted">
-            暂无服务监控 —— 添加 HTTP/TCP/Ping 探测任务
+            {t("services.noServices")}
           </div>
         )}
       </div>

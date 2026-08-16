@@ -1,8 +1,9 @@
-import { Activity, Bell, CalendarClock, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Radar, Settings as SettingsIcon, ShieldCheck, Sun, BellRing, ScrollText, Users, Wrench, X, Zap } from "lucide-react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Activity, Bell, CalendarClock, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Radar, Settings as SettingsIcon, ShieldCheck, Sun, BellRing, ScrollText, Users, Wrench, X, Zap } from "lucide-react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
 import { setToken } from "../lib/api";
+import { useI18n, type TKey } from "../lib/i18n";
 import CommandPalette from "../components/CommandPalette";
 
 function useTheme() {
@@ -16,27 +17,28 @@ function useTheme() {
   return [theme, setTheme] as const;
 }
 
-const nav = [
-  { to: "/admin/overview", label: "总览", icon: LayoutDashboard },
-  { to: "/admin/servers", label: "服务器", icon: MonitorSmartphone },
-  { to: "/admin/services", label: "服务监控", icon: Radar },
-  { to: "/admin/alerts", label: "报警", icon: Bell },
-  { to: "/admin/crons", label: "任务", icon: CalendarClock },
-  { to: "/admin/files", label: "文件管理", icon: FolderOpen },
-  { to: "/admin/access", label: "访问控制", icon: KeyRound },
-  { to: "/admin/sessions", label: "在线会话", icon: Users },
-  { to: "/admin/network", label: "网络服务", icon: NetworkIcon },
-  { to: "/admin/security", label: "账户安全", icon: ShieldCheck },
-  { to: "/admin/notifications", label: "通知中心", icon: BellRing },
-  { to: "/admin/plugins", label: "插件", icon: Zap },
-  { to: "/admin/lifecycle", label: "过户与升级", icon: Wrench },
-  { to: "/admin/audit", label: "审计日志", icon: ScrollText },
-  { to: "/admin/maintenance", label: "备份维护", icon: Wrench },
-  { to: "/admin/settings", label: "设置", icon: SettingsIcon },
+const nav: { to: string; key: TKey; icon: typeof LayoutDashboard }[] = [
+  { to: "/admin/overview", key: "nav.overview", icon: LayoutDashboard },
+  { to: "/admin/servers", key: "nav.servers", icon: MonitorSmartphone },
+  { to: "/admin/services", key: "nav.services", icon: Radar },
+  { to: "/admin/alerts", key: "nav.alerts", icon: Bell },
+  { to: "/admin/crons", key: "nav.crons", icon: CalendarClock },
+  { to: "/admin/files", key: "nav.files", icon: FolderOpen },
+  { to: "/admin/access", key: "nav.access", icon: KeyRound },
+  { to: "/admin/sessions", key: "nav.sessions", icon: Users },
+  { to: "/admin/network", key: "nav.network", icon: NetworkIcon },
+  { to: "/admin/security", key: "nav.security", icon: ShieldCheck },
+  { to: "/admin/notifications", key: "nav.notifications", icon: BellRing },
+  { to: "/admin/plugins", key: "nav.plugins", icon: Zap },
+  { to: "/admin/lifecycle", key: "nav.lifecycle", icon: Wrench },
+  { to: "/admin/audit", key: "nav.audit", icon: ScrollText },
+  { to: "/admin/maintenance", key: "nav.maintenance", icon: Wrench },
+  { to: "/admin/settings", key: "nav.settings", icon: SettingsIcon },
 ];
 
-function SidebarContent({ theme, onToggleTheme, onNavigate }: { theme: "light" | "dark"; onToggleTheme: () => void; onNavigate?: () => void }) {
+function SidebarContent({ theme, onToggleTheme, onToggleLang, onNavigate }: { theme: "light" | "dark"; onToggleTheme: () => void; onToggleLang: () => void; onNavigate?: () => void }) {
   const { online, total } = useServers();
+  const { t, lang } = useI18n();
   const navigate = useNavigate();
   return (
     <>
@@ -45,7 +47,7 @@ function SidebarContent({ theme, onToggleTheme, onNavigate }: { theme: "light" |
         Argus
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-3">
-        {nav.map(({ to, label, icon: Icon }) => (
+        {nav.map(({ to, key, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
@@ -57,16 +59,22 @@ function SidebarContent({ theme, onToggleTheme, onNavigate }: { theme: "light" |
             }
           >
             <Icon className="h-4 w-4 shrink-0" />
-            {label}
+            {t(key)}
           </NavLink>
         ))}
       </nav>
       <div className="border-t border-border p-3 text-xs text-muted">
         <div className="mb-2 flex items-center justify-between px-1">
-          <span>在线 {online}/{total}</span>
-          <button onClick={onToggleTheme} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5" title="切换主题">
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
+          <span>{t("common.onlineOf", { online, total })}</span>
+          <span className="flex items-center gap-1">
+            <button onClick={onToggleLang} className="flex items-center gap-1 rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5" title={t("common.switchLang")}>
+              <Globe className="h-3.5 w-3.5" />
+              {lang === "zh-CN" ? "EN" : "中文"}
+            </button>
+            <button onClick={onToggleTheme} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5" title={t("common.theme")}>
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+          </span>
         </div>
         <button
           onClick={() => {
@@ -75,7 +83,7 @@ function SidebarContent({ theme, onToggleTheme, onNavigate }: { theme: "light" |
           }}
           className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-black/5 dark:hover:bg-white/5"
         >
-          <LogOut className="h-3.5 w-3.5" /> 退出登录
+          <LogOut className="h-3.5 w-3.5" /> {t("common.logout")}
         </button>
       </div>
     </>
@@ -85,23 +93,26 @@ function SidebarContent({ theme, onToggleTheme, onNavigate }: { theme: "light" |
 export default function Layout() {
   const [theme, setTheme] = useTheme();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const { lang, setLang, t } = useI18n();
+
+  const toggleLang = () => setLang(lang === "zh-CN" ? "en" : "zh-CN");
 
   return (
     <div className="min-h-screen">
       {/* 桌面端固定侧栏 */}
       <aside className="fixed inset-y-0 left-0 z-10 hidden w-52 flex-col border-r border-border bg-panel lg:flex">
-        <SidebarContent theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} />
+        <SidebarContent theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} onToggleLang={toggleLang} />
       </aside>
 
       {/* 移动端顶部栏 + 抽屉 */}
       <header className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-panel px-4 py-3 lg:hidden">
-        <button onClick={() => setDrawerOpen(true)} className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5" aria-label="打开菜单">
+        <button onClick={() => setDrawerOpen(true)} className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5" aria-label={t("common.openMenu")}>
           <Menu className="h-5 w-5" />
         </button>
         <div className="flex items-center gap-2 font-bold">
           <Activity className="h-5 w-5 text-accent" /> Argus
         </div>
-        <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5" aria-label="切换主题">
+        <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5" aria-label={t("common.theme")}>
           {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </button>
       </header>
@@ -109,10 +120,10 @@ export default function Layout() {
         <div className="fixed inset-0 z-30 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setDrawerOpen(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-64 flex-col border-r border-border bg-panel">
-            <button onClick={() => setDrawerOpen(false)} className="absolute right-2 top-3 rounded-lg p-1.5 hover:bg-black/5 dark:hover:bg-white/5" aria-label="关闭菜单">
+            <button onClick={() => setDrawerOpen(false)} className="absolute right-2 top-3 rounded-lg p-1.5 hover:bg-black/5 dark:hover:bg-white/5" aria-label={t("common.closeMenu")}>
               <X className="h-5 w-5" />
             </button>
-            <SidebarContent theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} onNavigate={() => setDrawerOpen(false)} />
+            <SidebarContent theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} onToggleLang={toggleLang} onNavigate={() => setDrawerOpen(false)} />
           </aside>
         </div>
       )}

@@ -474,7 +474,7 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 	}
 	peer := s.Agents.Peer(id)
 	if peer == nil {
-		fail(c, http.StatusConflict, "server offline")
+		fail(c, http.StatusConflict, "server offline", "server.offline")
 		return
 	}
 	resp, err := peer.Call(protocol.MethodApplyConfig, protocol.AgentConfig{

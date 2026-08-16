@@ -6,6 +6,7 @@ import AdminLayout from "./layouts/AdminLayout";
 import PublicLayout from "./layouts/PublicLayout";
 import { ServersProvider } from "./context/servers";
 import { getToken } from "./lib/api";
+import { I18nProvider } from "./lib/i18n";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
 import ServerDetail from "./pages/ServerDetail";
@@ -41,7 +42,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ErrorBoundary>
+    <I18nProvider>
+      <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
         <Routes>
@@ -96,7 +98,8 @@ createRoot(document.getElementById("root")!).render(
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
-    </ErrorBoundary>
+      </ErrorBoundary>
+    </I18nProvider>
   </StrictMode>,
 );
 

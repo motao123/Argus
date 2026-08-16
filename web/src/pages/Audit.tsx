@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ScrollText } from "lucide-react";
 import { api, type AuditLog } from "../lib/api";
-import { fmtDateTime } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
 export default function Audit() {
+  const { t, fmtDateTime } = useI18n();
   const [offset, setOffset] = useState(0);
   const { data, isFetching } = useQuery({
     queryKey: ["audit", offset],
@@ -17,18 +18,18 @@ export default function Audit() {
   return (
     <div>
       <h1 className="mb-1 flex items-center gap-2 text-xl font-semibold">
-        <ScrollText className="h-5 w-5 text-accent" /> 审计日志
+        <ScrollText className="h-5 w-5 text-accent" /> {t("audit.title")}
       </h1>
-      <p className="mb-4 text-sm text-muted">管理操作记录（admin），共 {total} 条</p>
+      <p className="mb-4 text-sm text-muted">{t("audit.subtitle", { total })}</p>
       <div className="overflow-x-auto rounded-xl border border-border bg-panel">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted">
-              <th className="px-4 py-2.5">时间</th>
-              <th className="px-4 py-2.5">用户</th>
-              <th className="px-4 py-2.5">动作</th>
-              <th className="px-4 py-2.5">详情</th>
-              <th className="px-4 py-2.5">IP</th>
+              <th className="px-4 py-2.5">{t("audit.time")}</th>
+              <th className="px-4 py-2.5">{t("common.user")}</th>
+              <th className="px-4 py-2.5">{t("audit.action")}</th>
+              <th className="px-4 py-2.5">{t("audit.detail")}</th>
+              <th className="px-4 py-2.5">{t("common.ip")}</th>
             </tr>
           </thead>
           <tbody>
@@ -41,7 +42,7 @@ export default function Audit() {
                 <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted">{l.ip}</td>
               </tr>
             ))}
-            {logs.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">暂无审计记录</td></tr>}
+            {logs.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">{t("audit.none")}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -51,17 +52,17 @@ export default function Audit() {
           onClick={() => setOffset(Math.max(0, offset - 50))}
           className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40"
         >
-          上一页
+          {t("audit.prev")}
         </button>
-        <span className="text-muted">第 {page + 1} 页</span>
+        <span className="text-muted">{t("audit.page", { page: page + 1 })}</span>
         <button
           disabled={offset + 50 >= total}
           onClick={() => setOffset(offset + 50)}
           className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40"
         >
-          下一页
+          {t("audit.next")}
         </button>
-        {isFetching && <span className="text-xs text-muted">加载中…</span>}
+        {isFetching && <span className="text-xs text-muted">{t("audit.loading")}</span>}
       </div>
     </div>
   );

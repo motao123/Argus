@@ -2,29 +2,31 @@ import { Fragment, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { api } from "../lib/api";
+import { useI18n, type TKey } from "../lib/i18n";
 
 // 全局设置：站点、终端外观与后台数据保留策略。
-const fieldMeta: { key: string; label: string; type: "text" | "number" | "select" | "textarea"; defaultValue?: string; min?: number; max?: number; section?: string; help?: string; options?: { v: string; label: string }[] }[] = [
-  { key: "site_name", label: "站点名称", type: "text" },
-  { key: "site_desc", label: "站点描述", type: "text" },
-  { key: "favicon", label: "Favicon URL", type: "text" },
-  { key: "force_auth", label: "私有站点模式", type: "select", help: "开启后游客无法查看任何数据（借鉴 komari 私有站点 + nezha force_auth）", options: [{ v: "0", label: "关闭（游客可看公开视图）" }, { v: "1", label: "开启（强制登录）" }] },
-  { key: "term_font_size", label: "终端字号", type: "number", help: "网页终端字体大小（px，默认 13）" },
-  { key: "term_theme", label: "终端主题", type: "select", help: "xterm.js 明暗主题", options: [{ v: "dark", label: "深色" }, { v: "light", label: "浅色" }] },
-  { key: "custom_css", label: "自定义 CSS", type: "textarea", help: "注入所有页面 <head>，可用于白标定制" },
-  { key: "custom_js", label: "自定义 JS", type: "textarea", help: "注入所有页面 </body> 前" },
-  { key: "custom_footer", label: "前台页脚 HTML", type: "textarea", help: "注入前台 Powered by 之前" },
-  { key: "retention_metric_1m_days", label: "指标 1 分钟数据", type: "number", defaultValue: "1", min: 1, max: 30, section: "数据保留（天）" },
-  { key: "retention_metric_5m_days", label: "指标 5 分钟数据", type: "number", defaultValue: "7", min: 1, max: 365, section: "数据保留（天）" },
-  { key: "retention_metric_1h_days", label: "指标 1 小时数据", type: "number", defaultValue: "30", min: 1, max: 3650, section: "数据保留（天）" },
-  { key: "retention_service_history_days", label: "服务监控历史", type: "number", defaultValue: "30", min: 1, max: 3650, section: "数据保留（天）" },
-  { key: "retention_transfer_days", label: "流量历史", type: "number", defaultValue: "365", min: 1, max: 3650, section: "数据保留（天）" },
-  { key: "retention_task_run_days", label: "任务运行记录", type: "number", defaultValue: "30", min: 1, max: 3650, section: "数据保留（天）" },
-  { key: "retention_audit_days", label: "审计日志", type: "number", defaultValue: "365", min: 1, max: 3650, section: "数据保留（天）", help: "同时受下方最大条数限制" },
-  { key: "retention_audit_max_rows", label: "审计日志最大条数", type: "number", defaultValue: "5000", min: 100, max: 1000000, section: "数据保留（天）", help: "兼容现有默认上限 5000 条" },
+const fieldMeta: { key: string; label: TKey; type: "text" | "number" | "select" | "textarea"; defaultValue?: string; min?: number; max?: number; section?: TKey; help?: TKey; options?: { v: string; label: TKey }[] }[] = [
+  { key: "site_name", label: "settings.siteName", type: "text" },
+  { key: "site_desc", label: "settings.siteDesc", type: "text" },
+  { key: "favicon", label: "settings.favicon", type: "text" },
+  { key: "force_auth", label: "settings.forceAuth", type: "select", help: "settings.forceAuthHelp", options: [{ v: "0", label: "settings.forceAuthOff" }, { v: "1", label: "settings.forceAuthOn" }] },
+  { key: "term_font_size", label: "settings.termFontSize", type: "number", help: "settings.termFontSizeHelp" },
+  { key: "term_theme", label: "settings.termTheme", type: "select", help: "settings.termThemeHelp", options: [{ v: "dark", label: "settings.termThemeDark" }, { v: "light", label: "settings.termThemeLight" }] },
+  { key: "custom_css", label: "settings.customCss", type: "textarea", help: "settings.customCssHelp" },
+  { key: "custom_js", label: "settings.customJs", type: "textarea", help: "settings.customJsHelp" },
+  { key: "custom_footer", label: "settings.customFooter", type: "textarea", help: "settings.customFooterHelp" },
+  { key: "retention_metric_1m_days", label: "settings.retention1m", type: "number", defaultValue: "1", min: 1, max: 30, section: "settings.retentionSection" },
+  { key: "retention_metric_5m_days", label: "settings.retention5m", type: "number", defaultValue: "7", min: 1, max: 365, section: "settings.retentionSection" },
+  { key: "retention_metric_1h_days", label: "settings.retention1h", type: "number", defaultValue: "30", min: 1, max: 3650, section: "settings.retentionSection" },
+  { key: "retention_service_history_days", label: "settings.retentionService", type: "number", defaultValue: "30", min: 1, max: 3650, section: "settings.retentionSection" },
+  { key: "retention_transfer_days", label: "settings.retentionTransfer", type: "number", defaultValue: "365", min: 1, max: 3650, section: "settings.retentionSection" },
+  { key: "retention_task_run_days", label: "settings.retentionTaskRun", type: "number", defaultValue: "30", min: 1, max: 3650, section: "settings.retentionSection" },
+  { key: "retention_audit_days", label: "settings.retentionAudit", type: "number", defaultValue: "365", min: 1, max: 3650, section: "settings.retentionSection", help: "settings.retentionAuditHelp" },
+  { key: "retention_audit_max_rows", label: "settings.retentionAuditRows", type: "number", defaultValue: "5000", min: 100, max: 1000000, section: "settings.retentionSection", help: "settings.retentionAuditRowsHelp" },
 ];
 
 export default function Settings() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const current = data?.settings ?? {};
@@ -51,8 +53,8 @@ export default function Settings() {
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold">站点设置</h1>
-      <p className="mb-5 text-sm text-muted">站点信息、访问控制与终端外观（改动即时生效，无需重启）</p>
+      <h1 className="mb-1 text-xl font-semibold">{t("settings.title")}</h1>
+      <p className="mb-5 text-sm text-muted">{t("settings.subtitle")}</p>
 
       <div className="max-w-xl rounded-xl border border-border bg-panel p-5">
         <div className="space-y-4">
@@ -60,12 +62,12 @@ export default function Settings() {
             <Fragment key={f.key}>
               {f.section && f.section !== fieldMeta[index - 1]?.section && (
                 <div className="border-t border-border pt-4">
-                  <h2 className="text-base font-semibold">{f.section}</h2>
-                  <p className="mt-1 text-xs text-muted">保存后由后台清理任务生效，不会在本次请求中删除数据，也不会自动 VACUUM。</p>
+                  <h2 className="text-base font-semibold">{t(f.section)}</h2>
+                  <p className="mt-1 text-xs text-muted">{t("settings.retentionNote")}</p>
                 </div>
               )}
             <label className="block">
-              <span className="mb-1 block text-sm font-medium">{f.label}</span>
+              <span className="mb-1 block text-sm font-medium">{t(f.label)}</span>
               {f.type === "textarea" ? (
                 <textarea
                   rows={4}
@@ -81,7 +83,7 @@ export default function Settings() {
                 >
                   {f.options?.map((o) => (
                     <option key={o.v} value={o.v}>
-                      {o.label}
+                      {t(o.label)}
                     </option>
                   ))}
                 </select>
@@ -95,7 +97,7 @@ export default function Settings() {
                   className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
                 />
               )}
-              {f.help && <span className="mt-1 block text-xs text-muted">{f.help}</span>}
+              {f.help && <span className="mt-1 block text-xs text-muted">{t(f.help)}</span>}
             </label>
             </Fragment>
           ))}
@@ -107,9 +109,9 @@ export default function Settings() {
             className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90 disabled:opacity-40"
           >
             <Save className="h-4 w-4" />
-            保存设置
+            {t("settings.saveSettings")}
           </button>
-          {saved && <span className="text-sm text-ok">已保存 ✓</span>}
+          {saved && <span className="text-sm text-ok">{t("settings.saved")}</span>}
         </div>
       </div>
     </div>

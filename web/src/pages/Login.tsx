@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Activity, Github, KeyRound, Lock, User } from "lucide-react";
 import { api, setToken } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 
 export default function Login() {
+  const { t } = useI18n();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [twoFA, setTwoFA] = useState("");
@@ -64,7 +66,7 @@ export default function Login() {
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="用户名"
+              placeholder={t("login.username")}
               autoComplete="username"
               className="w-full rounded-lg border border-border bg-bg py-2.5 pl-9 pr-3 text-sm outline-none focus:border-accent"
             />
@@ -75,7 +77,7 @@ export default function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="密码"
+              placeholder={t("login.password")}
               autoComplete="current-password"
               className="w-full rounded-lg border border-border bg-bg py-2.5 pl-9 pr-3 text-sm outline-none focus:border-accent"
             />
@@ -86,7 +88,7 @@ export default function Login() {
               <input
                 value={twoFA}
                 onChange={(e) => setTwoFA(e.target.value)}
-                placeholder="两步验证码（TOTP）"
+                placeholder={t("login.twoFA")}
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 className="w-full rounded-lg border border-border bg-bg py-2.5 pl-9 pr-3 text-sm outline-none focus:border-accent"
@@ -98,12 +100,12 @@ export default function Login() {
             disabled={loading}
             className="w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {loading ? "登录中…" : "登录"}
+            {loading ? t("login.loggingIn") : t("common.login")}
           </button>
         </form>
         {providers.length > 0 && (
           <div className="mt-4 space-y-2 border-t border-border pt-4">
-            <p className="text-center text-xs text-muted">或使用第三方登录</p>
+            <p className="text-center text-xs text-muted">{t("login.orThirdParty")}</p>
             {providers.map((name) => (
               <button
                 key={name}
