@@ -22,8 +22,16 @@ import (
 type Server struct {
 	DB    *gorm.DB
 	Peers func() map[int64]*rpc.Peer
-	// IdentifyPAT 校验 Bearer token 返回用户 ID（由 API 层注入）。
-	IdentifyPAT func(raw string) (int64, bool)
+	// IdentifyPAT 校验 PAT 并返回完整授权身份。
+	IdentifyPAT func(raw string) (*Principal, bool)
+}
+
+// Principal is the MCP authorization context supplied by the API package.
+type Principal struct {
+	UserID    int64
+	IsAdmin   bool
+	Scopes    map[string]bool
+	ServerIDs map[int64]bool
 }
 
 // 消息结构（MCP 用 JSON-RPC 2.0）。
@@ -58,7 +66,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, &rpcMsg{Error: &rpcErr{-32001, "PAT required"}})
 		return
 	}
-	userID, ok := s.IdentifyPAT(auth)
+	principal, ok := s.IdentifyPAT(auth)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, &rpcMsg{Error: &rpcErr{-32001, "invalid PAT"}})
 		return
@@ -75,42 +83,72 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, rpcErr := s.dispatch(msg.Method, msg.Params, userID)
+	result, rpcErr := s.dispatch(msg.Method, msg.Params, principal)
 	writeJSON(w, http.StatusOK, &rpcMsg{ID: msg.ID, Result: result, Error: rpcErr})
 }
 
 // dispatch 分发工具调用。
-func (s *Server) dispatch(method string, params json.RawMessage, userID int64) (any, *rpcErr) {
+func (s *Server) dispatch(method string, params json.RawMessage, p *Principal) (any, *rpcErr) {
+	if p == nil {
+		return nil, &rpcErr{-32001, "unauthorized"}
+	}
+	need := func(scope string) *rpcErr {
+		if p.IsAdmin || p.Scopes["argus:*"] || p.Scopes["argus:admin:*"] || p.Scopes[scope] {
+			return nil
+		}
+		return &rpcErr{-32003, "insufficient scope: " + scope}
+	}
 	switch method {
 	case "server.list":
-		return s.serverList(userID)
+		if e := need("argus:server:read"); e != nil {
+			return nil, e
+		}
+		return s.serverList(p)
 	case "server.get":
-		return s.serverGet(params, userID)
+		if e := need("argus:server:read"); e != nil {
+			return nil, e
+		}
+		return s.serverGet(params, p)
 	case "server.exec":
-		return s.serverExec(params, userID)
-	case "fs.list":
-		return s.fsList(params, userID)
-	case "fs.read":
-		return s.fsRead(params, userID)
-	case "fs.write":
-		return s.fsWrite(params, userID)
-	case "fs.delete":
-		return s.fsDelete(params, userID)
+		if e := need("argus:server:exec"); e != nil {
+			return nil, e
+		}
+		return s.serverExec(params, p)
+	case "fs.list", "fs.read":
+		if e := need("argus:server:read"); e != nil {
+			return nil, e
+		}
+		if method == "fs.list" {
+			return s.fsList(params, p)
+		}
+		return s.fsRead(params, p)
+	case "fs.write", "fs.delete":
+		if e := need("argus:server:write"); e != nil {
+			return nil, e
+		}
+		if method == "fs.write" {
+			return s.fsWrite(params, p)
+		}
+		return s.fsDelete(params, p)
 	case "meta.whoami":
-		return map[string]any{"user_id": userID}, nil
+		return map[string]any{"user_id": p.UserID}, nil
 	default:
 		return nil, &rpcErr{-32601, "unknown tool: " + method}
 	}
 }
 
-func (s *Server) serverList(userID int64) (any, *rpcErr) {
+func (s *Server) serverList(p *Principal) (any, *rpcErr) {
 	var servers []model.Server
 	q := s.DB.Order("id")
-	if userID != 0 {
-		var u model.User
-		if err := s.DB.First(&u, userID).Error; err == nil && u.Role != model.RoleAdmin {
-			q = q.Where("owner_id = ?", userID)
+	if !p.IsAdmin {
+		q = q.Where("owner_id = ?", p.UserID)
+	}
+	if len(p.ServerIDs) > 0 {
+		ids := make([]int64, 0, len(p.ServerIDs))
+		for id := range p.ServerIDs {
+			ids = append(ids, id)
 		}
+		q = q.Where("id IN ?", ids)
 	}
 	if err := q.Find(&servers).Error; err != nil {
 		return nil, &rpcErr{-32603, err.Error()}
@@ -122,34 +160,48 @@ func (s *Server) serverList(userID int64) (any, *rpcErr) {
 	return map[string]any{"servers": out}, nil
 }
 
-func (s *Server) serverGet(params json.RawMessage, userID int64) (any, *rpcErr) {
-	var p struct {
+func (s *Server) authorizedServer(id int64, p *Principal) (*model.Server, *rpcErr) {
+	var sv model.Server
+	if err := s.DB.First(&sv, id).Error; err != nil {
+		return nil, &rpcErr{-32002, "server not found"}
+	}
+	if !p.IsAdmin && (sv.OwnerID != p.UserID || (len(p.ServerIDs) > 0 && !p.ServerIDs[id])) {
+		return nil, &rpcErr{-32003, "server access denied"}
+	}
+	return &sv, nil
+}
+
+func (s *Server) serverGet(params json.RawMessage, p *Principal) (any, *rpcErr) {
+	var req struct {
 		ID int64 `json:"id"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 {
+	if err := json.Unmarshal(params, &req); err != nil || req.ID <= 0 {
 		return nil, &rpcErr{-32602, "id required"}
 	}
-	var sv model.Server
-	if err := s.DB.First(&sv, p.ID).Error; err != nil {
-		return nil, &rpcErr{-32002, "server not found"}
+	sv, authErr := s.authorizedServer(req.ID, p)
+	if authErr != nil {
+		return nil, authErr
 	}
 	return map[string]any{"id": sv.ID, "name": sv.Name, "group": sv.Group, "note": sv.Note}, nil
 }
 
-func (s *Server) serverExec(params json.RawMessage, userID int64) (any, *rpcErr) {
-	var p struct {
+func (s *Server) serverExec(params json.RawMessage, p *Principal) (any, *rpcErr) {
+	var req struct {
 		ID      int64  `json:"id"`
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 || p.Command == "" {
+	if err := json.Unmarshal(params, &req); err != nil || req.ID <= 0 || req.Command == "" {
 		return nil, &rpcErr{-32602, "id and command required"}
 	}
-	peer := s.Peers()[p.ID]
+	if _, authErr := s.authorizedServer(req.ID, p); authErr != nil {
+		return nil, authErr
+	}
+	peer := s.Peers()[req.ID]
 	if peer == nil {
 		return nil, &rpcErr{-32002, "server offline"}
 	}
-	resp, err := peer.Call(protocol.MethodExec, protocol.ExecParams{Command: p.Command, Timeout: p.Timeout}, 60*time.Second)
+	resp, err := peer.Call(protocol.MethodExec, protocol.ExecParams{Command: req.Command, Timeout: req.Timeout}, 60*time.Second)
 	if err != nil {
 		return nil, &rpcErr{-32603, err.Error()}
 	}
@@ -162,22 +214,25 @@ func (s *Server) serverExec(params json.RawMessage, userID int64) (any, *rpcErr)
 	return map[string]any{"output": result.Output, "exit_code": result.Code}, nil
 }
 
-func (s *Server) fsList(params json.RawMessage, userID int64) (any, *rpcErr) {
-	var p struct {
+func (s *Server) fsList(params json.RawMessage, p *Principal) (any, *rpcErr) {
+	var req struct {
 		ID   int64  `json:"id"`
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 {
+	if err := json.Unmarshal(params, &req); err != nil || req.ID <= 0 {
 		return nil, &rpcErr{-32602, "id required"}
 	}
-	peer := s.Peers()[p.ID]
+	if _, authErr := s.authorizedServer(req.ID, p); authErr != nil {
+		return nil, authErr
+	}
+	peer := s.Peers()[req.ID]
 	if peer == nil {
 		return nil, &rpcErr{-32002, "server offline"}
 	}
-	if p.Path == "" {
-		p.Path = "/"
+	if req.Path == "" {
+		req.Path = "/"
 	}
-	resp, err := peer.Call(protocol.MethodFsList, protocol.FsListParams{Path: p.Path}, 30*time.Second)
+	resp, err := peer.Call(protocol.MethodFsList, protocol.FsListParams{Path: req.Path}, 30*time.Second)
 	if err != nil {
 		return nil, &rpcErr{-32603, err.Error()}
 	}
@@ -190,21 +245,24 @@ func (s *Server) fsList(params json.RawMessage, userID int64) (any, *rpcErr) {
 	return map[string]any{"path": result.Path, "entries": result.Entries}, nil
 }
 
-func (s *Server) fsRead(params json.RawMessage, userID int64) (any, *rpcErr) {
-	var p struct {
+func (s *Server) fsRead(params json.RawMessage, p *Principal) (any, *rpcErr) {
+	var req struct {
 		ID     int64  `json:"id"`
 		Path   string `json:"path"`
 		Offset int64  `json:"offset"`
 		Limit  int    `json:"limit"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 {
+	if err := json.Unmarshal(params, &req); err != nil || req.ID <= 0 || req.Path == "" {
 		return nil, &rpcErr{-32602, "id and path required"}
 	}
-	peer := s.Peers()[p.ID]
+	if _, authErr := s.authorizedServer(req.ID, p); authErr != nil {
+		return nil, authErr
+	}
+	peer := s.Peers()[req.ID]
 	if peer == nil {
 		return nil, &rpcErr{-32002, "server offline"}
 	}
-	resp, err := peer.Call(protocol.MethodFsRead, protocol.FsReadParams{Path: p.Path, Offset: p.Offset, Limit: p.Limit}, 30*time.Second)
+	resp, err := peer.Call(protocol.MethodFsRead, protocol.FsReadParams{Path: req.Path, Offset: req.Offset, Limit: req.Limit}, 30*time.Second)
 	if err != nil {
 		return nil, &rpcErr{-32603, err.Error()}
 	}
@@ -217,25 +275,28 @@ func (s *Server) fsRead(params json.RawMessage, userID int64) (any, *rpcErr) {
 	return map[string]any{"data": base64.StdEncoding.EncodeToString(result.Data), "eof": result.EOF, "size": result.Size}, nil
 }
 
-func (s *Server) fsWrite(params json.RawMessage, userID int64) (any, *rpcErr) {
-	var p struct {
+func (s *Server) fsWrite(params json.RawMessage, p *Principal) (any, *rpcErr) {
+	var req struct {
 		ID     int64  `json:"id"`
 		Path   string `json:"path"`
 		Data   string `json:"data"` // base64
 		Append bool   `json:"append"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 || p.Path == "" {
+	if err := json.Unmarshal(params, &req); err != nil || req.ID <= 0 || req.Path == "" {
 		return nil, &rpcErr{-32602, "id/path/data required"}
 	}
-	data, err := base64.StdEncoding.DecodeString(p.Data)
+	data, err := base64.StdEncoding.DecodeString(req.Data)
 	if err != nil {
 		return nil, &rpcErr{-32602, "invalid base64"}
 	}
-	peer := s.Peers()[p.ID]
+	if _, authErr := s.authorizedServer(req.ID, p); authErr != nil {
+		return nil, authErr
+	}
+	peer := s.Peers()[req.ID]
 	if peer == nil {
 		return nil, &rpcErr{-32002, "server offline"}
 	}
-	resp, err := peer.Call(protocol.MethodFsWrite, protocol.FsWriteParams{Path: p.Path, Data: data, Append: p.Append}, 30*time.Second)
+	resp, err := peer.Call(protocol.MethodFsWrite, protocol.FsWriteParams{Path: req.Path, Data: data, Append: req.Append}, 30*time.Second)
 	if err != nil {
 		return nil, &rpcErr{-32603, err.Error()}
 	}
@@ -248,20 +309,23 @@ func (s *Server) fsWrite(params json.RawMessage, userID int64) (any, *rpcErr) {
 	return map[string]any{"bytes": result.Bytes}, nil
 }
 
-func (s *Server) fsDelete(params json.RawMessage, userID int64) (any, *rpcErr) {
-	var p struct {
+func (s *Server) fsDelete(params json.RawMessage, p *Principal) (any, *rpcErr) {
+	var req struct {
 		ID        int64  `json:"id"`
 		Path      string `json:"path"`
 		Recursive bool   `json:"recursive"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.ID <= 0 || p.Path == "" {
+	if err := json.Unmarshal(params, &req); err != nil || req.ID <= 0 || req.Path == "" {
 		return nil, &rpcErr{-32602, "id and path required"}
 	}
-	peer := s.Peers()[p.ID]
+	if _, authErr := s.authorizedServer(req.ID, p); authErr != nil {
+		return nil, authErr
+	}
+	peer := s.Peers()[req.ID]
 	if peer == nil {
 		return nil, &rpcErr{-32002, "server offline"}
 	}
-	resp, err := peer.Call(protocol.MethodFsDelete, protocol.FsDeleteParams{Path: p.Path, Recursive: p.Recursive}, 30*time.Second)
+	resp, err := peer.Call(protocol.MethodFsDelete, protocol.FsDeleteParams{Path: req.Path, Recursive: req.Recursive}, 30*time.Second)
 	if err != nil {
 		return nil, &rpcErr{-32603, err.Error()}
 	}

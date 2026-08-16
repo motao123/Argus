@@ -56,6 +56,7 @@ func New(s *Server) *gin.Engine {
 			pub.GET("/servers", s.forceAuth, s.listServers)
 			pub.GET("/servers/:id/metrics", s.forceAuth, s.serverMetrics)
 			pub.GET("/servers/:id/transfer", s.forceAuth, s.serverTransfer)
+			pub.GET("/servers/:id/traffic", s.forceAuth, s.serverTransfer)
 			pub.GET("/services", s.forceAuth, s.listServices)
 			pub.GET("/services/:id/history", s.forceAuth, s.serviceHistory)
 			pub.GET("/services/:id/stats", s.forceAuth, s.serviceStats)
@@ -122,15 +123,13 @@ func New(s *Server) *gin.Engine {
 			// 审计日志（admin）
 			authed.GET("/admin/logs", s.listAuditLogs)
 
-			// 插件市场
-			authed.GET("/plugins/market", s.listPluginMarket)
-			authed.POST("/plugins/market/:name/install", s.installPlugin)
-
-			// 插件管理
-			authed.GET("/plugins", s.listPlugins)
-			authed.POST("/plugins/:name/toggle", s.togglePlugin)
-			authed.POST("/plugins/:name/run", s.runPluginNow)
-			authed.DELETE("/plugins/:name", s.deletePlugin)
+			// 插件（admin；插件可执行任意代码并访问网络）
+			authed.GET("/plugins/market", requireAdmin(), s.listPluginMarket)
+			authed.POST("/plugins/market/:name/install", requireAdmin(), s.installPlugin)
+			authed.GET("/plugins", requireAdmin(), s.listPlugins)
+			authed.POST("/plugins/:name/toggle", requireAdmin(), s.togglePlugin)
+			authed.POST("/plugins/:name/run", requireAdmin(), s.runPluginNow)
+			authed.DELETE("/plugins/:name", requireAdmin(), s.deletePlugin)
 
 			// 通知分组
 			authed.GET("/notification-groups", s.listNotificationGroups)
@@ -138,11 +137,11 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/notification-groups/:id", s.saveNotificationGroup)
 			authed.DELETE("/notification-groups/:id", s.deleteNotificationGroup)
 
-			// 通知
-			authed.GET("/notifications", requireScope(ScopeNotificationRead), s.listNotifications)
-			authed.POST("/notifications", requireScope(ScopeNotificationWrite), s.createNotification)
-			authed.PUT("/notifications/:id", requireScope(ScopeNotificationWrite), s.updateNotification)
-			authed.DELETE("/notifications/:id", requireScope(ScopeNotificationDelete), s.deleteNotification)
+			// 通知（全局资源，仅 admin；避免敏感凭据被普通用户读取）
+			authed.GET("/notifications", requireAdmin(), s.listNotifications)
+			authed.POST("/notifications", requireAdmin(), s.createNotification)
+			authed.PUT("/notifications/:id", requireAdmin(), s.updateNotification)
+			authed.DELETE("/notifications/:id", requireAdmin(), s.deleteNotification)
 
 			// 定时任务
 			authed.GET("/crons", requireScope(ScopeCronRead), s.listCrons)
@@ -174,8 +173,7 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/batch-delete/servers", s.batchDeleteServers)
 			authed.POST("/batch-move/servers", s.batchMoveServers)
 
-			// 服务器过户（admin）
-			authed.POST("/servers/:id/transfer", s.serverTransfer)
+			// 服务器过户状态机尚未实现，禁止保留一个会误报成功的 POST 路由。
 
 			// DDNS
 			authed.GET("/ddns", s.listDDNS)

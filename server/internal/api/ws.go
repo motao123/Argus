@@ -54,12 +54,22 @@ func (s *Server) dashboardWS(c *gin.Context) {
 		select {
 		case <-ticker.C:
 			snap := s.Store.Snapshot()
-			if isGuest {
-				// 游客不推送隐藏服务器（借鉴 nezha HideForGuest）
-				for id, st := range snap {
-					if st.Server != nil && st.Server.Hidden {
-						delete(snap, id)
-					}
+			for id, st := range snap {
+				if st.Server == nil {
+					delete(snap, id)
+					continue
+				}
+				if isGuest && st.Server.Hidden {
+					delete(snap, id)
+					continue
+				}
+				if p != nil && !p.IsAdmin && st.Server.OwnerID != p.UserID {
+					delete(snap, id)
+					continue
+				}
+				if p != nil && p.IsPAT && !p.canAccessServer(id) {
+					delete(snap, id)
+					continue
 				}
 			}
 			out := make([]serverView, 0, len(snap))
@@ -125,6 +135,10 @@ var (
 // terminalWS 浏览器终端 WebSocket：建立时通知 Agent 开会话，双向转发字节。
 func (s *Server) terminalWS(c *gin.Context) {
 	serverID := mustIDParam(c, "serverId")
+	if _, ok := s.authorizeServer(c, serverID, ScopeServerExec); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	if s.Agents.Peer(serverID) == nil {
 		fail(c, http.StatusConflict, "server offline")
 		return

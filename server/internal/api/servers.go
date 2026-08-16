@@ -13,6 +13,41 @@ import (
 	"github.com/motao123/Argus/server/internal/model"
 )
 
+// authorizeServer verifies scope, ownership and PAT server whitelist for a server resource.
+func (s *Server) authorizeServer(c *gin.Context, serverID int64, scope string) (*model.Server, bool) {
+	p := principalFromContext(c)
+	if p == nil || !p.hasScope(scope) {
+		return nil, false
+	}
+	var srv model.Server
+	if err := s.DB.First(&srv, serverID).Error; err != nil {
+		return nil, false
+	}
+	if p.IsAdmin {
+		return &srv, true
+	}
+	if srv.OwnerID != p.UserID || (p.IsPAT && !p.canAccessServer(serverID)) {
+		return nil, false
+	}
+	return &srv, true
+}
+
+// authorizePublicServer permits a visible server to guests and owner/admin users.
+func (s *Server) authorizePublicServer(c *gin.Context, serverID int64) (*model.Server, bool) {
+	p := principalFromContext(c)
+	var srv model.Server
+	if err := s.DB.First(&srv, serverID).Error; err != nil {
+		return nil, false
+	}
+	if p == nil {
+		return &srv, !srv.Hidden && s.GetSetting(SettingForceAuth, "0") != "1"
+	}
+	if p.IsAdmin || (srv.OwnerID == p.UserID && (!p.IsPAT || p.canAccessServer(serverID))) {
+		return &srv, true
+	}
+	return nil, false
+}
+
 // serverView 前端视图：持久化配置 + 实时状态。
 type serverView struct {
 	model.Server
@@ -48,11 +83,20 @@ type hostView struct {
 func (s *Server) listServers(c *gin.Context) {
 	p := principalFromContext(c)
 	q := s.DB.Model(&model.Server{}).Order("sort_order, id")
-	if p == nil || (!p.IsAdmin && !p.IsPAT) {
-		// 游客或普通用户：隐藏服务器不可见（借鉴 nezha HideForGuest）
-		q = q.Where("hidden = ?", false)
-	}
-	if p != nil && !p.IsAdmin && !p.IsPAT {
+	switch {
+	case p == nil:
+		// 游客只看非隐藏服务器（私有站点模式一律不可见）
+		if s.GetSetting(SettingForceAuth, "0") == "1" {
+			q = q.Where("1 = 0")
+		} else {
+			q = q.Where("hidden = ?", false)
+		}
+	case p.IsAdmin:
+		// 全部
+	case p.IsPAT:
+		q = q.Where("owner_id = ?", p.UserID)
+	default:
+		// 普通用户看自己名下（含隐藏，隐藏仅对游客生效）
 		q = q.Where("owner_id = ?", p.UserID)
 	}
 	offset, limit := pagination(c)
@@ -117,7 +161,7 @@ func (s *Server) createServer(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
-	srv := model.Server{Name: req.Name, Group: req.Group, Note: req.Note, Secret: agent.GenSecret()}
+	srv := model.Server{Name: req.Name, Group: req.Group, Note: req.Note, Secret: agent.GenSecret(), OwnerID: principalFromContext(c).UserID}
 	if err := s.DB.Create(&srv).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -131,9 +175,9 @@ func (s *Server) createServer(c *gin.Context) {
 func (s *Server) updateServer(c *gin.Context) {
 	id := mustID(c)
 	var req struct {
-		Name      string   `json:"name"`
-		Group     string   `json:"group"`
-		Note      string   `json:"note"`
+		Name      *string  `json:"name"`
+		Group     *string  `json:"group"`
+		Note      *string  `json:"note"`
 		Price     *float64 `json:"price"`
 		CycleDays *int     `json:"cycle_days"`
 		ExpireAt  *string  `json:"expire_at"` // RFC3339 或空
@@ -147,12 +191,24 @@ func (s *Server) updateServer(c *gin.Context) {
 		return
 	}
 	var srv model.Server
+	if _, ok := s.authorizeServer(c, id, ScopeServerWrite); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	if err := s.DB.First(&srv, id).Error; err != nil {
 		fail(c, http.StatusNotFound, "not found")
 		return
 	}
-	updates := map[string]any{
-		"name": req.Name, "group": req.Group, "note": req.Note,
+	// 部分更新语义：未提交字段保留原值（防止单字段更新清空 name/group/note）
+	updates := map[string]any{}
+	if req.Name != nil {
+		updates["name"] = *req.Name
+	}
+	if req.Group != nil {
+		updates["group_name"] = *req.Group
+	}
+	if req.Note != nil {
+		updates["note"] = *req.Note
 	}
 	if req.Price != nil {
 		updates["price"] = *req.Price
@@ -191,6 +247,10 @@ func (s *Server) updateServer(c *gin.Context) {
 
 func (s *Server) deleteServer(c *gin.Context) {
 	id := mustID(c)
+	if _, ok := s.authorizeServer(c, id, ScopeServerDelete); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	if err := s.DB.Delete(&model.Server{}, id).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -207,6 +267,10 @@ func (s *Server) deleteServer(c *gin.Context) {
 // period: 1h / 24h / 7d；返回聚合后的点（最多 ~120 点）。
 func (s *Server) serverMetrics(c *gin.Context) {
 	id := mustID(c)
+	if _, ok := s.authorizePublicServer(c, id); !ok {
+		fail(c, http.StatusNotFound, "server not found")
+		return
+	}
 	period := c.DefaultQuery("period", "1h")
 	now := time.Now()
 
@@ -277,6 +341,10 @@ func (s *Server) serverMetrics(c *gin.Context) {
 // serverApplyConfig 下发 Agent 配置（借鉴 nezha ApplyConfig）。
 func (s *Server) serverApplyConfig(c *gin.Context) {
 	id := mustID(c)
+	if _, ok := s.authorizeServer(c, id, ScopeServerWrite); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	var req struct {
 		ServerURL string `json:"server_url"`
 		Interval  int    `json:"interval"`
@@ -309,6 +377,10 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 // serverExec 立即在指定服务器执行命令（管理台调试用）。
 func (s *Server) serverExec(c *gin.Context) {
 	id := mustID(c)
+	if _, ok := s.authorizeServer(c, id, ScopeServerExec); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	var req struct {
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`

@@ -47,6 +47,10 @@ func (s *Server) createDDNS(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "server_id/name/domains required")
 		return
 	}
+	if _, ok := s.authorizeServer(c, req.ServerID, ScopeServerWrite); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	if req.Provider != "cloudflare" {
 		req.Provider = "webhook"
 	}
@@ -93,6 +97,10 @@ func (s *Server) updateDDNS(c *gin.Context) {
 	}
 	updates := map[string]any{}
 	if req.ServerID != nil {
+		if _, ok := s.authorizeServer(c, *req.ServerID, ScopeServerWrite); !ok {
+			fail(c, http.StatusForbidden, "server access denied")
+			return
+		}
 		updates["server_id"] = *req.ServerID
 	}
 	if req.Name != nil {
@@ -143,6 +151,14 @@ func (s *Server) testDDNS(c *gin.Context) {
 		fail(c, http.StatusNotFound, "not found")
 		return
 	}
+	if !s.canManage(&profile.OwnerID, c) {
+		fail(c, http.StatusForbidden, "not yours")
+		return
+	}
+	if _, ok := s.authorizeServer(c, profile.ServerID, ScopeServerWrite); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	ip := currentIP(c)
 	results := make(map[string]string)
 	provider := ddns.NewProvider(profile.Provider)
@@ -164,15 +180,9 @@ func (s *Server) testDDNS(c *gin.Context) {
 	ok(c, gin.H{"ip": ip, "results": results})
 }
 
-// currentIP 获取当前请求 IP（优先真实 IP 头）。
+// currentIP 获取当前请求 IP（仅信任配置的可信代理，见 main.go SetTrustedProxies）。
 func currentIP(c *gin.Context) string {
-	ip := c.ClientIP()
-	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
-		if first := strings.Split(xff, ",")[0]; first != "" {
-			return strings.TrimSpace(first)
-		}
-	}
-	return ip
+	return c.ClientIP()
 }
 
 // HandleServerIPChange 服务器 IP 变化回调：更新匹配的 DDNS 配置（异步）。

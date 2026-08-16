@@ -3,7 +3,6 @@ package notifier
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -170,9 +169,9 @@ func sendServerChan(n *model.Notification, title, content string) {
 
 // ---- 公共 ----
 
-var httpClient = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
-	TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // 允许自签通知端点
-}}
+// httpClient 校验证书链（不再全局跳过 TLS 验证，防止通知凭据被中间人窃取）。
+// 若使用自签端点，应配置受信 CA 而不是关闭校验。
+var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 func doRequest(req *http.Request) {
 	resp, err := httpClient.Do(req)

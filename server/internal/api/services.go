@@ -23,7 +23,23 @@ type serviceView struct {
 func (s *Server) listServices(c *gin.Context) {
 	p := principalFromContext(c)
 	q := s.DB.Model(&model.Service{}).Order("id")
-	if p != nil && !p.IsAdmin && !p.IsPAT {
+	switch {
+	case p == nil:
+		// 游客只看公开服务（私有站点模式一律不可见）
+		if s.GetSetting(SettingForceAuth, "0") == "1" {
+			q = q.Where("1 = 0")
+		} else {
+			q = q.Where("hidden = ?", false)
+		}
+	case p.IsAdmin:
+		// 全部
+	case p.IsPAT:
+		if !p.hasScope(ScopeServiceRead) {
+			fail(c, http.StatusForbidden, "insufficient scope: "+ScopeServiceRead)
+			return
+		}
+		q = q.Where("owner_id = ?", p.UserID)
+	default:
 		q = q.Where("owner_id = ?", p.UserID)
 	}
 	offset, limit := pagination(c)
@@ -86,6 +102,10 @@ func (s *Server) createService(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "server_id/name/target required")
 		return
 	}
+	if _, ok := s.authorizeServer(c, req.ServerID, ScopeServiceWrite); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	switch req.Type {
 	case "http", "tcp", "ping":
 	default:
@@ -127,12 +147,19 @@ func (s *Server) updateService(c *gin.Context) {
 		Target          *string `json:"target"`
 		Interval        *int    `json:"interval"`
 		Enabled         *bool   `json:"enabled"`
+		Hidden          *bool   `json:"hidden"`
 		Notify          *bool   `json:"notify"`
 		NotifyWebhookID *int64  `json:"notify_webhook_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
+	}
+	if req.ServerID != nil {
+		if _, ok := s.authorizeServer(c, *req.ServerID, ScopeServiceWrite); !ok {
+			fail(c, http.StatusForbidden, "server access denied")
+			return
+		}
 	}
 	updates := map[string]any{}
 	if req.ServerID != nil {
@@ -152,6 +179,9 @@ func (s *Server) updateService(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
+	}
+	if req.Hidden != nil {
+		updates["hidden"] = *req.Hidden
 	}
 	if req.Notify != nil {
 		updates["notify"] = *req.Notify
@@ -182,9 +212,37 @@ func (s *Server) deleteService(c *gin.Context) {
 	ok(c, gin.H{"ok": true})
 }
 
+// canViewService 服务可见性：游客只看公开；普通用户/PAT 只看自己名下（PAT 需 read scope）。
+func (s *Server) canViewService(c *gin.Context, svc *model.Service) bool {
+	p := principalFromContext(c)
+	if p == nil {
+		return s.GetSetting(SettingForceAuth, "0") != "1" && !svc.Hidden
+	}
+	if p.IsAdmin {
+		return true
+	}
+	if svc.OwnerID != p.UserID {
+		return false
+	}
+	if p.IsPAT && !p.hasScope(ScopeServiceRead) {
+		return false
+	}
+	_, ok := s.authorizeServer(c, svc.ServerID, ScopeServiceRead)
+	return ok
+}
+
 // serviceHistory 服务历史（1d 分钟级 / 7d 按小时聚合）。
 func (s *Server) serviceHistory(c *gin.Context) {
 	id := mustID(c)
+	var svc model.Service
+	if err := s.DB.First(&svc, id).Error; err != nil {
+		fail(c, http.StatusNotFound, "service not found")
+		return
+	}
+	if !s.canViewService(c, &svc) {
+		fail(c, http.StatusNotFound, "service not found")
+		return
+	}
 	period := c.DefaultQuery("period", "1d")
 	step := int64(60)
 	seconds := int64(24 * 3600)
@@ -241,6 +299,15 @@ func (s *Server) serviceHistory(c *gin.Context) {
 // serviceStats 服务统计汇总（最近 24h：可用率/平均延迟/最大延迟/丢包率）。
 func (s *Server) serviceStats(c *gin.Context) {
 	id := mustID(c)
+	var svc model.Service
+	if err := s.DB.First(&svc, id).Error; err != nil {
+		fail(c, http.StatusNotFound, "service not found")
+		return
+	}
+	if !s.canViewService(c, &svc) {
+		fail(c, http.StatusNotFound, "service not found")
+		return
+	}
 	from := time.Now().Add(-24 * time.Hour).Unix()
 	var agg struct {
 		Up, Total int64

@@ -26,7 +26,7 @@ const version = "0.1.0"
 func main() {
 	var (
 		serverURL = flag.String("s", "ws://127.0.0.1:8080/ws/agent", "server WebSocket 地址")
-		secret    = flag.String("k", "", "服务器密钥（空则首次注册后自动保存）")
+		secret    = flag.String("k", "", "注册密钥（服务器密钥或用户 Agent 密钥；必填，不再支持空密钥首次注册）")
 		interval  = flag.Duration("i", 2*time.Second, "上报间隔")
 		configDir = flag.String("c", ".", "配置目录（用于保存注册密钥）")
 	)
@@ -53,6 +53,9 @@ func main() {
 		if s, err := loadSecret(cfgFile); err == nil && s != "" {
 			*secret = s
 		}
+	}
+	if *secret == "" {
+		log.Fatal("注册密钥必填：请通过 -k 传入服务器密钥或用户 Agent 密钥（服务器已禁止空密钥注册）")
 	}
 
 	col := collector.New(version)

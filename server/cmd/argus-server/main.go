@@ -209,6 +209,10 @@ func main() {
 	// DDNS：服务器 IP 变化时更新解析记录
 	agents.IPChangeCb = srv.HandleServerIPChange
 	router := api.New(srv)
+	// 可信代理：只有来自这些代理的请求才采信 X-Forwarded-For（默认空 = 直连模式）
+	if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		log.Fatalf("invalid trusted proxies: %v", err)
+	}
 
 	// 容器编排/反向代理探活端点：不访问数据库，不泄露运行数据。
 	router.GET("/healthz", func(c *gin.Context) {

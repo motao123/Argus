@@ -2,7 +2,8 @@
 
 > 汇总 komari / nezha-master / nezha-dash-v2 三项目的盘点结果，合并去重，
 > 标注来源项目、功能用途、适配改造要点。供 Argus 整合版开发索引。
-> 状态刷新：2026-08-16（对照当前代码库逐项核实，A1-A6 / B1-B6 / 第1-7项 已全部落地）。
+> 状态刷新：2026-08-16（第 2 轮：逐项核实并纠正此前误报；状态列统一为
+> 「✅ 完整可用 / ⚠️ 部分或仅后端 / 📋 待实现」，不再以“有路由”代替“可用”）。
 
 ## 一、后端服务能力
 
@@ -10,7 +11,7 @@
 
 | 资产 | 来源 | 用途 | 改造要点 | Argus 状态 |
 |---|---|---|---|---|
-| Agent 上报协议 | komari | JSON-RPC 2.0 over WS（v2），含 register/report/事件队列 | 直接复用设计 | ✅ 已实现（protocol/rpc） |
+| Agent 上报协议 | komari | JSON-RPC 2.0 over WS（v2），含 register/report/事件队列 | 借鉴式实现：无 jsonrpc 信封、无 pull/ack 事件队列、无 HTTP fallback；不兼容 komari v2 | ⚠️ 部分（协议风格借鉴） |
 | gRPC 上报流 | nezha | ReportSystemState/RequestTask 双向流 | 性能更强但工具链重，**不迁** | — |
 | 实时状态内存区 | nezha | ServerClass 内存台账 + 权限过滤 | 已实现 store.Hub | ✅ 已实现 |
 | 指标降采样 TSDB | komari | pkg/metric 分层 rollup（1m→5m→1h）+ t-digest | 单二进制场景采用 SQLite 分钟级 rollup + 聚合查询（internal/metric/rollup） | ✅ 已实现基础版 |
@@ -55,7 +56,7 @@
 | 服务器 CRUD + 分组 | komari/nezha | 基础管理 | A4 分组管理已实现 | ✅ 已实现 |
 | 服务器排序/搜索/过滤 | komari | orderClients + 分组/标签 | B6 标签/手动排序 + 前端 9 种排序 | ✅ 已实现 |
 | 批量操作 | nezha | batch-delete/batch-move | A5 已实现 | ✅ 已实现 |
-| 服务器过户转移 | nezha | transfer 状态机（跨账号） | API 已实现 | ✅ 已实现 |
+| 服务器过户转移 | nezha | transfer 状态机（跨账号） | 尚未实现；原 POST 路由已移除（曾误绑流量查询） | 📋 待实现 |
 | 服务器计费信息 | komari | 价格/周期/自动续费字段 | B2 到期提醒 + model 字段（price/cycle_days/expire_at/auto_renew） | ✅ 已实现 |
 | 服务器隐藏（guest 不可见） | nezha | HideForGuest | B6 hidden 字段 + 前端联动 | ✅ 已实现 |
 | PAT 细粒度权限 | nezha | `nezha:{resource}:{verb}` + 白名单 | `argus:{resource}:{verb}` + server_ids 白名单 + 吊销 | ✅ 已实现 |
@@ -68,24 +69,24 @@
 |---|---|---|---|---|
 | OAuth2 登录 | komari/nezha | GitHub/Gitee/QQ/OIDC | 第5项 已实现（多 provider 可配置） | ✅ 已实现 |
 | TOTP 2FA | komari | 敏感操作二次验证 | twofa.go（setup/qrcode/enable/disable） | ✅ 已实现 |
-| GeoIP（mmdb 内嵌） | nezha | pkg/geoip 国家归属 | internal/geoip | ✅ 已实现 |
+| GeoIP（mmdb 内嵌） | nezha | pkg/geoip 国家归属 | 默认空 provider；仅可选在线 HTTP provider，无内嵌 mmdb | ⚠️ 部分（默认不查询） |
 | GeoIP 多 provider | komari | mmdb/ipinfo/ipapi/geojs 可插拔 | 待实现 | 📋 待实现 |
-| DDNS | nezha | libdns cloudflare/tencentcloud/HE/webhook | API 完整（list/create/update/delete/test） | ✅ 已实现 |
-| NAT 内网穿透 | nezha | 域名→服务器映射 + IOStream 隧道 | API 完整 + agent nat 任务 | ✅ 已实现 |
+| DDNS | nezha | libdns cloudflare/tencentcloud/HE/webhook | 仅 webhook/cloudflare；已补 server 归属校验 | ⚠️ 基础可用 |
+| NAT 内网穿透 | nezha | 域名→服务器映射 + IOStream 隧道 | 简化 Host 代理，无租约/配额/能力协商；已补 server 归属校验 | ⚠️ 基础可用 |
 
 ### 1.6 运维与系统能力
 
 | 资产 | 来源 | 用途 | 改造要点 | Argus 状态 |
 |---|---|---|---|---|
-| 备份/恢复 | komari | 打包下载 + 上传恢复 | backup.go | ✅ 已实现 |
+| 备份/恢复 | komari | 打包下载 + 上传恢复 | 直接覆盖活动 SQLite（无校验/原子切换/回滚），无 UI | ⚠️ 实验性，待重做 |
 | 数据迁移向导 | komari | legacy 库迁移 + 指标库恢复 | 待实现 | 📋 待实现 |
-| 运维子命令 | komari | chpasswd/disable-2fa/permitLogin | A2 已实现（ops.go 逃生门） | ✅ 已实现 |
+| 运维子命令 | komari | chpasswd/disable-2fa/permitLogin | 仅 chpasswd / disable-2fa；无 permit-login 恢复流程 | ⚠️ 部分 |
 | pprof 性能剖析 | komari/nezha | /api/admin/pprof | 第6项 已实现（/debug/pprof + 鉴权中间件） | ✅ 已实现 |
-| 审计日志 | komari/nezha | Log/MCPAuditLog | audit.go + admin/logs 分页 | ✅ 已实现 |
+| 审计日志 | komari/nezha | Log/MCPAuditLog | 仅部分 handler 记录，无前端页面 | ⚠️ 部分 |
 | 安装向导 | komari | 首启 install guide | 自动建 admin（ARGUS_ADMIN_USER/PASS） | ⚠️ 简化版 |
 | 主题系统 | komari | 主题包（zip+manifest）+ 主题市场 | 内置 light/dark + 自定义代码注入点 | ⚠️ 内置主题 |
-| 插件系统 | komari | goja 沙箱 JS 插件 + server 模块钩子 | internal/plugin（goja + cron 触发 + fetch/console） | ✅ 已实现 |
-| 分片上传 | komari | init/chunk/merge/cancel 通用上传 | 第6项 已实现（备份恢复分片上传） | ✅ 已实现 |
+| 插件系统 | komari | goja 沙箱 JS 插件 + server 模块钩子 | 简化沙箱：无权限审批/路由/hook/页面/持久启停；fetch 任意 URL（SSRF 风险，已限 admin） | ⚠️ 演示级，待安全化 |
+| 分片上传 | komari | init/chunk/merge/cancel 通用上传 | 仅备份恢复 append 模式，无会话/顺序/哈希校验 | ⚠️ 简化，待重做 |
 | 私有站点模式 | komari | private_site 强制登录 | 第1项 force_auth（本次新增设置页入口） | ✅ 已实现 |
 | 自定义代码注入 | dash-v2/nezha | InjectContext 白标定制 | custom_code 设置项（komari 样式 head/body 注入） | ⚠️ 设置键待补全 |
 
@@ -186,15 +187,15 @@
 | 文件管理器 | nezha | ✅ 已实现 |
 | DDNS | nezha | ✅ API 已实现（界面待补） |
 | NAT 内网穿透 | nezha | ✅ API 已实现（界面待补） |
-| 服务器过户 | nezha | ✅ API 已实现（界面待补） |
+| 服务器过户 | nezha | 📋 未实现（原路由误绑已移除） |
 | PAT 细粒度权限 | nezha | ✅ 已实现 |
 | 多用户 | nezha | ✅ 已实现（本次补密钥读取链路） |
 | MCP 自动化 | nezha | ✅ 已实现 |
 | 全球地图 | dash-v2 | ✅ 已实现 |
 | 服务可用率条 | dash-v2 | ✅ 已实现 |
 | 命令面板 | dash-v2 | ✅ 已实现 |
-| GeoIP | nezha | ✅ 已实现 |
-| 插件系统 | komari | ✅ 已实现（goja 沙箱 + 市场 API） |
+| GeoIP | nezha | ⚠️ 部分（默认空 provider） |
+| 插件系统 | komari | ⚠️ 简化版（goja + 本地市场目录），待安全化与完整宿主 |
 | 主题市场 | komari | 📋 待实现（内置主题 + 自定义代码） |
 | 计费/续费 | komari | ✅ 字段 + 到期提醒（界面待补） |
 | 多 GeoIP provider | komari | 📋 待实现 |

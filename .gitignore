@@ -22,3 +22,6 @@ data/
 # 构建产物
 dist/
 *.tsbuildinfo
+
+# 编辑器/工具运行数据
+.zcode/

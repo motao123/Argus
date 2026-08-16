@@ -1,6 +1,6 @@
 # Argus 整合版部署验证报告
 
-> 最近验证日期：2026-08-16（第2轮全量验证，随「7 步整合任务」复跑）
+> 最近验证日期：2026-08-16（第2轮全量验证 + 阶段0 安全整改复验）
 > 本地环境：Deepin 25 / Go 1.26.6 / Node 22 / pnpm 11 / SQLite（WAL）
 > 验证方式：单测 + go vet + API 冒烟 + 真实 Agent 端到端 + 浏览器可视化实测
 
@@ -97,3 +97,30 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
 - 新增后台「网络服务」页 `/admin/network`，统一管理 DDNS 与 NAT：列表、创建、编辑、删除；DDNS 支持 Cloudflare/Webhook 与立即测试。
 - 浏览器黑盒验证：页面渲染正常；临时 NAT `nat-test.local → 127.0.0.1:3000` 创建后即时出现在列表，随后经 API 删除并确认列表为空；未调用任何真实外部 DDNS。
 - 下一批优先级：周期流量统计卡、报警联动任务表单、备份/数据库维护、2FA、插件与审计日志管理页。
+
+## 十一、阶段 0：安全基线整改与复验（2026-08-16）
+
+**修复的安全/数据完整性缺陷（均有回归测试）**
+1. 统一授权模型：`authorizeServer` / `authorizePublicServer` / `canViewService`，覆盖 REST、WebSocket、MCP
+2. MCP 全部工具（server.get/exec、fs.*）校验 scope、owner、PAT 白名单；admin 才可越过 scope
+3. 服务器 update/delete/exec/config/terminal 增加 owner 校验；修复 updateServer 单字段更新清空 name/group/note 的缺陷（列名 group_name）
+4. 公开 metrics/traffic 对隐藏服务器按 owner/hidden 过滤；Dashboard WS 按 guest-hidden、user-owner、PAT 白名单过滤
+5. Service 新增 hidden；list/history/stats 统一可见性；Service/DDNS/NAT 创建与改绑校验 server 归属；DDNS test 校验 profile owner
+6. 删除误绑的「过户」POST 路由（曾调用流量查询）；流量接口统一 `/servers/:id/traffic`
+7. Agent 注册：禁止空密钥；用户 AgentSecret 注册创建 owner server；服务端密钥仅重连；存量重复 AgentSecret 去重回填
+8. WAF 改为真实时间窗口（可注入时钟测试），过期清理；修复「累计 301 次永久封禁」缺陷
+9. 新增 `ARGUS_TRUSTED_PROXIES`，不再无条件信任 X-Forwarded-For；部署样例与 nginx 注释同步
+10. 通知 HTTP 客户端恢复 TLS 证书校验（移除 InsecureSkipVerify）
+11. 插件与通知渠道接口收紧为 admin
+
+**新增测试**
+- api/authz_test.go：跨租户 update/delete/exec、隐藏服务器 metrics、Service/DDNS/NAT server 归属、服务可见性
+- api/waf_test.go：时间窗口重置、封禁、解封（可控时钟）
+- mcp/mcp_test.go：工具级 scope/owner/白名单、server.list 过滤
+
+**本地双用户端到端复验（全部通过）**
+- alice 创建服务器（owner=alice）→ 真实 Agent 注册上线（Deepin 实时数据）
+- bob 对 alice 服务器 update/exec/terminal → 403；bob 服务器列表为空
+- 隐藏服务器：guest 404、非 owner 404、owner 200
+- 单字段 PATCH 不清空 name；MCP 只读 PAT：get 放行、exec 拒绝、不存在 404
+- 空密钥 Agent：客户端与服务端双重拒绝

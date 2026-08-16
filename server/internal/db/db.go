@@ -69,9 +69,25 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 			return nil, fmt.Errorf("create admin: %w", err)
 		}
 	}
-	// 存量用户若缺 Agent 密钥则补生成（老版本引导创建的 admin 无密钥，无法注册 Agent）
-	if err := gdb.Model(&model.User{}).Where("agent_secret = '' OR agent_secret IS NULL").Updates(map[string]any{"agent_secret": agent.GenSecret()}).Error; err != nil {
-		return nil, fmt.Errorf("backfill agent secrets: %w", err)
+	// 存量用户若缺 Agent 密钥则逐用户补生成（禁止复用同一随机值，避免重复密钥）。
+	var users []model.User
+	gdb.Where("agent_secret = '' OR agent_secret IS NULL").Find(&users)
+	for i := range users {
+		if err := gdb.Model(&users[i]).Update("agent_secret", agent.GenSecret()).Error; err != nil {
+			return nil, fmt.Errorf("backfill agent secrets: %w", err)
+		}
+	}
+	// 处理历史重复密钥（旧版本曾用同一随机值回填），冲突则重新生成。
+	seen := make(map[string]struct{})
+	var all []model.User
+	gdb.Order("id").Find(&all)
+	for i := range all {
+		if _, dup := seen[all[i].AgentSecret]; dup {
+			if err := gdb.Model(&all[i]).Update("agent_secret", agent.GenSecret()).Error; err != nil {
+				return nil, fmt.Errorf("dedupe agent secrets: %w", err)
+			}
+		}
+		seen[all[i].AgentSecret] = struct{}{}
 	}
 	return gdb, nil
 }

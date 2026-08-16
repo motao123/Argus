@@ -38,6 +38,10 @@ func (s *Server) createNAT(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "server_id/domain/target_addr required")
 		return
 	}
+	if _, ok := s.authorizeServer(c, req.ServerID, ScopeServerWrite); !ok {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
 	nat := model.NAT{
 		OwnerID:    p.UserID,
 		ServerID:   req.ServerID,
@@ -75,6 +79,10 @@ func (s *Server) updateNAT(c *gin.Context) {
 	}
 	updates := map[string]any{}
 	if req.ServerID != nil {
+		if _, ok := s.authorizeServer(c, *req.ServerID, ScopeServerWrite); !ok {
+			fail(c, http.StatusForbidden, "server access denied")
+			return
+		}
 		updates["server_id"] = *req.ServerID
 	}
 	if req.Domain != nil {

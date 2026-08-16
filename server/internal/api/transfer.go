@@ -29,6 +29,10 @@ func (s *Server) FlushTransfers() {
 // period: day（24 点）/ month（30 点）/ year（12 点）。
 func (s *Server) serverTransfer(c *gin.Context) {
 	id := mustID(c)
+	if _, ok := s.authorizePublicServer(c, id); !ok {
+		fail(c, http.StatusNotFound, "server not found")
+		return
+	}
 	period := c.DefaultQuery("period", "day")
 	now := time.Now()
 

@@ -6,7 +6,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// listPlugins 插件列表。
+// requireAdmin 管理接口必须由 admin 调用。
+func requireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p := principalFromContext(c)
+		if p == nil || !p.IsAdmin {
+			fail(c, http.StatusForbidden, "admin only")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// listPlugins 插件列表（admin）。
 func (s *Server) listPlugins(c *gin.Context) {
 	if s.Plugins == nil {
 		ok(c, gin.H{"plugins": []any{}})
@@ -15,7 +28,7 @@ func (s *Server) listPlugins(c *gin.Context) {
 	ok(c, gin.H{"plugins": s.Plugins.List()})
 }
 
-// togglePlugin 启停插件。
+// togglePlugin 启停插件（admin）。
 func (s *Server) togglePlugin(c *gin.Context) {
 	if s.Plugins == nil {
 		fail(c, http.StatusNotFound, "plugin manager disabled")

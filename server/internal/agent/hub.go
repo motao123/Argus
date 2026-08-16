@@ -135,23 +135,30 @@ func (ch *connHandler) Handle(method string, params json.RawMessage) (any, *prot
 	}
 }
 
-// handleRegister 首次注册（无密钥）或带密钥连接。
+// handleRegister 注册：必须携带密钥。
+// 密钥优先匹配既有 Server.Secret（重连）；否则匹配 User.AgentSecret（按用户创建 owner server）。
 func (ch *connHandler) handleRegister(params json.RawMessage) (any, *protocol.RPCError) {
 	var p protocol.RegisterParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, protocol.NewError(protocol.ErrParams, err.Error())
 	}
+	if p.Secret == "" {
+		// 禁止空密钥注册：防止公网实例被任意新增节点占用
+		return nil, protocol.NewError(protocol.ErrUnauthorized, "secret required")
+	}
 
 	var srv model.Server
-	if p.Secret == "" {
-		// 首次注册：创建服务器并生成密钥
-		srv = model.Server{Name: "Server", Secret: GenSecret()}
+	if err := ch.hub.db.Where("secret = ?", p.Secret).First(&srv).Error; err == nil {
+		// 已有服务器：重连
+	} else {
+		// 尝试按用户注册密钥创建 owner server
+		var user model.User
+		if err := ch.hub.db.Where("agent_secret = ?", p.Secret).First(&user).Error; err != nil {
+			return nil, protocol.NewError(protocol.ErrUnauthorized, "invalid secret")
+		}
+		srv = model.Server{Name: "Server", Secret: GenSecret(), OwnerID: user.ID}
 		if err := ch.hub.db.Create(&srv).Error; err != nil {
 			return nil, protocol.NewError(protocol.ErrInternal, err.Error())
-		}
-	} else {
-		if err := ch.hub.db.Where("secret = ?", p.Secret).First(&srv).Error; err != nil {
-			return nil, protocol.NewError(protocol.ErrUnauthorized, "invalid secret")
 		}
 	}
 

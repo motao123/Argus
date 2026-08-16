@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/motao123/Argus/server/internal/mcp"
 	"github.com/motao123/Argus/server/internal/model"
 )
 
@@ -192,30 +193,81 @@ func requireScope(scope string) gin.HandlerFunc {
 	}
 }
 
-// ---- 全局爆破防护（借鉴 nezha WAF 简化版）----
+// ---- 全局爆破防护（借鉴 nezha WAF；真实固定时间窗口）----
 
-var (
-	wafMu     sync.Mutex
-	wafCounts = map[string]int{}       // IP → 请求数
-	wafBlock  = map[string]time.Time{} // IP → 封禁截止
-)
+type wafState struct {
+	windowStart  time.Time
+	count        int
+	blockedUntil time.Time
+}
 
-// wafMiddleware 每 IP 每分钟限 300 请求，超限封禁 10 分钟。
+type wafLimiter struct {
+	mu       sync.Mutex
+	entries  map[string]*wafState
+	now      func() time.Time
+	limit    int           // 每窗口最大请求数
+	window   time.Duration // 窗口长度
+	blockFor time.Duration // 超限封禁时长
+}
+
+// wafMiddleware 每 IP 每窗口限 limit 请求，超限封禁 blockFor。
 func wafMiddleware() gin.HandlerFunc {
+	return newWAF(300, time.Minute, 10*time.Minute).middleware()
+}
+
+func newWAF(limit int, window, blockFor time.Duration) *wafLimiter {
+	return &wafLimiter{
+		entries:  make(map[string]*wafState),
+		now:      time.Now,
+		limit:    limit,
+		window:   window,
+		blockFor: blockFor,
+	}
+}
+
+func (w *wafLimiter) middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
-		wafMu.Lock()
-		if until, ok := wafBlock[ip]; ok && time.Now().Before(until) {
-			wafMu.Unlock()
+		w.mu.Lock()
+		now := w.now()
+		st, ok := w.entries[ip]
+		if !ok {
+			st = &wafState{windowStart: now}
+			w.entries[ip] = st
+		}
+		// 过期封禁自动解除并清理
+		if !st.blockedUntil.IsZero() && now.After(st.blockedUntil) {
+			delete(w.entries, ip)
+			st = &wafState{windowStart: now}
+			w.entries[ip] = st
+		}
+		// 窗口重置
+		if now.Sub(st.windowStart) >= w.window {
+			st.windowStart = now
+			st.count = 0
+		}
+		if !st.blockedUntil.IsZero() {
+			w.mu.Unlock()
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"success": false, "error": "ip temporarily blocked"})
 			return
 		}
-		wafCounts[ip]++
-		if wafCounts[ip] > 300 {
-			wafBlock[ip] = time.Now().Add(10 * time.Minute)
-			delete(wafCounts, ip)
+		st.count++
+		if st.count > w.limit {
+			st.blockedUntil = now.Add(w.blockFor)
+			st.count = 0
+			w.mu.Unlock()
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"success": false, "error": "ip temporarily blocked"})
+			return
 		}
-		wafMu.Unlock()
+		// 周期性清理闲置条目，防止内存增长
+		if len(w.entries) > 4096 {
+			for k, e := range w.entries {
+				if now.Sub(e.windowStart) > 24*w.window {
+					delete(w.entries, k)
+				}
+			}
+		}
+		w.mu.Unlock()
 		c.Next()
 	}
 }
@@ -239,13 +291,19 @@ func (s *Server) identify(raw string) (*principal, error) {
 	return &principal{UserID: user.ID, Username: user.Username, IsAdmin: user.Role == model.RoleAdmin}, nil
 }
 
-// IdentifyPATToken 供 MCP 端点校验 PAT，返回用户 ID（供 mcp.Server 注入）。
-func (s *Server) IdentifyPATToken(raw string) (int64, bool) {
+// IdentifyPATToken 供 MCP 端点校验 PAT，返回完整授权上下文。
+func (s *Server) IdentifyPATToken(raw string) (*mcp.Principal, bool) {
 	p, err := s.identifyPAT(raw)
 	if err != nil {
-		return 0, false
+		return nil, false
 	}
-	return p.UserID, true
+	mp := &mcp.Principal{
+		UserID:    p.UserID,
+		IsAdmin:   p.IsAdmin,
+		Scopes:    p.TokenScopes,
+		ServerIDs: p.TokenServers,
+	}
+	return mp, true
 }
 
 func (s *Server) identifyPAT(raw string) (*principal, error) {
@@ -257,8 +315,14 @@ func (s *Server) identifyPAT(raw string) (*principal, error) {
 	if tok.ExpiresAt != nil && time.Now().After(*tok.ExpiresAt) {
 		return nil, errInvalidToken
 	}
+	var user model.User
+	if err := s.DB.First(&user, tok.UserID).Error; err != nil {
+		return nil, errInvalidToken
+	}
 	p := &principal{
 		UserID:      tok.UserID,
+		Username:    user.Username,
+		IsAdmin:     user.Role == model.RoleAdmin,
 		IsPAT:       true,
 		TokenID:     tok.ID,
 		TokenScopes: make(map[string]bool),
