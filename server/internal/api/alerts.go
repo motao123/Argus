@@ -139,13 +139,13 @@ func (s *Server) updateNotification(c *gin.Context) {
 	}
 	// 部分更新：未提交字段保留原值（读取已脱敏，避免空值覆盖凭据）
 	var req struct {
-		Name   *string `json:"name"`
-		Type   *string `json:"type"`
-		URL    *string `json:"url"`
-		Method *string `json:"method"`
+		Name    *string `json:"name"`
+		Type    *string `json:"type"`
+		URL     *string `json:"url"`
+		Method  *string `json:"method"`
 		Headers *string `json:"headers"`
-		Body   *string `json:"body"`
-		ChatID *string `json:"chat_id"`
+		Body    *string `json:"body"`
+		ChatID  *string `json:"chat_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")

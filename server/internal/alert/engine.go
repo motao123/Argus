@@ -211,7 +211,7 @@ func (e *Engine) cycleTraffic(serverID int64, in bool) (uint64, bool) {
 	}
 	var sum struct{ V uint64 }
 	if err := e.db.Model(&model.Transfer{}).
-		Select("COALESCE(SUM(" + col + "),0) as v").
+		Select("COALESCE(SUM("+col+"),0) as v").
 		Where("server_id = ? AND ts >= ?", serverID, monthStart).
 		Scan(&sum).Error; err != nil {
 		return 0, false

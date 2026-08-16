@@ -160,7 +160,9 @@ func TestNotificationRedactionAndPartialUpdate(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, create)
 	var created struct {
-		Data struct{ ID int64 `json:"id"` } `json:"data"`
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
 	}
 	json.Unmarshal(w.Body.Bytes(), &created)
 	id := created.Data.ID
