@@ -12,7 +12,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/notifier"
 	"github.com/motao123/Argus/server/internal/store"
@@ -80,7 +79,14 @@ func (e *Engine) checkOnce() {
 	snap := e.store.Snapshot()
 
 	for _, a := range alerts {
+		allowed := alertServerIDs(a.ServerIDs)
 		for serverID, st := range snap {
+			if a.OwnerID != 0 && st.Server.OwnerID != a.OwnerID {
+				continue
+			}
+			if a.OwnerID != 0 && allowed != nil && !allowed[serverID] {
+				continue
+			}
 			key := fmt.Sprintf("%d:%d", a.ID, serverID)
 			value, ok := e.metricValue(&a, st)
 			if !ok {
@@ -239,6 +245,13 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 	if a.TriggerCronID > 0 && e.Trigger != nil {
 		var cron model.Cron
 		if err := e.db.First(&cron, a.TriggerCronID).Error; err == nil {
+			// 联动 Cron 必须与报警规则同租户，并且目标服务器归属该租户。
+			if cron.OwnerID != a.OwnerID || (a.OwnerID != 0 && st.Server.OwnerID != a.OwnerID) {
+				return
+			}
+			if targets := alertServerIDs(cron.ServerIDs); targets != nil && !targets[st.Server.ID] {
+				return
+			}
 			go e.Trigger(&cron, st.Server.ID)
 		}
 	}
@@ -276,7 +289,18 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 	log.Printf("alert %s (%s): %s", a.Name, kind, content)
 }
 
-var _ = protocol.MethodReport
+func alertServerIDs(raw string) map[int64]bool {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	ids := make(map[int64]bool)
+	for _, part := range strings.Split(raw, ",") {
+		if id := parseInt64(strings.TrimSpace(part)); id > 0 {
+			ids[id] = true
+		}
+	}
+	return ids
+}
 
 func parseInt64(str string) int64 {
 	var n int64

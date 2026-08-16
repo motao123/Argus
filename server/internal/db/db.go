@@ -91,5 +91,12 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		}
 		seen[all[i].AgentSecret] = struct{}{}
 	}
+	// 历史 Cron 没有租户归属，统一归属首个管理员，避免迁移后泄露给普通用户。
+	var admin model.User
+	if err := gdb.Where("role = ?", model.RoleAdmin).Order("id").First(&admin).Error; err == nil {
+		if err := gdb.Model(&model.Cron{}).Where("owner_id = 0 OR owner_id IS NULL").Update("owner_id", admin.ID).Error; err != nil {
+			return nil, fmt.Errorf("backfill cron owners: %w", err)
+		}
+	}
 	return gdb, nil
 }

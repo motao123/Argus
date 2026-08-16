@@ -6,30 +6,80 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-
 	"github.com/motao123/Argus/server/internal/model"
 )
 
-// ---- Crons ----
-
 func (s *Server) listCrons(c *gin.Context) {
+	p := principalFromContext(c)
+	q := s.DB.Model(&model.Cron{})
+	if p == nil || !p.IsAdmin {
+		q = q.Where("owner_id = ?", p.UserID)
+	}
 	offset, limit := pagination(c)
 	var total int64
-	s.DB.Model(&model.Cron{}).Count(&total)
+	q.Count(&total)
 	var crons []model.Cron
-	if err := s.DB.Order("id").Offset(offset).Limit(limit).Find(&crons).Error; err != nil {
+	if err := q.Order("id").Offset(offset).Limit(limit).Find(&crons).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	okPage(c, gin.H{"crons": crons}, total, offset, limit)
 }
 
+type cronRequest struct {
+	Name       string `json:"name"`
+	Expression string `json:"expression"`
+	Command    string `json:"command"`
+	ServerIDs  string `json:"server_ids"`
+	Enabled    *bool  `json:"enabled"`
+}
+
+func (s *Server) authorizeCronTargets(c *gin.Context, ownerID int64, serverIDs string) bool {
+	p := principalFromContext(c)
+	ids, valid := parseCronServerIDs(serverIDs)
+	if !valid {
+		return false
+	}
+	for _, id := range ids {
+		var srv model.Server
+		if err := s.DB.First(&srv, id).Error; err != nil {
+			return false
+		}
+		if p.IsPAT && !p.canAccessServer(id) {
+			return false
+		}
+		if !p.IsAdmin && srv.OwnerID != p.UserID {
+			return false
+		}
+		if !s.cronOwnerIsAdmin(ownerID) && srv.OwnerID != ownerID {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) cronOwnerIsAdmin(ownerID int64) bool {
+	var count int64
+	s.DB.Model(&model.User{}).Where("id = ? AND role = ?", ownerID, model.RoleAdmin).Count(&count)
+	return count > 0
+}
+
 func (s *Server) createCron(c *gin.Context) {
-	var cr model.Cron
-	if err := c.ShouldBindJSON(&cr); err != nil {
+	p := principalFromContext(c)
+	var req cronRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" || req.Expression == "" || req.Command == "" {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
+	if !s.authorizeCronTargets(c, p.UserID, req.ServerIDs) {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	cr := model.Cron{OwnerID: p.UserID, Name: req.Name, Expression: req.Expression, Command: req.Command, ServerIDs: req.ServerIDs, Enabled: enabled}
 	if err := s.DB.Create(&cr).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -48,11 +98,23 @@ func (s *Server) updateCron(c *gin.Context) {
 		fail(c, http.StatusNotFound, "not found")
 		return
 	}
-	if err := c.ShouldBindJSON(&cr); err != nil {
+	if !s.canManage(&cr.OwnerID, c) {
+		fail(c, http.StatusForbidden, "not your cron")
+		return
+	}
+	var req cronRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
-	cr.ID = id
+	if !s.authorizeCronTargets(c, cr.OwnerID, req.ServerIDs) {
+		fail(c, http.StatusForbidden, "server access denied")
+		return
+	}
+	cr.Name, cr.Expression, cr.Command, cr.ServerIDs = req.Name, req.Expression, req.Command, req.ServerIDs
+	if req.Enabled != nil {
+		cr.Enabled = *req.Enabled
+	}
 	if err := s.DB.Save(&cr).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -60,13 +122,22 @@ func (s *Server) updateCron(c *gin.Context) {
 	if s.Scheduler != nil {
 		s.Scheduler.Upsert(&cr)
 	}
-	s.auditLog(c, "cron.create", cr.Name)
+	s.auditLog(c, "cron.update", cr.Name)
 	ok(c, cr)
 }
 
 func (s *Server) deleteCron(c *gin.Context) {
 	id := mustID(c)
-	if err := s.DB.Delete(&model.Cron{}, id).Error; err != nil {
+	var cr model.Cron
+	if err := s.DB.First(&cr, id).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.canManage(&cr.OwnerID, c) {
+		fail(c, http.StatusForbidden, "not your cron")
+		return
+	}
+	if err := s.DB.Delete(&cr).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -76,7 +147,6 @@ func (s *Server) deleteCron(c *gin.Context) {
 	ok(c, gin.H{"ok": true})
 }
 
-// runCron 立即手动触发一次任务。
 func (s *Server) runCron(c *gin.Context) {
 	id := mustID(c)
 	var cr model.Cron
@@ -84,24 +154,33 @@ func (s *Server) runCron(c *gin.Context) {
 		fail(c, http.StatusNotFound, "not found")
 		return
 	}
+	if !s.canManage(&cr.OwnerID, c) {
+		fail(c, http.StatusForbidden, "not your cron")
+		return
+	}
 	if s.Scheduler == nil {
 		fail(c, http.StatusInternalServerError, "scheduler not started")
 		return
 	}
-	result := s.Scheduler.RunOnce(&cr)
-	ok(c, gin.H{"result": result})
+	ok(c, gin.H{"result": s.Scheduler.RunOnce(&cr)})
 }
 
-// parseIDs 解析逗号分隔的服务器 ID 列表。
-func parseIDs(s string) []int64 {
-	if strings.TrimSpace(s) == "" {
-		return nil
+func parseCronServerIDs(value string) ([]int64, bool) {
+	if strings.TrimSpace(value) == "" {
+		return nil, true
 	}
 	var ids []int64
-	for _, p := range strings.Split(s, ",") {
-		if v, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64); err == nil {
-			ids = append(ids, v)
+	for _, p := range strings.Split(value, ",") {
+		v, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64)
+		if err != nil || v <= 0 {
+			return nil, false
 		}
+		ids = append(ids, v)
 	}
+	return ids, true
+}
+
+func parseIDs(value string) []int64 {
+	ids, _ := parseCronServerIDs(value)
 	return ids
 }

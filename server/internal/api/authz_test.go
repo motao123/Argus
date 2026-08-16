@@ -40,7 +40,7 @@ func newAuthzEnv(t *testing.T) *authzTestEnv {
 	if err := gdb.AutoMigrate(
 		&model.User{}, &model.Server{}, &model.Service{}, &model.ServiceHistory{},
 		&model.APIToken{}, &model.Setting{}, &model.DDNSProfile{}, &model.NAT{}, &model.Metric{},
-		&model.AuditLog{}, &model.ServerTransfer{}, &model.Notification{},
+		&model.AuditLog{}, &model.ServerTransfer{}, &model.Notification{}, &model.Alert{}, &model.Cron{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -134,13 +134,179 @@ func (e *authzTestEnv) do(t *testing.T, method, path string, token string, body 
 	authed.PUT("/servers/:id", requireScope(ScopeServerWrite), e.srv.updateServer)
 	authed.DELETE("/servers/:id", requireScope(ScopeServerDelete), e.srv.deleteServer)
 	authed.POST("/servers/:id/exec", requireScope(ScopeServerExec), e.srv.serverExec)
+	authed.GET("/files/:serverId", requireScope(ScopeServerRead), e.srv.listFiles)
+	authed.POST("/files/:serverId/read", requireScope(ScopeServerRead), e.srv.readFile)
+	authed.POST("/files/:serverId/write", requireScope(ScopeServerWrite), e.srv.writeFile)
+	authed.POST("/files/:serverId/delete", requireScope(ScopeServerWrite), e.srv.deleteFile)
 	pub := r.Group("", e.srv.optionalAuthMiddleware())
 	pub.GET("/servers/:id/metrics", e.srv.forceAuth, e.srv.serverMetrics)
 	authed.POST("/ddns", e.srv.createDDNS)
 	authed.POST("/nats", e.srv.createNAT)
 	authed.POST("/services", requireScope(ScopeServiceWrite), e.srv.createService)
+	authed.GET("/alerts", requireScope(ScopeAlertRead), e.srv.listAlerts)
+	authed.POST("/alerts", requireScope(ScopeAlertWrite), e.srv.createAlert)
+	authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), e.srv.updateAlert)
+	authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), e.srv.deleteAlert)
+	authed.GET("/crons", requireScope(ScopeCronRead), e.srv.listCrons)
+	authed.POST("/crons", requireScope(ScopeCronWrite), e.srv.createCron)
+	authed.PUT("/crons/:id", requireScope(ScopeCronWrite), e.srv.updateCron)
+	authed.DELETE("/crons/:id", requireScope(ScopeCronDelete), e.srv.deleteCron)
+	authed.POST("/crons/:id/run", requireScope(ScopeCronWrite), e.srv.runCron)
+
 	r.ServeHTTP(w, req)
 	return w
+}
+
+func TestFileAccessOwnerIsolation(t *testing.T) {
+	e := newAuthzEnv(t)
+	aliceJWT := e.token(t, e.alice)
+	bobJWT := e.token(t, e.bob)
+	alicePAT := e.createPAT(t, e.alice, []string{ScopeServerRead}, itoa(e.aliceS.ID)+","+itoa(e.bobS.ID))
+	adminPAT := e.createPAT(t, e.admin, []string{ScopeServerRead}, itoa(e.bobS.ID))
+
+	// Offline owner access reaches the agent call; cross-owner access is denied first.
+	for _, tc := range []struct {
+		name, token string
+		serverID    int64
+		want        int
+	}{
+		{"JWT owner", aliceJWT, e.aliceS.ID, http.StatusConflict},
+		{"JWT cross-owner", aliceJWT, e.bobS.ID, http.StatusForbidden},
+		{"second JWT cross-owner", bobJWT, e.aliceS.ID, http.StatusForbidden},
+		{"PAT owner", alicePAT, e.aliceS.ID, http.StatusConflict},
+		{"PAT cross-owner", alicePAT, e.bobS.ID, http.StatusForbidden},
+		{"admin PAT", adminPAT, e.bobS.ID, http.StatusConflict},
+	} {
+		w := e.do(t, http.MethodGet, "/files/"+itoa(tc.serverID), tc.token, "")
+		if w.Code != tc.want {
+			t.Errorf("%s: got %d want %d", tc.name, w.Code, tc.want)
+		}
+	}
+}
+
+func TestPProfAdminOnly(t *testing.T) {
+	e := newAuthzEnv(t)
+	adminJWT := e.token(t, e.admin)
+	userJWT := e.token(t, e.alice)
+	ordinaryPAT := e.createPAT(t, e.alice, []string{ScopeServerRead}, "")
+	adminPAT := e.createPAT(t, e.alice, []string{ScopeAdmin}, "")
+	allPAT := e.createPAT(t, e.alice, []string{ScopeAll}, "")
+
+	request := func(token string) int {
+		req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.GET("/debug/pprof/*pprof", e.srv.AuthMiddlewareForPProf(), e.srv.PProfHandler)
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	for _, tc := range []struct {
+		name, token string
+		want        int
+	}{
+		{"ordinary JWT", userJWT, http.StatusForbidden},
+		{"ordinary PAT", ordinaryPAT, http.StatusForbidden},
+		{"admin JWT", adminJWT, http.StatusOK},
+		{"admin scope PAT", adminPAT, http.StatusOK},
+		{"all scope PAT", allPAT, http.StatusOK},
+	} {
+		if got := request(tc.token); got != tc.want {
+			t.Errorf("%s: got %d want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCronCrossTenant(t *testing.T) {
+	e := newAuthzEnv(t)
+	aliceToken := e.token(t, e.alice)
+	bobToken := e.token(t, e.bob)
+	adminToken := e.token(t, e.admin)
+
+	ownBody := `{"name":"alice-cron","expression":"* * * * *","command":"id","server_ids":"` + itoa(e.aliceS.ID) + `"}`
+	w := e.do(t, http.MethodPost, "/crons", aliceToken, ownBody)
+	if w.Code != http.StatusOK {
+		t.Fatalf("alice create own cron: got %d: %s", w.Code, w.Body.String())
+	}
+	var cr model.Cron
+	if err := e.srv.DB.Where("name = ?", "alice-cron").First(&cr).Error; err != nil {
+		t.Fatal(err)
+	}
+	if cr.OwnerID != e.alice.ID {
+		t.Fatalf("cron owner = %d want %d", cr.OwnerID, e.alice.ID)
+	}
+
+	w = e.do(t, http.MethodPost, "/crons", aliceToken, `{"name":"cross","expression":"* * * * *","command":"id","server_ids":"`+itoa(e.bobS.ID)+`"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("alice target bob server: got %d want 403", w.Code)
+	}
+	w = e.do(t, http.MethodGet, "/crons", bobToken, "")
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "alice-cron") {
+		t.Fatalf("bob can see alice cron: %d %s", w.Code, w.Body.String())
+	}
+	w = e.do(t, http.MethodPut, "/crons/"+itoa(cr.ID), bobToken, ownBody)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("bob update alice cron: got %d want 403", w.Code)
+	}
+	w = e.do(t, http.MethodDelete, "/crons/"+itoa(cr.ID), bobToken, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("bob delete alice cron: got %d want 403", w.Code)
+	}
+	w = e.do(t, http.MethodPost, "/crons/"+itoa(cr.ID)+"/run", bobToken, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("bob run alice cron: got %d want 403", w.Code)
+	}
+
+	adminBody := `{"name":"admin-cron","expression":"* * * * *","command":"id","server_ids":"` + itoa(e.bobS.ID) + `"}`
+	w = e.do(t, http.MethodPost, "/crons", adminToken, adminBody)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin create cron on bob server: got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAlertCrossTenant(t *testing.T) {
+	e := newAuthzEnv(t)
+	aliceToken := e.token(t, e.alice)
+	bobToken := e.token(t, e.bob)
+	adminToken := e.token(t, e.admin)
+	cron := model.Cron{Name: "alice-cron", Expression: "* * * * *", Command: "id", ServerIDs: itoa(e.aliceS.ID), OwnerID: e.alice.ID}
+	if err := e.srv.DB.Create(&cron).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := `{"name":"alice-alert","metric":"cpu","duration":1,"server_ids":"` + itoa(e.aliceS.ID) + `","trigger_cron_id":` + itoa(cron.ID) + `}`
+	w := e.do(t, http.MethodPost, "/alerts", aliceToken, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("alice create own alert: got %d", w.Code)
+	}
+	var a model.Alert
+	if err := e.srv.DB.First(&a).Error; err != nil {
+		t.Fatal(err)
+	}
+	if a.OwnerID != e.alice.ID {
+		t.Fatalf("alert owner = %d", a.OwnerID)
+	}
+	w = e.do(t, http.MethodGet, "/alerts", bobToken, "")
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "alice-alert") {
+		t.Fatalf("bob can see alice alert: %d %s", w.Code, w.Body.String())
+	}
+	w = e.do(t, http.MethodPut, "/alerts/"+itoa(a.ID), bobToken, `{"name":"hacked"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("bob update alert: got %d want 403", w.Code)
+	}
+	w = e.do(t, http.MethodDelete, "/alerts/"+itoa(a.ID), bobToken, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("bob delete alert: got %d want 403", w.Code)
+	}
+	w = e.do(t, http.MethodPost, "/alerts", aliceToken, `{"name":"cross","metric":"cpu","server_ids":"`+itoa(e.bobS.ID)+`"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("alice target bob server: got %d want 403", w.Code)
+	}
+	w = e.do(t, http.MethodPost, "/alerts", adminToken, `{"name":"global","metric":"cpu"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin global alert: got %d", w.Code)
+	}
 }
 
 func TestServerUpdateCrossTenant(t *testing.T) {

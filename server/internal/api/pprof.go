@@ -11,7 +11,7 @@ import (
 // PProfHandler 受 admin 保护的 pprof 端点（借鉴 komari admin pprof）。
 func (s *Server) PProfHandler(c *gin.Context) {
 	p := principalFromContext(c)
-	if p == nil || !p.IsAdmin {
+	if p == nil || (!p.IsPAT && !p.IsAdmin) || (p.IsPAT && !p.TokenScopes[ScopeAdmin] && !p.TokenScopes[ScopeAll]) {
 		fail(c, http.StatusForbidden, "admin only")
 		return
 	}

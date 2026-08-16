@@ -13,11 +13,16 @@ import (
 // ---- Alerts ----
 
 func (s *Server) listAlerts(c *gin.Context) {
+	p := principalFromContext(c)
+	q := s.DB.Model(&model.Alert{})
+	if p != nil && !p.IsAdmin {
+		q = q.Where("owner_id = ?", p.UserID)
+	}
 	offset, limit := pagination(c)
 	var total int64
-	s.DB.Model(&model.Alert{}).Count(&total)
+	q.Count(&total)
 	var alerts []model.Alert
-	if err := s.DB.Order("id").Offset(offset).Limit(limit).Find(&alerts).Error; err != nil {
+	if err := q.Order("id").Offset(offset).Limit(limit).Find(&alerts).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -25,9 +30,16 @@ func (s *Server) listAlerts(c *gin.Context) {
 }
 
 func (s *Server) createAlert(c *gin.Context) {
+	p := principalFromContext(c)
 	var a model.Alert
 	if err := c.ShouldBindJSON(&a); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	if !p.IsAdmin {
+		a.OwnerID = p.UserID
+	}
+	if !s.validateAlertTargets(c, &a) {
 		return
 	}
 	if err := s.DB.Create(&a).Error; err != nil {
@@ -39,10 +51,15 @@ func (s *Server) createAlert(c *gin.Context) {
 }
 
 func (s *Server) updateAlert(c *gin.Context) {
+	p := principalFromContext(c)
 	id := mustID(c)
 	var a model.Alert
 	if err := s.DB.First(&a, id).Error; err != nil {
 		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !p.IsAdmin && a.OwnerID != p.UserID {
+		fail(c, http.StatusForbidden, "alert access denied")
 		return
 	}
 	if err := c.ShouldBindJSON(&a); err != nil {
@@ -50,6 +67,12 @@ func (s *Server) updateAlert(c *gin.Context) {
 		return
 	}
 	a.ID = id
+	if !p.IsAdmin {
+		a.OwnerID = p.UserID
+	}
+	if !s.validateAlertTargets(c, &a) {
+		return
+	}
 	if err := s.DB.Save(&a).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -58,11 +81,67 @@ func (s *Server) updateAlert(c *gin.Context) {
 }
 
 func (s *Server) deleteAlert(c *gin.Context) {
-	if err := s.DB.Delete(&model.Alert{}, mustID(c)).Error; err != nil {
+	p := principalFromContext(c)
+	var a model.Alert
+	if err := s.DB.First(&a, mustID(c)).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !p.IsAdmin && a.OwnerID != p.UserID {
+		fail(c, http.StatusForbidden, "alert access denied")
+		return
+	}
+	if err := s.DB.Delete(&a).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ok(c, gin.H{"ok": true})
+}
+
+// validateAlertTargets enforces server ownership and PAT whitelist for alert rules.
+func (s *Server) validateAlertTargets(c *gin.Context, a *model.Alert) bool {
+	p := principalFromContext(c)
+	if p.IsAdmin {
+		return true
+	}
+	ids := parseIDs(a.ServerIDs)
+	if len(ids) == 0 {
+		fail(c, http.StatusForbidden, "alert targets required")
+		return false
+	}
+	for _, id := range ids {
+		if _, ok := s.authorizeServer(c, id, ScopeServerRead); !ok {
+			fail(c, http.StatusForbidden, "alert server access denied")
+			return false
+		}
+	}
+	if a.TriggerCronID > 0 {
+		var cr model.Cron
+		if err := s.DB.First(&cr, a.TriggerCronID).Error; err != nil {
+			fail(c, http.StatusBadRequest, "trigger cron not found")
+			return false
+		}
+		if cr.OwnerID != a.OwnerID {
+			fail(c, http.StatusForbidden, "trigger cron access denied")
+			return false
+		}
+		cronIDs := parseIDs(cr.ServerIDs)
+		if len(cronIDs) == 0 {
+			fail(c, http.StatusForbidden, "trigger cron target scope required")
+			return false
+		}
+		allowed := make(map[int64]bool, len(ids))
+		for _, id := range ids {
+			allowed[id] = true
+		}
+		for _, id := range cronIDs {
+			if !allowed[id] {
+				fail(c, http.StatusForbidden, "trigger cron target denied")
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ---- Notifications ----

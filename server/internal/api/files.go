@@ -171,16 +171,16 @@ func (s *Server) canAccessServer(serverID int64, c *gin.Context) bool {
 	if p == nil {
 		return false
 	}
-	if p.IsAdmin {
-		return true
-	}
-	if p.IsPAT {
-		return p.canAccessServer(serverID)
-	}
-	// 普通用户：查服务器 owner
 	var srv model.Server
 	if err := s.DB.First(&srv, serverID).Error; err != nil {
 		return false
+	}
+	if p.IsPAT {
+		// PAT 仍受白名单约束，且不能借白名单跨越服务器 owner 边界。
+		return p.canAccessServer(serverID) && (p.IsAdmin || srv.OwnerID == p.UserID)
+	}
+	if p.IsAdmin {
+		return true
 	}
 	return srv.OwnerID == p.UserID
 }

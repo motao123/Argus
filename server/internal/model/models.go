@@ -86,16 +86,18 @@ type NotificationGroup struct {
 // Alert 报警规则。
 type Alert struct {
 	ID            int64     `gorm:"primaryKey" json:"id"`
+	OwnerID       int64     `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有（兼容旧数据）
 	Name          string    `gorm:"size:64;not null" json:"name"`
 	Metric        string    `gorm:"size:32;not null" json:"metric"` // cpu/mem/disk/net_in_speed/net_out_speed/load1/offline
 	Min           *float64  `json:"min"`                            // 下限（nil 不检查）
 	Max           *float64  `json:"max"`                            // 上限（nil 不检查）
 	Duration      int       `json:"duration"`                       // 持续秒数
 	Notify        bool      `gorm:"default:true" json:"notify"`
-	WebhookID     int64     `json:"webhook_id"`      // 单渠道（兼容）
-	GroupID       int64     `json:"group_id"`        // 通知分组（0=无）
-	TriggerCronID int64     `json:"trigger_cron_id"` // 触发时执行的任务（0=无）
-	TriggerRatio  *int      `json:"trigger_ratio"`   // 采样达标比例（1-100，如 70=70% 采样超限才触发；nil=全部采样）
+	WebhookID     int64     `json:"webhook_id"`                            // 单渠道（兼容）
+	GroupID       int64     `json:"group_id"`                              // 通知分组（0=无）
+	TriggerCronID int64     `json:"trigger_cron_id"`                       // 触发时执行的任务（0=无）
+	ServerIDs     string    `gorm:"size:512;default:''" json:"server_ids"` // 逗号分隔；空 = 全部（仅 admin）
+	TriggerRatio  *int      `json:"trigger_ratio"`                         // 采样达标比例（1-100，如 70=70% 采样超限才触发；nil=全部采样）
 	Enabled       bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt     time.Time `json:"created_at"`
 }
@@ -117,6 +119,7 @@ type Notification struct {
 // Cron 定时任务。
 type Cron struct {
 	ID         int64     `gorm:"primaryKey" json:"id"`
+	OwnerID    int64     `gorm:"index;default:0" json:"owner_id"` // 任务所有者；历史数据回填为管理员
 	Name       string    `gorm:"size:64;not null" json:"name"`
 	Expression string    `gorm:"size:64;not null" json:"expression"` // cron 表达式
 	Command    string    `gorm:"size:1024;not null" json:"command"`

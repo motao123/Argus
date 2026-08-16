@@ -93,16 +93,50 @@ func (s *Scheduler) remove(id int64) {
 	}
 }
 
-// run 执行任务：向目标服务器下发命令。
-func (s *Scheduler) run(cr *model.Cron) {
-	ids := parseIDs(cr.ServerIDs)
-	peers := s.agents.Peers()
-	if len(ids) == 0 {
-		// 空 = 全部在线服务器
-		for id := range peers {
+func (s *Scheduler) targetIDs(cr *model.Cron, onlineIDs map[int64]bool) []int64 {
+	requested := parseIDs(cr.ServerIDs)
+	var servers []model.Server
+	q := s.db.Model(&model.Server{})
+	var owner model.User
+	ownerIsAdmin := s.db.First(&owner, cr.OwnerID).Error == nil && owner.Role == model.RoleAdmin
+	if !ownerIsAdmin {
+		q = q.Where("owner_id = ?", cr.OwnerID)
+	}
+	if len(requested) > 0 {
+		q = q.Where("id IN ?", requested)
+	}
+	if err := q.Find(&servers).Error; err != nil {
+		return nil
+	}
+	allowed := make(map[int64]struct{}, len(servers))
+	for i := range servers {
+		allowed[servers[i].ID] = struct{}{}
+	}
+	ids := make([]int64, 0, len(allowed))
+	if len(requested) > 0 {
+		for _, id := range requested {
+			if _, ok := allowed[id]; ok {
+				ids = append(ids, id)
+			}
+		}
+		return ids
+	}
+	for id := range onlineIDs {
+		if _, ok := allowed[id]; ok {
 			ids = append(ids, id)
 		}
 	}
+	return ids
+}
+
+// run 执行任务：向目标服务器下发命令。
+func (s *Scheduler) run(cr *model.Cron) {
+	peers := s.agents.Peers()
+	onlineIDs := make(map[int64]bool, len(peers))
+	for id := range peers {
+		onlineIDs[id] = true
+	}
+	ids := s.targetIDs(cr, onlineIDs)
 	if len(ids) == 0 {
 		s.recordResult(cr.ID, "no target servers online")
 		return
@@ -136,13 +170,12 @@ func (s *Scheduler) recordResult(id int64, result string) {
 
 // RunOnce 手动触发一次（API 层调用，返回执行结果摘要）。
 func (s *Scheduler) RunOnce(cr *model.Cron) string {
-	ids := parseIDs(cr.ServerIDs)
 	peers := s.agents.Peers()
-	if len(ids) == 0 {
-		for id := range peers {
-			ids = append(ids, id)
-		}
+	onlineIDs := make(map[int64]bool, len(peers))
+	for id := range peers {
+		onlineIDs[id] = true
 	}
+	ids := s.targetIDs(cr, onlineIDs)
 	if len(ids) == 0 {
 		return "no target servers online"
 	}
