@@ -63,6 +63,28 @@ func (s *Server) runPluginNow(c *gin.Context) {
 	ok(c, gin.H{"ok": true})
 }
 
+// approvePlugin 批准插件高危权限（管理员）。
+func (s *Server) approvePlugin(c *gin.Context) {
+	if s.Plugins == nil {
+		fail(c, http.StatusNotFound, "plugin manager disabled")
+		return
+	}
+	name := c.Param("name")
+	var req struct {
+		Approved bool `json:"approved"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	if !s.Plugins.SetApproved(name, req.Approved) {
+		fail(c, http.StatusNotFound, "plugin not found")
+		return
+	}
+	s.auditLog(c, "plugin.approve", name)
+	ok(c, gin.H{"ok": true})
+}
+
 // deletePlugin 删除插件。
 func (s *Server) deletePlugin(c *gin.Context) {
 	if s.Plugins == nil {

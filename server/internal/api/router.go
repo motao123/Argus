@@ -131,6 +131,7 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/plugins/market/:name/install", requireAdmin(), s.installPlugin)
 			authed.GET("/plugins", requireAdmin(), s.listPlugins)
 			authed.POST("/plugins/:name/toggle", requireAdmin(), s.togglePlugin)
+			authed.POST("/plugins/:name/approve", requireAdmin(), s.approvePlugin)
 			authed.POST("/plugins/:name/run", requireAdmin(), s.runPluginNow)
 			authed.DELETE("/plugins/:name", requireAdmin(), s.deletePlugin)
 

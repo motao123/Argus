@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,10 +22,18 @@ import (
 
 // Manifest 插件清单。
 type Manifest struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Description string `json:"description"`
-	Cron        string `json:"cron"` // cron 表达式或 @every 30s
+	Name        string      `json:"name"`
+	Version     string      `json:"version"`
+	Description string      `json:"description"`
+	Cron        string      `json:"cron"` // cron 表达式或 @every 30s
+	Permissions Permissions `json:"permissions"`
+}
+
+// Permissions 插件权限声明（不声明即不授予；借鉴 komari manifest 权限模型）。
+type Permissions struct {
+	AllowFetch bool `json:"allow_fetch"` // 允许网络请求（默认禁止，防 SSRF）
+	AllowExec  bool `json:"allow_exec"`  // 允许子进程（默认禁止）
+	Approved   bool `json:"approved"`    // 管理员批准（启用高危能力需显式批准）
 }
 
 // Plugin 运行中的插件。
@@ -34,6 +43,8 @@ type Plugin struct {
 	Enabled bool     `json:"enabled"`
 	Logs    []string `json:"logs"` // 环形缓冲最近 50 条
 	LastRun string   `json:"last_run"`
+	// 权限摘要（JSON 展示用）
+	PermissionsAllowFetch bool `json:"permissions_allow_fetch"`
 }
 
 // Manager 插件管理器。
@@ -50,7 +61,8 @@ func New(dir string) *Manager {
 	return &Manager{dir: dir, plugins: make(map[string]*Plugin), lastRuns: make(map[string]time.Time)}
 }
 
-// Load 扫描目录加载插件。
+// syncPerm 运行时同步权限摘要。
+func (p *Plugin) syncPerm() { p.PermissionsAllowFetch = p.Permissions.AllowFetch }
 func (m *Manager) Load() error {
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {
@@ -82,12 +94,15 @@ func (m *Manager) Load() error {
 		if man.Name == "" {
 			man.Name = name
 		}
-		m.plugins[name] = &Plugin{
+		plugin := &Plugin{
 			Manifest: man,
 			Dir:      name,
 			Enabled:  true,
 			Logs:     make([]string, 0, 50),
 		}
+		m.loadState(plugin)
+		plugin.syncPerm()
+		m.plugins[name] = plugin
 		log.Printf("plugin manager: loaded %s v%s (%s)", name, man.Version, man.Cron)
 	}
 	return nil
@@ -192,7 +207,49 @@ func (m *Manager) SetEnabled(name string, enabled bool) bool {
 		return false
 	}
 	p.Enabled = enabled
+	p.syncPerm()
+	m.persistState(p)
 	return true
+}
+
+// SetApproved 批准插件高危权限（管理员操作，持久化）。
+func (m *Manager) SetApproved(name string, approved bool) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.plugins[name]
+	if !ok {
+		return false
+	}
+	p.Permissions.Approved = approved
+	p.syncPerm()
+	m.persistState(p)
+	return true
+}
+
+// persistState 持久化启停/批准状态到插件目录 state.json。
+func (m *Manager) persistState(p *Plugin) {
+	data, _ := json.Marshal(map[string]any{"enabled": p.Enabled, "approved": p.Permissions.Approved})
+	_ = os.WriteFile(filepath.Join(m.dir, p.Dir, "state.json"), data, 0o600)
+}
+
+// loadState 启动加载 state.json（覆盖 manifest 默认启停/批准）。
+func (m *Manager) loadState(p *Plugin) {
+	data, err := os.ReadFile(filepath.Join(m.dir, p.Dir, "state.json"))
+	if err != nil {
+		return
+	}
+	var st struct {
+		Enabled  *bool `json:"enabled"`
+		Approved *bool `json:"approved"`
+	}
+	if json.Unmarshal(data, &st) == nil {
+		if st.Enabled != nil {
+			p.Enabled = *st.Enabled
+		}
+		if st.Approved != nil {
+			p.Permissions.Approved = *st.Approved
+		}
+	}
 }
 
 // Delete 删除插件目录。
@@ -260,16 +317,25 @@ func (m *Manager) Run(name string) error {
 	})
 	_ = vm.Set("console", console)
 
-	// fetch(url) → 返回响应文本
+	// fetch(url) → 返回响应文本（需声明 allow_fetch 且已被批准；仅 http(s)）
 	_ = vm.Set("fetch", func(call goja.FunctionCall) goja.Value {
+		if !p.Permissions.AllowFetch || !p.Permissions.Approved {
+			m.addLog(p, "ERR fetch denied: plugin lacks allow_fetch/approved permission")
+			return goja.Undefined()
+		}
 		if len(call.Arguments) == 0 {
 			return goja.Undefined()
 		}
-		url := call.Arguments[0].String()
+		raw := call.Arguments[0].String()
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			m.addLog(p, "ERR fetch "+raw+": only http(s) allowed")
+			return goja.Undefined()
+		}
 		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Get(url)
+		resp, err := client.Get(u.String())
 		if err != nil {
-			m.addLog(p, "ERR fetch "+url+": "+err.Error())
+			m.addLog(p, "ERR fetch "+raw+": "+err.Error())
 			return goja.Undefined()
 		}
 		defer resp.Body.Close()

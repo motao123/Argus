@@ -189,6 +189,18 @@ export interface TwoFASetup {
   otpauth_url: string;
 }
 
+export interface PluginInfo {
+  name: string;
+  version: string;
+  description: string;
+  cron: string;
+  enabled: boolean;
+  approved: boolean;
+  permissions_allow_fetch: boolean;
+  logs: string[];
+  last_run: string;
+}
+
 export interface NotificationGroup {
   id: number;
   name: string;
@@ -307,6 +319,15 @@ export const api = {
     request<{ ok: boolean; deleted: number }>("/api/v1/batch-delete/servers", { method: "POST", body: JSON.stringify({ ids }) }),
   batchMoveServers: (ids: number[], group: string) =>
     request<{ ok: boolean; moved: number }>("/api/v1/batch-move/servers", { method: "POST", body: JSON.stringify({ ids, group }) }),
+  plugins: () => request<{ plugins: PluginInfo[] }>("/api/v1/plugins"),
+  pluginToggle: (name: string, enabled: boolean) =>
+    request<{ ok: boolean }>(`/api/v1/plugins/${encodeURIComponent(name)}/toggle`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  pluginApprove: (name: string, approved: boolean) =>
+    request<{ ok: boolean }>(`/api/v1/plugins/${encodeURIComponent(name)}/approve`, { method: "POST", body: JSON.stringify({ approved }) }),
+  pluginRun: (name: string) => request<{ ok: boolean }>(`/api/v1/plugins/${encodeURIComponent(name)}/run`, { method: "POST" }),
+  pluginDelete: (name: string) => request(`/api/v1/plugins/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  pluginMarket: () => request<{ plugins: Array<{ name: string; description: string; version: string; installed: boolean }> }>("/api/v1/plugins/market"),
+  pluginInstall: (name: string) => request<{ ok: boolean }>(`/api/v1/plugins/market/${encodeURIComponent(name)}/install`, { method: "POST" }),
   groups: () => request<{ groups: ServerGroup[] }>("/api/v1/groups"),
   createGroup: (name: string) => request<ServerGroup>("/api/v1/groups", { method: "POST", body: JSON.stringify({ name }) }),
   deleteGroup: (id: number) => request(`/api/v1/groups/${id}`, { method: "DELETE" }),

@@ -16,6 +16,9 @@ const (
 	SettingForceAuth    = "force_auth"     // 1 = 强制登录
 	SettingTermFontSize = "term_font_size" // 终端字号（默认 13）
 	SettingTermTheme    = "term_theme"     // 终端主题：dark/light
+	SettingCustomCSS    = "custom_css"     // 注入两站 <head> 的 CSS
+	SettingCustomJS     = "custom_js"      // 注入两站 </body> 前的 JS
+	SettingCustomFooter = "custom_footer"  // 前台页脚自定义 HTML
 )
 
 // GetSetting 读设置（默认值兜底）。

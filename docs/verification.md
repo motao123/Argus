@@ -179,3 +179,15 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
 - 端到端验证：alice 拥有服务器 → admin 过户给 bob → bob Agent 用新密钥重连 → owner 变 bob、
   transfer=verified、bob 可见/alice 不可见；取消路径回滚原密钥通过；单测 TestTransferLifecycle/AdminOnly
 - Agent 升级端到端：v1(0.1.0) → HTTP 源提供 v2(0.2.0) → 触发升级 → 二进制替换 + v2 重连上报
+
+## 十六、阶段 5：插件安全化与自定义注入（2026-08-16）
+
+- 插件系统安全化：manifest 权限声明（allow_fetch/allow_exec/approved，默认全禁）；
+  fetch 仅 http(s) 且需批准（防 SSRF）；启停/批准状态持久化（state.json）重启保留；
+  新增 `POST /plugins/:name/approve`
+- 新增「插件」管理页（/admin/plugins）：已安装/市场 Tab、启停、批准、立即运行、日志、删除、安装
+- 自定义代码注入：设置新增 custom_css/custom_js/custom_footer，serve 时注入
+  （<head> CSS、</body> 前 JS、前台 Powered by 前页脚），热更新
+- 端到端验证：CSS/JS/页脚注入生效；未批准插件 fetch 拒绝、批准后成功（httptest）；
+  插件状态重启持久化（单测）
+- 新增 plugin_test.go（TestPluginPermissionDeniedThenApproved）

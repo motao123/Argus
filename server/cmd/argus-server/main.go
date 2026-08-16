@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -218,6 +219,23 @@ func main() {
 	// 可信代理：只有来自这些代理的请求才采信 X-Forwarded-For（默认空 = 直连模式）
 	if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		log.Fatalf("invalid trusted proxies: %v", err)
+	}
+
+	// 自定义代码注入（设置键 custom_css / custom_js / custom_footer，热更新）
+	injectHTML = func(html string) string {
+		css := srv.GetSetting(api.SettingCustomCSS, "")
+		js := srv.GetSetting(api.SettingCustomJS, "")
+		footer := srv.GetSetting(api.SettingCustomFooter, "")
+		if css != "" {
+			html = strings.Replace(html, "</head>", "<style>\n"+css+"\n</style>\n</head>", 1)
+		}
+		if js != "" {
+			html = strings.Replace(html, "</body>", "<script>\n"+js+"\n</script>\n</body>", 1)
+		}
+		if footer != "" {
+			html = strings.Replace(html, "Powered by Argus", footer+"\nPowered by Argus", 1)
+		}
+		return html
 	}
 
 	// 容器编排/反向代理探活端点：不访问数据库，不泄露运行数据。

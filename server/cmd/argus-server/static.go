@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// injectHTML 由 main 注入：从 DB 读自定义代码并改写 HTML 响应（自定义 CSS/JS/页脚）。
+var injectHTML func(html string) string
+
 // serveEmbedded 提供前端静态资源（构建时注入 web/dist 产物）。
 // 若 embed 目录不存在（纯 API 开发模式），返回 404 JSON。
 func serveEmbedded(w http.ResponseWriter, r *http.Request) {
@@ -38,9 +41,13 @@ func serveFile(w http.ResponseWriter, r *http.Request, name string) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
 		return
 	}
+	body := string(data)
+	if injectHTML != nil && strings.HasSuffix(name, ".html") {
+		body = injectHTML(body)
+	}
 	w.Header().Set("Content-Type", contentType(name))
 	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(data)
+	_, _ = w.Write([]byte(body))
 }
 
 func contentType(name string) string {
