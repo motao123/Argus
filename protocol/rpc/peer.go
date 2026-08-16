@@ -99,10 +99,10 @@ func (p *Peer) WriteRaw(v any) error {
 
 // wireMessage 统一的线上消息形态：请求带 method，应答不带。
 type wireMessage struct {
-	ID     json.RawMessage `json:"id,omitempty"`
-	Method string          `json:"method,omitempty"`
-	Params json.RawMessage `json:"params,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
+	ID     json.RawMessage    `json:"id,omitempty"`
+	Method string             `json:"method,omitempty"`
+	Params json.RawMessage    `json:"params,omitempty"`
+	Result json.RawMessage    `json:"result,omitempty"`
 	Error  *protocol.RPCError `json:"error,omitempty"`
 }
 

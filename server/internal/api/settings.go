@@ -10,12 +10,12 @@ import (
 
 // 站点设置键
 const (
-	SettingSiteName    = "site_name"
-	SettingSiteDesc    = "site_desc"
-	SettingFavicon     = "favicon"
-	SettingForceAuth   = "force_auth"   // 1 = 强制登录
+	SettingSiteName     = "site_name"
+	SettingSiteDesc     = "site_desc"
+	SettingFavicon      = "favicon"
+	SettingForceAuth    = "force_auth"     // 1 = 强制登录
 	SettingTermFontSize = "term_font_size" // 终端字号（默认 13）
-	SettingTermTheme    = "term_theme"    // 终端主题：dark/light
+	SettingTermTheme    = "term_theme"     // 终端主题：dark/light
 )
 
 // GetSetting 读设置（默认值兜底）。
@@ -33,8 +33,8 @@ func (s *Server) GetSetting(key, def string) string {
 // getPublicSettings 公开设置（前台/游客可读）。
 func (s *Server) getPublicSettings(c *gin.Context) {
 	ok(c, gin.H{
-		"site_name": s.GetSetting(SettingSiteName, "Argus"),
-		"site_desc": s.GetSetting(SettingSiteDesc, "轻量自托管服务器监控"),
+		"site_name":  s.GetSetting(SettingSiteName, "Argus"),
+		"site_desc":  s.GetSetting(SettingSiteDesc, "轻量自托管服务器监控"),
 		"force_auth": s.GetSetting(SettingForceAuth, "0") == "1",
 	})
 }

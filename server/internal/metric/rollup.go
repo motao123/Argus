@@ -25,8 +25,8 @@ type Rollup struct {
 func New(db *gorm.DB) *Rollup { return &Rollup{db: db} }
 
 type agg struct {
-	count                    int
-	cpu, netIn, netOut, load float64
+	count                                  int
+	cpu, netIn, netOut, load               float64
 	memUsed, memTotal, diskUsed, diskTotal uint64
 }
 

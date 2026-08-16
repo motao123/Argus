@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api, type ApiToken, type User } from "../lib/api";
 import { fmtDateTime } from "../lib/format";
-
 const allScopes = [
   { key: "argus:server:read", label: "服务器读取" },
   { key: "argus:server:write", label: "服务器写入" },
@@ -55,6 +54,11 @@ export default function Access() {
     },
   });
   const delUser = useMutation({ mutationFn: api.deleteUser, onSuccess: invalidate });
+  const [viewedSecret, setViewedSecret] = useState<{ username: string; secret: string } | null>(null);
+  const viewSecret = useMutation({
+    mutationFn: (u: User) => api.userSecret(u.id).then((r) => ({ username: u.username, secret: r.agent_secret })),
+    onSuccess: setViewedSecret,
+  });
 
   return (
     <div>
@@ -207,6 +211,20 @@ export default function Access() {
         </div>
       )}
 
+      {viewedSecret && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg bg-ok/10 p-3 text-sm">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-ok" />
+          <span className="text-xs">「{viewedSecret.username}」Agent 密钥：</span>
+          <span className="break-all font-mono text-xs">{viewedSecret.secret}</span>
+          <button onClick={() => navigator.clipboard?.writeText(viewedSecret.secret)} className="ml-auto shrink-0 text-muted hover:text-fg">
+            <Copy className="h-4 w-4" />
+          </button>
+          <button onClick={() => setViewedSecret(null)} className="shrink-0 text-muted hover:text-fg">
+            ✕
+          </button>
+        </div>
+      )}
+
       {userForm && (
         <div className="mb-4 rounded-xl border border-border bg-panel p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
@@ -265,6 +283,13 @@ export default function Access() {
                 </td>
                 <td className="px-4 py-2.5 text-xs text-muted">{fmtDateTime(u.created_at)}</td>
                 <td className="px-4 py-2.5 text-right">
+                  <button
+                    onClick={() => viewSecret.mutate(u)}
+                    title="查看 Agent 密钥"
+                    className="mr-1 rounded p-1.5 text-muted hover:bg-accent/10 hover:text-accent"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                  </button>
                   <button
                     onClick={() => confirm(`删除用户「${u.username}」？其名下服务器将一并删除！`) && delUser.mutate(u.id)}
                     className="rounded p-1.5 text-err hover:bg-err/10"

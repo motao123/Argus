@@ -113,7 +113,7 @@ func (s *Server) dashboardWS(c *gin.Context) {
 
 // terminalSession 浏览器 → Server → Agent 的终端中继。
 type terminalSession struct {
-	serverID int64
+	serverID  int64
 	sessionID string
 }
 
@@ -182,4 +182,3 @@ func newSessionID() string {
 	_, _ = rand.Read(buf)
 	return hex.EncodeToString(buf)
 }
-

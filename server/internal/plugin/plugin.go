@@ -30,10 +30,10 @@ type Manifest struct {
 // Plugin 运行中的插件。
 type Plugin struct {
 	Manifest
-	Dir    string `json:"dir"`
-	Enabled bool   `json:"enabled"`
-	Logs   []string `json:"logs"` // 环形缓冲最近 50 条
-	LastRun string `json:"last_run"`
+	Dir     string   `json:"dir"`
+	Enabled bool     `json:"enabled"`
+	Logs    []string `json:"logs"` // 环形缓冲最近 50 条
+	LastRun string   `json:"last_run"`
 }
 
 // Manager 插件管理器。

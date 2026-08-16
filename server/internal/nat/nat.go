@@ -115,8 +115,8 @@ type Proxy struct {
 	server *http.Server
 	seq    atomic.Uint64
 
-	mu       sync.Mutex
-	tunnels  map[string]*tunnel
+	mu      sync.Mutex
+	tunnels map[string]*tunnel
 }
 
 // New 创建 NAT 反向代理。

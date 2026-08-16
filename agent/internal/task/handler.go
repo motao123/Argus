@@ -11,13 +11,13 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/motao123/Argus/protocol/rpc"
 	"github.com/motao123/Argus/protocol"
+	"github.com/motao123/Argus/protocol/rpc"
 )
 
 // Handler 实现 rpc.Handler 接口。
 type Handler struct {
-	conn   *websocket.Conn
+	conn *websocket.Conn
 	peer *rpc.Peer
 
 	mu       sync.Mutex
@@ -235,4 +235,3 @@ func (h *Handler) closeSession(id string) {
 	_ = h.peer.Notify(protocol.MethodTermClose, protocol.TerminalData{SessionID: id})
 	log.Printf("terminal session %s closed", id)
 }
-

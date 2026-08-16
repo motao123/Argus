@@ -27,10 +27,10 @@ type Hub struct {
 	mu      sync.RWMutex
 	servers map[int64]*State
 	// 流量打点：serverID → (小时桶, 累计入, 累计出)
-	lastTransferIn    map[int64]uint64
-	lastTransferOut   map[int64]uint64
-	lastTransferHour  map[int64]int64
-	transferQueue     []TransferDelta
+	lastTransferIn   map[int64]uint64
+	lastTransferOut  map[int64]uint64
+	lastTransferHour map[int64]int64
+	transferQueue    []TransferDelta
 }
 
 // TakeTransferQueue 取走待落库的流量差值（由调度器定期消费）。
@@ -161,17 +161,17 @@ type TransferDelta struct {
 
 // bucket 单服务器一分钟内的聚合缓冲。
 type bucket struct {
-	serverID   int64
-	ts         int64 // 整分钟
-	count      int
-	cpuSum     float64
-	memUsed    uint64
-	memTotal   uint64
-	diskUsed   uint64
-	diskTotal  uint64
-	netInSum   float64
-	netOutSum  float64
-	load1Sum   float64
+	serverID  int64
+	ts        int64 // 整分钟
+	count     int
+	cpuSum    float64
+	memUsed   uint64
+	memTotal  uint64
+	diskUsed  uint64
+	diskTotal uint64
+	netInSum  float64
+	netOutSum float64
+	load1Sum  float64
 }
 
 // MetricBatcher 聚合 Agent 上报为分钟级指标并批量落库。

@@ -107,6 +107,15 @@ export interface ApiToken {
   created_at: string;
 }
 
+export interface Session {
+  id: number;
+  user_id: number;
+  user_agent: string;
+  ip: string;
+  created_at: string;
+  expires_at: string;
+}
+
 export interface MetricPoint {
   ts: number;
   cpu: number;
@@ -217,9 +226,16 @@ export const api = {
     }),
 
   users: () => request<{ users: User[] }>("/api/v1/users"),
+  userSecret: (id: number) => request<{ agent_secret: string }>(`/api/v1/users/${id}/secret`),
   createUser: (u: { username: string; password: string; role: string }) =>
     request<{ user: User; agent_secret: string }>("/api/v1/users", { method: "POST", body: JSON.stringify(u) }),
   deleteUser: (id: number) => request(`/api/v1/users/${id}`, { method: "DELETE" }),
+
+  settings: () => request<{ settings: Record<string, string> }>("/api/v1/settings"),
+  saveSettings: (settings: Record<string, string>) =>
+    request(`/api/v1/settings`, { method: "POST", body: JSON.stringify({ settings }) }),
+  sessions: () => request<{ sessions: Session[] }>("/api/v1/sessions"),
+  kickSession: (id: number) => request(`/api/v1/sessions/${id}`, { method: "DELETE" }),
 
   tokens: () => request<{ tokens: ApiToken[] }>("/api/v1/tokens"),
   createToken: (t: { name: string; scopes: string[]; server_ids?: string; expires_in?: number }) =>

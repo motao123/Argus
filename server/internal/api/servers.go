@@ -1,7 +1,6 @@
 package api
 
 import (
-
 	"math"
 	"net/http"
 	"strconv"
@@ -17,20 +16,20 @@ import (
 // serverView 前端视图：持久化配置 + 实时状态。
 type serverView struct {
 	model.Server
-	Host      *hostView `json:"host,omitempty"`
-	CPU       float64   `json:"cpu"`
-	MemUsed   uint64    `json:"mem_used"`
-	MemTotal  uint64    `json:"mem_total"`
-	DiskUsed  uint64    `json:"disk_used"`
-	DiskTotal uint64    `json:"disk_total"`
-	NetInSpeed   float64 `json:"net_in_speed"`
-	NetOutSpeed  float64 `json:"net_out_speed"`
-	Load1     float64   `json:"load1"`
-	Temperature float64 `json:"temperature"`
-	GPUUtil   float64   `json:"gpu_util"`
-	Uptime    uint64    `json:"uptime"`
-	Online    bool      `json:"online"`
-	LastSeen  time.Time `json:"last_seen"`
+	Host        *hostView `json:"host,omitempty"`
+	CPU         float64   `json:"cpu"`
+	MemUsed     uint64    `json:"mem_used"`
+	MemTotal    uint64    `json:"mem_total"`
+	DiskUsed    uint64    `json:"disk_used"`
+	DiskTotal   uint64    `json:"disk_total"`
+	NetInSpeed  float64   `json:"net_in_speed"`
+	NetOutSpeed float64   `json:"net_out_speed"`
+	Load1       float64   `json:"load1"`
+	Temperature float64   `json:"temperature"`
+	GPUUtil     float64   `json:"gpu_util"`
+	Uptime      uint64    `json:"uptime"`
+	Online      bool      `json:"online"`
+	LastSeen    time.Time `json:"last_seen"`
 }
 
 type hostView struct {
@@ -132,9 +131,9 @@ func (s *Server) createServer(c *gin.Context) {
 func (s *Server) updateServer(c *gin.Context) {
 	id := mustID(c)
 	var req struct {
-		Name      string `json:"name"`
-		Group     string `json:"group"`
-		Note      string `json:"note"`
+		Name      string   `json:"name"`
+		Group     string   `json:"group"`
+		Note      string   `json:"note"`
 		Price     *float64 `json:"price"`
 		CycleDays *int     `json:"cycle_days"`
 		ExpireAt  *string  `json:"expire_at"` // RFC3339 或空
@@ -231,8 +230,8 @@ func (s *Server) serverMetrics(c *gin.Context) {
 
 	// 内存聚合降采样到 step
 	type agg struct {
-		count            int
-		cpu, netIn, netOut, load1 float64
+		count                                  int
+		cpu, netIn, netOut, load1              float64
 		memUsed, memTotal, diskUsed, diskTotal uint64
 	}
 	buckets := map[int64]*agg{}
@@ -261,14 +260,14 @@ func (s *Server) serverMetrics(c *gin.Context) {
 		a := buckets[bts]
 		n := float64(a.count)
 		out = append(out, gin.H{
-			"ts": bts,
-			"cpu": round2(a.cpu / n),
-			"net_in": round2(a.netIn / n),
-			"net_out": round2(a.netOut / n),
-			"load1": round2(a.load1 / n),
-			"mem_used": a.memUsed,
-			"mem_total": a.memTotal,
-			"disk_used": a.diskUsed,
+			"ts":         bts,
+			"cpu":        round2(a.cpu / n),
+			"net_in":     round2(a.netIn / n),
+			"net_out":    round2(a.netOut / n),
+			"load1":      round2(a.load1 / n),
+			"mem_used":   a.memUsed,
+			"mem_total":  a.memTotal,
+			"disk_used":  a.diskUsed,
 			"disk_total": a.diskTotal,
 		})
 	}
@@ -341,4 +340,3 @@ func mustIDParam(c *gin.Context, name string) int64 {
 }
 
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
-

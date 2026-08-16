@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/store"
-	"github.com/motao123/Argus/protocol"
 )
 
 func TestInRange(t *testing.T) {
@@ -18,9 +18,9 @@ func TestInRange(t *testing.T) {
 		v    float64
 		want bool
 	}{
-		{5, true},    // 低于下限触发
-		{50, false},  // 正常区间
-		{95, true},   // 高于上限触发
+		{5, true},   // 低于下限触发
+		{50, false}, // 正常区间
+		{95, true},  // 高于上限触发
 	}
 	for _, c := range cases {
 		if got := e.inRange(a, c.v); got != c.want {

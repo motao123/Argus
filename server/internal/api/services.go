@@ -70,13 +70,13 @@ func max64(a, b int64) int64 {
 func (s *Server) createService(c *gin.Context) {
 	p := principalFromContext(c)
 	var req struct {
-		ServerID int64  `json:"server_id"`
-		Name     string `json:"name"`
-		Type     string `json:"type"`
-		Target   string `json:"target"`
-		Interval int    `json:"interval"`
-		Notify   bool   `json:"notify"`
-		NotifyWebhookID int64 `json:"notify_webhook_id"`
+		ServerID        int64  `json:"server_id"`
+		Name            string `json:"name"`
+		Type            string `json:"type"`
+		Target          string `json:"target"`
+		Interval        int    `json:"interval"`
+		Notify          bool   `json:"notify"`
+		NotifyWebhookID int64  `json:"notify_webhook_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -92,14 +92,14 @@ func (s *Server) createService(c *gin.Context) {
 		req.Type = "http"
 	}
 	svc := model.Service{
-		OwnerID:  p.UserID,
-		ServerID: req.ServerID,
-		Name:     req.Name,
-		Type:     req.Type,
-		Target:   req.Target,
-		Interval: req.Interval,
-		Enabled:  true,
-		Notify:   req.Notify,
+		OwnerID:         p.UserID,
+		ServerID:        req.ServerID,
+		Name:            req.Name,
+		Type:            req.Type,
+		Target:          req.Target,
+		Interval:        req.Interval,
+		Enabled:         true,
+		Notify:          req.Notify,
 		NotifyWebhookID: req.NotifyWebhookID,
 	}
 	if err := s.DB.Create(&svc).Error; err != nil {
@@ -121,14 +121,14 @@ func (s *Server) updateService(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ServerID *int64  `json:"server_id"`
-		Name     *string `json:"name"`
-		Type     *string `json:"type"`
-		Target   *string `json:"target"`
-		Interval *int    `json:"interval"`
-		Enabled  *bool   `json:"enabled"`
-		Notify   *bool   `json:"notify"`
-		NotifyWebhookID *int64 `json:"notify_webhook_id"`
+		ServerID        *int64  `json:"server_id"`
+		Name            *string `json:"name"`
+		Type            *string `json:"type"`
+		Target          *string `json:"target"`
+		Interval        *int    `json:"interval"`
+		Enabled         *bool   `json:"enabled"`
+		Notify          *bool   `json:"notify"`
+		NotifyWebhookID *int64  `json:"notify_webhook_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -261,10 +261,10 @@ func (s *Server) serviceStats(c *gin.Context) {
 		avgDelay = int(agg.DelaySum / agg.Total)
 	}
 	ok(c, gin.H{
-		"up_rate":    round2(upRate),
-		"loss_rate":  round2(lossRate),
-		"avg_delay":  avgDelay,
-		"max_delay":  int(agg.MaxDelay),
+		"up_rate":      round2(upRate),
+		"loss_rate":    round2(lossRate),
+		"avg_delay":    avgDelay,
+		"max_delay":    int(agg.MaxDelay),
 		"total_probes": agg.Total,
 	})
 }

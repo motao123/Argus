@@ -1,9 +1,9 @@
 package main
 
 import (
-	"errors"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"

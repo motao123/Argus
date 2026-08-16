@@ -4,9 +4,9 @@ import "testing"
 
 func TestPagination(t *testing.T) {
 	cases := []struct {
-		name            string
-		offset, limit   int
-		wantO, wantL    int
+		name          string
+		offset, limit int
+		wantO, wantL  int
 	}{
 		{"defaults", 0, 0, 0, 50},
 		{"over max", 0, 9999, 0, 500},

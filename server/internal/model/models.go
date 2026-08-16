@@ -8,21 +8,21 @@ import (
 
 // Server 一台被监控服务器（持久化配置）。
 type Server struct {
-	ID        int64     `gorm:"primaryKey" json:"id"`
-	Name      string    `gorm:"size:64;not null" json:"name"`
-	Secret    string    `gorm:"size:64;not null;uniqueIndex" json:"-"`
-	Group     string    `gorm:"column:group_name;size:64;default:''" json:"group"` // group 是 SQL 保留字
-	Note      string    `gorm:"size:255;default:''" json:"note"`
-	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有
+	ID      int64  `gorm:"primaryKey" json:"id"`
+	Name    string `gorm:"size:64;not null" json:"name"`
+	Secret  string `gorm:"size:64;not null;uniqueIndex" json:"-"`
+	Group   string `gorm:"column:group_name;size:64;default:''" json:"group"` // group 是 SQL 保留字
+	Note    string `gorm:"size:255;default:''" json:"note"`
+	OwnerID int64  `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有
 	// 计费信息（借鉴 komari，VPS 售卖场景）
-	Price      float64   `gorm:"default:0" json:"price"`
-	CycleDays  int       `gorm:"default:0" json:"cycle_days"` // 计费周期（天），0 = 无
-	ExpireAt   *time.Time `json:"expire_at"`
-	AutoRenew  bool      `gorm:"default:false" json:"auto_renew"`
+	Price     float64    `gorm:"default:0" json:"price"`
+	CycleDays int        `gorm:"default:0" json:"cycle_days"` // 计费周期（天），0 = 无
+	ExpireAt  *time.Time `json:"expire_at"`
+	AutoRenew bool       `gorm:"default:false" json:"auto_renew"`
 	// 标签与展示（借鉴 komari 标签 + nezha 排序/隐藏）
-	Tags      string `gorm:"size:512;default:''" json:"tags"` // 逗号分隔
-	SortOrder int    `gorm:"default:0" json:"sort_order"`
-	Hidden    bool   `gorm:"default:false" json:"hidden"` // guest 不可见
+	Tags      string    `gorm:"size:512;default:''" json:"tags"` // 逗号分隔
+	SortOrder int       `gorm:"default:0" json:"sort_order"`
+	Hidden    bool      `gorm:"default:false" json:"hidden"` // guest 不可见
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -47,17 +47,17 @@ type User struct {
 
 // TrafficReport 流量定时报告配置（借鉴 komari 流量报告通知）。
 type TrafficReport struct {
-	ID           int64     `gorm:"primaryKey" json:"id"`
-	WebhookID    int64     `json:"webhook_id"`
-	Hour         int       `gorm:"default:9" json:"hour"` // 每天几点发送
-	Enabled      bool      `gorm:"default:false" json:"enabled"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	WebhookID int64     `json:"webhook_id"`
+	Hour      int       `gorm:"default:9" json:"hour"` // 每天几点发送
+	Enabled   bool      `gorm:"default:false" json:"enabled"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // OfflineNotify 离线/上线通知配置（借鉴 komari notifier/offline）。
 type OfflineNotify struct {
 	ID           int64     `gorm:"primaryKey" json:"id"`
-	WebhookID    int64     `json:"webhook_id"` // 0 = 不通知
+	WebhookID    int64     `json:"webhook_id"`                      // 0 = 不通知
 	OfflineAfter int       `gorm:"default:60" json:"offline_after"` // 离线多少秒后通知
 	Enabled      bool      `gorm:"default:true" json:"enabled"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -85,19 +85,19 @@ type NotificationGroup struct {
 
 // Alert 报警规则。
 type Alert struct {
-	ID        int64     `gorm:"primaryKey" json:"id"`
-	Name      string    `gorm:"size:64;not null" json:"name"`
-	Metric    string    `gorm:"size:32;not null" json:"metric"` // cpu/mem/disk/net_in_speed/net_out_speed/load1/offline
-	Min       *float64  `json:"min"`                            // 下限（nil 不检查）
-	Max       *float64  `json:"max"`                            // 上限（nil 不检查）
-	Duration  int       `json:"duration"`                       // 持续秒数
-	Notify    bool      `gorm:"default:true" json:"notify"`
-	WebhookID int64     `json:"webhook_id"`          // 单渠道（兼容）
-	GroupID   int64     `json:"group_id"`            // 通知分组（0=无）
-	TriggerCronID int64 `json:"trigger_cron_id"`     // 触发时执行的任务（0=无）
-	TriggerRatio  *int  `json:"trigger_ratio"`       // 采样达标比例（1-100，如 70=70% 采样超限才触发；nil=全部采样）
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            int64     `gorm:"primaryKey" json:"id"`
+	Name          string    `gorm:"size:64;not null" json:"name"`
+	Metric        string    `gorm:"size:32;not null" json:"metric"` // cpu/mem/disk/net_in_speed/net_out_speed/load1/offline
+	Min           *float64  `json:"min"`                            // 下限（nil 不检查）
+	Max           *float64  `json:"max"`                            // 上限（nil 不检查）
+	Duration      int       `json:"duration"`                       // 持续秒数
+	Notify        bool      `gorm:"default:true" json:"notify"`
+	WebhookID     int64     `json:"webhook_id"`      // 单渠道（兼容）
+	GroupID       int64     `json:"group_id"`        // 通知分组（0=无）
+	TriggerCronID int64     `json:"trigger_cron_id"` // 触发时执行的任务（0=无）
+	TriggerRatio  *int      `json:"trigger_ratio"`   // 采样达标比例（1-100，如 70=70% 采样超限才触发；nil=全部采样）
+	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // Notification 通知渠道（借鉴 komari 多渠道设计 + nezha 模板）。
@@ -129,49 +129,49 @@ type Cron struct {
 
 // Metric 降采样指标（granularity: 60=分钟 / 300=5分钟 / 3600=小时）。
 type Metric struct {
-	ID         int64     `gorm:"primaryKey" json:"-"`
-	ServerID   int64     `gorm:"index:idx_metric_server_ts" json:"server_id"`
-	TS         int64     `gorm:"index:idx_metric_server_ts" json:"ts"` // unix 秒（整周期）
-	Granularity int      `gorm:"index:idx_metric_gran" json:"-"`       // 60/300/3600
-	CPU        float64   `json:"cpu"`
-	MemUsed    uint64    `json:"mem_used"`
-	MemTotal   uint64    `json:"mem_total"`
-	DiskUsed   uint64    `json:"disk_used"`
-	DiskTotal  uint64    `json:"disk_total"`
-	NetInSpeed float64   `json:"net_in_speed"`
-	NetOutSpeed float64  `json:"net_out_speed"`
-	Load1      float64   `json:"load1"`
-	CreatedAt  time.Time `json:"-"`
+	ID          int64     `gorm:"primaryKey" json:"-"`
+	ServerID    int64     `gorm:"index:idx_metric_server_ts" json:"server_id"`
+	TS          int64     `gorm:"index:idx_metric_server_ts" json:"ts"` // unix 秒（整周期）
+	Granularity int       `gorm:"index:idx_metric_gran" json:"-"`       // 60/300/3600
+	CPU         float64   `json:"cpu"`
+	MemUsed     uint64    `json:"mem_used"`
+	MemTotal    uint64    `json:"mem_total"`
+	DiskUsed    uint64    `json:"disk_used"`
+	DiskTotal   uint64    `json:"disk_total"`
+	NetInSpeed  float64   `json:"net_in_speed"`
+	NetOutSpeed float64   `json:"net_out_speed"`
+	Load1       float64   `json:"load1"`
+	CreatedAt   time.Time `json:"-"`
 }
 
 // APIToken 个人访问令牌（PAT），借鉴 nezha 的 scope + 白名单设计。
 type APIToken struct {
-	ID        int64     `gorm:"primaryKey" json:"id"`
-	UserID    int64     `gorm:"index" json:"user_id"`
-	Name      string    `gorm:"size:128;not null" json:"name"`
-	TokenHash string    `gorm:"size:64;not null" json:"-"`
-	Scopes    string    `gorm:"size:1024;not null" json:"scopes"`   // 逗号分隔，如 argus:server:read,argus:server:exec
-	ServerIDs string    `gorm:"size:2048;default:''" json:"server_ids"` // 逗号分隔；空 = 全部
+	ID        int64      `gorm:"primaryKey" json:"id"`
+	UserID    int64      `gorm:"index" json:"user_id"`
+	Name      string     `gorm:"size:128;not null" json:"name"`
+	TokenHash string     `gorm:"size:64;not null" json:"-"`
+	Scopes    string     `gorm:"size:1024;not null" json:"scopes"`       // 逗号分隔，如 argus:server:read,argus:server:exec
+	ServerIDs string     `gorm:"size:2048;default:''" json:"server_ids"` // 逗号分隔；空 = 全部
 	ExpiresAt *time.Time `json:"expires_at"`
-	Revoked   bool      `gorm:"default:false" json:"revoked"`
-	CreatedAt time.Time `json:"created_at"`
+	Revoked   bool       `gorm:"default:false" json:"revoked"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // Service 服务监控定义（HTTP/TCP/Ping 探测，借鉴 nezha ServiceSentinel）。
 type Service struct {
-	ID        int64     `gorm:"primaryKey" json:"id"`
-	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
-	ServerID  int64     `gorm:"index;not null" json:"server_id"` // 由哪个 agent 执行探测
-	Name      string    `gorm:"size:64;not null" json:"name"`
-	Type      string    `gorm:"size:16;not null" json:"type"` // http / tcp / ping
-	Target    string    `gorm:"size:512;not null" json:"target"`
-	Interval  int       `gorm:"default:60" json:"interval"` // 秒
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	ID       int64  `gorm:"primaryKey" json:"id"`
+	OwnerID  int64  `gorm:"index;default:0" json:"owner_id"`
+	ServerID int64  `gorm:"index;not null" json:"server_id"` // 由哪个 agent 执行探测
+	Name     string `gorm:"size:64;not null" json:"name"`
+	Type     string `gorm:"size:16;not null" json:"type"` // http / tcp / ping
+	Target   string `gorm:"size:512;not null" json:"target"`
+	Interval int    `gorm:"default:60" json:"interval"` // 秒
+	Enabled  bool   `gorm:"default:true" json:"enabled"`
 	// 故障通知（借鉴 nezha 服务故障通知到通知组）
-	Notify       bool  `gorm:"default:false" json:"notify"`
-	NotifyWebhookID int64 `json:"notify_webhook_id"` // 0 = 无
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Notify          bool      `gorm:"default:false" json:"notify"`
+	NotifyWebhookID int64     `json:"notify_webhook_id"` // 0 = 无
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // ServiceHistory 探测历史（分钟级聚合，保留 30 天）。
@@ -186,18 +186,18 @@ type ServiceHistory struct {
 
 // DDNSProfile 动态解析配置（借鉴 nezha DDNS）。
 type DDNSProfile struct {
-	ID           int64     `gorm:"primaryKey" json:"id"`
-	OwnerID      int64     `gorm:"index;default:0" json:"owner_id"`
-	ServerID     int64     `gorm:"index" json:"server_id"` // 监听该服务器 IP 变化
-	Name         string    `gorm:"size:64;not null" json:"name"`
-	Provider     string    `gorm:"size:32;default:'webhook'" json:"provider"` // webhook / cloudflare
-	AccessKey    string    `gorm:"size:256;default:''" json:"-"`              // API Token
-	Domains      string    `gorm:"size:1024;not null" json:"domains"`         // 逗号分隔域名
-	WebhookURL   string    `gorm:"size:512;default:''" json:"webhook_url"`    // 含 {ip} 占位符
-	LastIP       string    `gorm:"size:64;default:''" json:"last_ip"`
-	LastUpdated  time.Time `json:"last_updated"`
-	Enabled      bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID          int64     `gorm:"primaryKey" json:"id"`
+	OwnerID     int64     `gorm:"index;default:0" json:"owner_id"`
+	ServerID    int64     `gorm:"index" json:"server_id"` // 监听该服务器 IP 变化
+	Name        string    `gorm:"size:64;not null" json:"name"`
+	Provider    string    `gorm:"size:32;default:'webhook'" json:"provider"` // webhook / cloudflare
+	AccessKey   string    `gorm:"size:256;default:''" json:"-"`              // API Token
+	Domains     string    `gorm:"size:1024;not null" json:"domains"`         // 逗号分隔域名
+	WebhookURL  string    `gorm:"size:512;default:''" json:"webhook_url"`    // 含 {ip} 占位符
+	LastIP      string    `gorm:"size:64;default:''" json:"last_ip"`
+	LastUpdated time.Time `json:"last_updated"`
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // NAT 内网穿透配置（借鉴 nezha NAT）：域名 → 服务器上的内网服务。
@@ -213,17 +213,17 @@ type NAT struct {
 
 // OAuthConfig 持久化的 OAuth2 provider 配置（JSON）。
 type OAuthConfig struct {
-	ID           int64     `gorm:"primaryKey" json:"id"`
-	Name         string    `gorm:"size:32;not null;uniqueIndex" json:"name"`
-	ClientID     string    `gorm:"size:256;not null" json:"-"`
-	ClientSecret string    `gorm:"size:256;not null" json:"-"`
-	AuthURL      string    `gorm:"size:512" json:"-"`
-	TokenURL     string    `gorm:"size:512" json:"-"`
-	UserInfoURL  string    `gorm:"size:512" json:"-"`
-	UsernameField string   `gorm:"size:64;default:'login'" json:"-"`
-	AdminLogins  string    `gorm:"size:512;default:''" json:"-"`
-	Enabled      bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID            int64     `gorm:"primaryKey" json:"id"`
+	Name          string    `gorm:"size:32;not null;uniqueIndex" json:"name"`
+	ClientID      string    `gorm:"size:256;not null" json:"-"`
+	ClientSecret  string    `gorm:"size:256;not null" json:"-"`
+	AuthURL       string    `gorm:"size:512" json:"-"`
+	TokenURL      string    `gorm:"size:512" json:"-"`
+	UserInfoURL   string    `gorm:"size:512" json:"-"`
+	UsernameField string    `gorm:"size:64;default:'login'" json:"-"`
+	AdminLogins   string    `gorm:"size:512;default:''" json:"-"`
+	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // Session 登录会话（借鉴 nezha JWTSession + komari Session）。
@@ -254,9 +254,9 @@ type Clipboard struct {
 
 // Transfer 周期流量打点（小时级，借鉴 nezha Transfer）。
 type Transfer struct {
-	ID       int64 `gorm:"primaryKey" json:"-"`
-	ServerID int64 `gorm:"index:idx_transfer" json:"server_id"`
-	Ts       int64 `gorm:"index:idx_transfer" json:"ts"` // 小时（unix/3600*3600）
+	ID       int64  `gorm:"primaryKey" json:"-"`
+	ServerID int64  `gorm:"index:idx_transfer" json:"server_id"`
+	Ts       int64  `gorm:"index:idx_transfer" json:"ts"` // 小时（unix/3600*3600）
 	In       uint64 `json:"in"`
 	Out      uint64 `json:"out"`
 }
@@ -266,7 +266,7 @@ type AuditLog struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
 	UserID    int64     `json:"user_id"`
 	Username  string    `gorm:"size:32" json:"username"`
-	Action    string    `gorm:"size:64" json:"action"`  // 如 server.create / alert.delete
+	Action    string    `gorm:"size:64" json:"action"` // 如 server.create / alert.delete
 	Detail    string    `gorm:"size:512" json:"detail"`
 	IP        string    `gorm:"size:64" json:"ip"`
 	CreatedAt time.Time `json:"created_at"`

@@ -1,20 +1,18 @@
 # 原始项目差异对比报告
 
 > 基于本地独立部署的三个原始项目实测 + 全量源码盘点 + 官方文档研读。
-> 部署环境：komari :25774（安装向导）、nezha-master :8008（Dashboard）、
-> nezha-dash-v2 :8010（生产包 + Mock API，30 台模拟服务器，浏览器实测）。
+> 最近复跑：2026-08-16（komari 源码 :25775 完整安装、nezha-master 源码 :8011、dash-v2 独立演示 :5173 + mock :8008）。
 
-## 一、部署实测记录
+## 一、部署实测记录（2026-08-16 复跑）
 
 | 项目 | 部署方式 | 运行结果 | 前端 UI |
 |---|---|---|---|
-| komari-main | go build 单二进制 | ✅ :25774 安装向导可达 | ⚠️ zip 不含前端产物（主题 dist 需从 komari-web 仓库构建），页面为占位 |
-| nezha-master | go build 单二进制 | ✅ :8008 Dashboard 启动 | ⚠️ zip 不含前端产物（user-dist/admin-dist 需从 release 下载，GitHub 直连不可达），页面为占位 |
-| nezha-dash-v2 | pnpm build 生产包 + Mock API 同源托管 | ✅ :8010 完整 UI 实测通过 | ✅ 完整现代仪表盘 |
+| komari-main | go build 单二进制（komari-web npm 构建主题，嵌入 web/public/defaultTheme） | ✅ :25775 安装向导 5 步完成（admin/Argus123、站点、SQLite DSN）→ 主界面 → 管理后台全菜单（浏览器实测） | ✅ 完整（顶栏/统计/搜索/主题市场入口） |
+| nezha-master | go build 单二进制（admin-frontend v2.3.3 dist + dash-v2 源码构建 user-dist；swag 生成 docs） | ✅ :8011 Dashboard（新版 listen_port 配置 schema） | ✅ dash-v2 用户端 + admin 登录 JWT |
+| nezha-dash-v2 | pnpm build 生产包 + dev:mock（mock-nezha-server :8008 + vite :5173 https） | ✅ :5173 页面 + mock API 200 | ✅ 完整现代仪表盘（哪吒监控） |
 
-**关键结论**：两个 Go 项目的 zip 均为**纯后端源码**，前端产物依赖外部仓库/release（当前网络无法获取），因此：
-- 后端功能对比：以源码盘点 + 官方文档为准（完整可靠）
-- 前端视觉/交互对比：以 dash-v2 为唯一完整基准（浏览器实测）
+**说明**：komari/nezha 的 zip 均为纯后端源码，前端需从 komari-web 仓库构建 / release dist 下载；
+nezha 新版（master）配置为 `listen_port`/`listen_host` + `oauth2` map 结构，与 2.3.6 版 `httpport` 不同。
 
 ## 二、功能完整性对比
 
@@ -48,20 +46,20 @@
 
 | 维度 | dash-v2（实测） | Argus 现状 | 差异 |
 |---|---|---|---|
-| 总览布局 | 4 统计卡（总数/在线/离线/流量）+ 服务器卡片墙 | 无统计卡，直接卡片网格 | 缺统计卡 |
-| 分组 Tab | 胶囊滑动指示器 + 横向滚动 | 下拉选择分组 | Tab 交互更佳 |
-| 排序 | 11 种指标 + 升降序 + 离线沉底 | 无排序 | 缺 |
-| 搜索 | Cmd+K 命令面板（服务器跳转+主题切换） | 顶部搜索框 | 命令面板更高级 |
-| 在线状态 | 统计卡点击联动过滤 | 卡片圆点 | 交互联动不足 |
-| 详情页 | 系统信息/负载/GPU/温度 + Detail/Network 双 Tab | 8 宫格指标 + 4 图表 | 缺 GPU/温度/Tab 结构 |
-| 图表 | 实时+历史拼接、Realtime/1D/7D/30D、削峰 | 1h/24h/7d 静态拉取 | 缺实时拼接与削峰 |
-| 地图 | d3-geo 全球地图 + 国家聚合 | 无 | 缺 |
-| 服务可用率 | 30 天色块条 + 阈值着色 | 无 | 缺 |
-| 主题 | light/dark/system 三态 + 防 FOUC | light/dark | 缺 system 跟随 |
-| 语言 | 14 语言 i18n | 仅中文 | 缺 i18n |
-| 时钟 | 实时时钟 AnimatedCount | 无 | 缺 |
-| 空态/错误态 | 空态插画 + 后端不可达提示 | 简单文本 | 缺插画 |
-| 移动端 | 响应式网格 | 响应式网格 | 基本对齐 |
+| 总览布局 | 4 统计卡（总数/在线/离线/流量）+ 服务器卡片墙 | 统计卡 + 服务状态条 + 卡片墙 | ✅ 已对齐 |
+| 分组 Tab | 胶囊滑动指示器 + 横向滚动 | 分组下拉 + 分组 Tab（前台） | ✅ 已对齐 |
+| 排序 | 11 种指标 + 升降序 + 离线沉底 | 9 种排序 + 升降序 | ✅ 已对齐 |
+| 搜索 | Cmd+K 命令面板（服务器跳转+主题切换） | 搜索框 + ⌘K 命令面板 | ✅ 已对齐 |
+| 在线状态 | 统计卡点击联动过滤 | 统计卡筛选 + 卡片在线徽标 | ✅ 已对齐 |
+| 详情页 | 系统信息/负载/GPU/温度 + Detail/Network 双 Tab | 8 宫格指标 + 图表 + 终端入口 | ⚠️ 缺 GPU/温度显示 |
+| 图表 | 实时+历史拼接、Realtime/1D/7D/30D、削峰 | 1h/24h/7d + 实时拼接（B3） | ✅ 已对齐 |
+| 地图 | d3-geo 全球地图 + 国家聚合 | 世界地图（国家筛选/折叠） | ✅ 已对齐 |
+| 服务可用率 | 30 天色块条 + 阈值着色 | 30 天色块（B3） | ✅ 已对齐 |
+| 主题 | light/dark/system 三态 + 防 FOUC | light/dark + 防 FOUC | ⚠️ 缺 system 跟随 |
+| 语言 | 14 语言 i18n | 中/英（EN 按钮） | ⚠️ 未全量 i18n |
+| 时钟 | 实时时钟 AnimatedCount | 实时时钟 | ✅ 已对齐 |
+| 空态/错误态 | 空态插画 + 后端不可达提示 | 空态文本 | ⚠️ 缺插画 |
+| 移动端 | 响应式网格 | 响应式网格 | ✅ 基本对齐 |
 
 ## 四、技术栈架构对比
 
@@ -111,5 +109,9 @@ dash-v2: 浏览器 ──WS /api/v1/ws/server──▶ websocket-provider(30 条
 3. **API 层**：nezha 的 /api/v1 REST 风格 + 统一响应壳 + 分页；权限借鉴 nezha PAT scope + komari 角色中间件
 4. **前端**：以 dash-v2 为视觉基准补齐统计卡/排序/命令面板/地图/可用率条/详情 Tab；后台补齐 komari/nezha 管理能力
 5. **差异功能全量保留**：服务监控/文件管理/DDNS/NAT/多用户/PAT/过户（nezha）+ 通知渠道/2FA/插件/主题/计费（komari）
+
+> **整合进展（2026-08-16）**：上述 1-5 项已全部落地（A1-A6 / B1-B6 / 第1-7项 迭代完成）；
+> 本轮复跑新增「在线会话」「站点设置」管理页与 Agent 密钥读取链路。未覆盖项见
+> docs/assets.md（⚠️/📋 标记）与 docs/verification.md「已知限制」。
 
 详见 docs/assets.md（可迁移资产清单）与 docs/standards.md（规范统一清单）。

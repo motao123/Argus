@@ -17,10 +17,10 @@ import (
 
 // Scheduler cron 任务调度器。
 type Scheduler struct {
-	db    *gorm.DB
+	db     *gorm.DB
 	agents *agent.Hub
 
-	mu  sync.Mutex
+	mu   sync.Mutex
 	cron *cron.Cron
 	ids  map[int64]cron.EntryID
 }

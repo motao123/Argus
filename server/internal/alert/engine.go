@@ -37,7 +37,7 @@ type violation struct {
 	notified    bool
 	recovering  bool // 已恢复但通知未发（下一轮发恢复通知）
 	// 达标比例采样窗口（借鉴 komari LoadNotification）
-	sampleCount int
+	sampleCount  int
 	violateCount int
 }
 

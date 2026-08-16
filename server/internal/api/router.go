@@ -66,6 +66,7 @@ func New(s *Server) *gin.Engine {
 		{
 			// 用户管理（admin）
 			authed.GET("/users", s.listUsers)
+			authed.GET("/users/:id/secret", s.getUserSecret)
 			authed.POST("/users", s.createUser)
 			authed.PUT("/users/:id", s.updateUser)
 			authed.DELETE("/users/:id", s.deleteUser)
@@ -243,4 +244,3 @@ func (s *Server) parseToken(token string) (*claims, error) {
 	}
 	return cl, nil
 }
-

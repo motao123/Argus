@@ -32,13 +32,13 @@ func NewError(code int, message string) *RPCError {
 
 // 标准错误码
 const (
-	ErrParse     = -32700
-	ErrInvalid   = -32600
-	ErrMethod    = -32601
-	ErrParams    = -32602
-	ErrInternal  = -32603
+	ErrParse        = -32700
+	ErrInvalid      = -32600
+	ErrMethod       = -32601
+	ErrParams       = -32602
+	ErrInternal     = -32603
 	ErrUnauthorized = -32001
-	ErrNotFound  = -32002
+	ErrNotFound     = -32002
 )
 
 // ---- 方法名 ----
@@ -49,10 +49,10 @@ const (
 	MethodReport   = "agent.report"
 
 	// Server → Agent
-	MethodExec        = "agent.exec"
-	MethodTerminal    = "agent.terminal"
-	MethodTermData    = "agent.terminal.data"
-	MethodTermClose   = "agent.terminal.close"
+	MethodExec         = "agent.exec"
+	MethodTerminal     = "agent.terminal"
+	MethodTermData     = "agent.terminal.data"
+	MethodTermClose    = "agent.terminal.close"
 	MethodServiceCheck = "agent.service.check"
 	MethodFsList       = "agent.fs.list"
 	MethodFsRead       = "agent.fs.read"
@@ -177,12 +177,12 @@ type FsListParams struct {
 
 // FsEntry 目录项。
 type FsEntry struct {
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	Size      int64  `json:"size"`
-	Mode      string `json:"mode"`
-	IsDir     bool   `json:"is_dir"`
-	Modified  int64  `json:"modified"`
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	Mode     string `json:"mode"`
+	IsDir    bool   `json:"is_dir"`
+	Modified int64  `json:"modified"`
 }
 
 // FsListResult 目录列表结果。

@@ -120,8 +120,8 @@ func sendTelegram(n *model.Notification, title, content string) {
 		return
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"chat_id": n.ChatID,
-		"text":    fmt.Sprintf("*%s*\n%s", title, content),
+		"chat_id":    n.ChatID,
+		"text":       fmt.Sprintf("*%s*\n%s", title, content),
 		"parse_mode": "Markdown",
 	})
 	req, _ := http.NewRequest(http.MethodPost, base+"/sendMessage", bytes.NewBuffer(payload))

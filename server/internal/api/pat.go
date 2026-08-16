@@ -196,7 +196,7 @@ func requireScope(scope string) gin.HandlerFunc {
 
 var (
 	wafMu     sync.Mutex
-	wafCounts = map[string]int{}     // IP → 请求数
+	wafCounts = map[string]int{}       // IP → 请求数
 	wafBlock  = map[string]time.Time{} // IP → 封禁截止
 )
 

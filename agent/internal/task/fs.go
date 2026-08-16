@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-
 	"github.com/motao123/Argus/protocol"
 )
 
@@ -119,4 +118,3 @@ func (h *Handler) handleFsDelete(params json.RawMessage) (any, *protocol.RPCErro
 	}
 	return &protocol.FsDeleteResult{}, nil
 }
-

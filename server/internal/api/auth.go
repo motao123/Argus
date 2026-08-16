@@ -60,8 +60,8 @@ func loginSuccess(ip string) {
 // login 管理员登录，返回 JWT。
 func (s *Server) login(c *gin.Context) {
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
 		TwoFACode string `json:"two_fa_code"` // 启用 2FA 后必填
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {

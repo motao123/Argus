@@ -118,7 +118,7 @@ func (c *cloudflareProvider) Update(domain, ip, apiToken string) error {
 	var listData struct {
 		Success bool `json:"success"`
 		Result  []struct {
-			ID   string `json:"id"`
+			ID      string `json:"id"`
 			Content string `json:"content"`
 		} `json:"result"`
 	}

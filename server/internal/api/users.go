@@ -26,6 +26,21 @@ func (s *Server) listUsers(c *gin.Context) {
 	ok(c, gin.H{"users": users})
 }
 
+// getUserSecret 读取用户专属 Agent 密钥（仅 admin，借鉴 nezha 管理端读取 agent_secret）。
+func (s *Server) getUserSecret(c *gin.Context) {
+	p := principalFromContext(c)
+	if !p.IsAdmin {
+		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	var u model.User
+	if err := s.DB.First(&u, mustID(c)).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	ok(c, gin.H{"agent_secret": u.AgentSecret})
+}
+
 // createUser 创建用户（仅 admin），返回用户专属 Agent 密钥。
 func (s *Server) createUser(c *gin.Context) {
 	p := principalFromContext(c)

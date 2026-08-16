@@ -1,7 +1,7 @@
 # 整合任务 7 步执行核对报告
 
 > 核对日期：2026-08-15 · 最终提交：56e76da（GitHub 与 cnb 一致）
-> 本报告为每一步骤的交付物与可验证证据清单。
+> 复跑核对：2026-08-16（提交 4fa32ed 之后新一轮 7 步复跑，见文末）
 
 ## 步骤 1：环境准备与项目解压 ✅
 
@@ -89,3 +89,17 @@
 | argus-admin.png | Argus 整合版后台总览（侧边栏导航） |
 | komari-admin.png | komari 管理后台（参考对比） |
 | nezha-official-user.png | nezha 官方用户端 dash-v2（含 agent 实时数据，参考对比） |
+
+---
+
+## 2026-08-16 复跑记录（提交 4fa32ed 之后）
+
+| 步骤 | 复跑结果 |
+|---|---|
+| 1. 环境与解压 | ✅ 统一工作根目录 `/home/imotao/code/refs/`（三项目原结构解压）；Node 22 / pnpm 11 / Go 1.26.6 / SQLite / 镜像通路 |
+| 2. 规范研读 | ✅ 双代理全站抓取：komari.wiki 37 页 + nezha.wiki 55 页，要点并入 docs/standards.md 附录 |
+| 3. 资产盘点 | ✅ docs/assets.md 状态全量刷新（对照代码逐项核实，A1-A6/B1-B6/第1-7项 全部落地） |
+| 4. 本地部署对比 | ✅ komari 源码 :25775（5 步安装完成 + 后台全菜单）、nezha 源码 :8011（登录 JWT）、dash-v2 :5173 + mock :8008；diff.md 更新部署记录 |
+| 5. 架构设计 | ✅ integration-design.md 已实现（v2 架构 + 分层设计）；本轮补 2 个管理页 |
+| 6. 部署验证与修复 | ✅ 修复 Agent 密钥链路缺陷（admin 引导生成密钥 + GET /users/:id/secret + 存量回填 + 单测）；新增在线会话/站点设置页；go test/vet/gofmt 全绿；真实 Agent 端到端 + 浏览器实测（截图 docs/screenshots/） |
+| 7. 提交与推送 | 见当次提交信息（GitHub origin + cnb 双远端） |

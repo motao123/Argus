@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/model"
 )
 
@@ -63,10 +64,14 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		if err != nil {
 			return nil, err
 		}
-		u := &model.User{Username: adminUser, PasswordHash: string(hash), Role: model.RoleAdmin}
+		u := &model.User{Username: adminUser, PasswordHash: string(hash), Role: model.RoleAdmin, AgentSecret: agent.GenSecret()}
 		if err := gdb.Create(u).Error; err != nil {
 			return nil, fmt.Errorf("create admin: %w", err)
 		}
+	}
+	// 存量用户若缺 Agent 密钥则补生成（老版本引导创建的 admin 无密钥，无法注册 Agent）
+	if err := gdb.Model(&model.User{}).Where("agent_secret = '' OR agent_secret IS NULL").Updates(map[string]any{"agent_secret": agent.GenSecret()}).Error; err != nil {
+		return nil, fmt.Errorf("backfill agent secrets: %w", err)
 	}
 	return gdb, nil
 }
