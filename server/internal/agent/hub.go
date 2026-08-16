@@ -31,6 +31,8 @@ type Hub struct {
 	IPChangeCb func(serverID int64, newIP string)
 	// NATDataCb Agent 回传 NAT 隧道数据（server 侧注册到 NAT Proxy）。
 	NATDataCb func(sessionID string, data []byte)
+	// TransferCb 服务器按密钥注册成功回调（过户验证用）。
+	TransferCb func(serverID int64)
 
 	mu      sync.RWMutex
 	conns   map[int64]*rpc.Peer // serverID → 连接
@@ -166,6 +168,9 @@ func (ch *connHandler) handleRegister(params json.RawMessage) (any, *protocol.RP
 	ch.hub.store.Upsert(&srv)
 	ch.hub.store.SetOnline(srv.ID)
 	log.Printf("agent %s (#%d) registered", srv.Name, srv.ID)
+	if ch.hub.TransferCb != nil {
+		ch.hub.TransferCb(srv.ID)
+	}
 	return protocol.RegisterResult{ServerID: srv.ID, Secret: srv.Secret}, nil
 }
 

@@ -40,7 +40,7 @@ func newAuthzEnv(t *testing.T) *authzTestEnv {
 	if err := gdb.AutoMigrate(
 		&model.User{}, &model.Server{}, &model.Service{}, &model.ServiceHistory{},
 		&model.APIToken{}, &model.Setting{}, &model.DDNSProfile{}, &model.NAT{}, &model.Metric{},
-		&model.AuditLog{},
+		&model.AuditLog{}, &model.ServerTransfer{},
 	); err != nil {
 		t.Fatal(err)
 	}

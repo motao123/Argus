@@ -272,6 +272,22 @@ type TrafficBaseline struct {
 	TS       int64  `json:"ts"`
 }
 
+// ServerTransfer 服务器过户（借鉴 nezha server transfer 状态机简化版）。
+// 发起时轮换服务器密钥为 NewSecret：新 owner 用其重连即完成验证。
+type ServerTransfer struct {
+	ID             int64     `gorm:"primaryKey" json:"id"`
+	ServerID       int64     `gorm:"index" json:"server_id"`
+	ServerName     string    `gorm:"size:64" json:"server_name"`
+	FromUserID     int64     `json:"from_user_id"`
+	ToUserID       int64     `json:"to_user_id"`
+	ToUsername     string    `gorm:"size:32" json:"to_username"`
+	Status         string    `gorm:"size:16;default:'pending'" json:"status"` // pending/verified/cancelled/failed
+	NewSecret      string    `gorm:"size:64;default:''" json:"-"`             // 一次性握手密钥（验证后即为服务器新密钥）
+	RollbackSecret string    `gorm:"size:64;default:''" json:"-"`             // 原密钥（取消/超时回滚）
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 // AuditLog 审计日志（管理操作记录，借鉴 komari Log）。
 type AuditLog struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`

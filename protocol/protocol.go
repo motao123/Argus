@@ -62,6 +62,7 @@ const (
 	MethodNATData      = "agent.nat.data"
 	MethodNATClose     = "agent.nat.close"
 	MethodApplyConfig  = "agent.apply_config"
+	MethodUpgrade      = "agent.upgrade"
 )
 
 // AgentConfig 服务端下发的 Agent 运行配置（借鉴 nezha ApplyConfig）。
@@ -69,6 +70,13 @@ type AgentConfig struct {
 	ServerURL string `json:"server_url,omitempty"` // WS 地址
 	Interval  int    `json:"interval,omitempty"`   // 上报间隔（秒）
 	Secret    string `json:"secret,omitempty"`     // 新密钥
+}
+
+// UpgradeParams Agent 自升级参数（下载 → SHA-256 校验 → 原子替换 → 重启）。
+type UpgradeParams struct {
+	URL     string `json:"url"`
+	SHA256  string `json:"sha256"`
+	Version string `json:"version"`
 }
 
 // ---- 上报结构 ----

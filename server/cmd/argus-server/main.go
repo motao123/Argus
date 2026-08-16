@@ -210,6 +210,8 @@ func main() {
 	// 周期流量落库改为 TrafficLedger 的 30s flush（见上文），此处移除旧小时 ticker。
 
 	agents.TermDataCb = srv.HandleAgentTermData
+	// 过户验证：Agent 用新密钥重连即完成
+	agents.TransferCb = srv.VerifyTransfer
 	// DDNS：服务器 IP 变化时更新解析记录
 	agents.IPChangeCb = srv.HandleServerIPChange
 	router := api.New(srv)

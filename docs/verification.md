@@ -167,3 +167,15 @@ DDNS/NAT/过户/备份/审计、现代化仪表盘。本轮修复 1 个真实缺
 - 告警表单：触发任务（Cron）、采样达标比例、通知分组；指标新增 temperature/gpu
 - 通知渠道：类型选择（webhook/bark/telegram/email/serverchan）、chat_id、测试发送
 - 浏览器验证：服务器列表/标签/分组管理/周期流量/终端入口全部通过
+
+## 十五、阶段 4：Agent 升级与服务器过户状态机（2026-08-16）
+
+- Agent 自升级：新增 `agent.upgrade` RPC（下载 → SHA-256 校验 → 备份 → 原子替换 → 后台重启）；
+  agent 端 platform 分离 detach 实现；服务端 `POST /upgrade-jobs` 批量升级 + 逐机回执
+  （success/failure/offline），仅 http(s) URL
+- 服务器过户状态机：`ServerTransfer` 模型（pending/verified/cancelled/failed）；
+  发起即轮换服务器密钥为一次性握手密钥、断开旧连接；新 owner 的 Agent 用新密钥重连即
+  `VerifyTransfer` 验证过户；取消回滚原密钥；30 分钟未验证自动回滚（sweep）
+- 端到端验证：alice 拥有服务器 → admin 过户给 bob → bob Agent 用新密钥重连 → owner 变 bob、
+  transfer=verified、bob 可见/alice 不可见；取消路径回滚原密钥通过；单测 TestTransferLifecycle/AdminOnly
+- Agent 升级端到端：v1(0.1.0) → HTTP 源提供 v2(0.2.0) → 触发升级 → 二进制替换 + v2 重连上报

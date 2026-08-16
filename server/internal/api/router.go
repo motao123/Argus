@@ -164,6 +164,15 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/files/:serverId/write", requireScope(ScopeServerWrite), s.writeFile)
 			authed.POST("/files/:serverId/delete", requireScope(ScopeServerWrite), s.deleteFile)
 
+			// 服务器过户（admin）
+			authed.GET("/server-transfers", s.listTransfers)
+			authed.POST("/server-transfers", s.createTransfer)
+			authed.POST("/server-transfers/:id/cancel", s.cancelTransfer)
+
+			// Agent 批量升级（admin，逐机回执）
+			authed.GET("/upgrade-jobs", requireAdmin(), s.listUpgradeJobs)
+			authed.POST("/upgrade-jobs", requireAdmin(), s.createUpgradeJob)
+
 			// 会话管理
 			authed.GET("/sessions", s.listSessions)
 			authed.DELETE("/sessions/:id", s.revokeSession)

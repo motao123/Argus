@@ -75,9 +75,27 @@ func (h *Handler) Handle(method string, params json.RawMessage) (any, *protocol.
 		return nil, nil
 	case protocol.MethodApplyConfig:
 		return h.handleApplyConfig(params)
+	case protocol.MethodUpgrade:
+		return h.handleUpgrade(params)
 	default:
 		return nil, protocol.NewError(protocol.ErrMethod, "unknown method: "+method)
 	}
+}
+
+// handleUpgrade 自升级：下载 → SHA-256 校验 → 备份 → 原子替换 → 重启。
+func (h *Handler) handleUpgrade(params json.RawMessage) (any, *protocol.RPCError) {
+	var p protocol.UpgradeParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, protocol.NewError(protocol.ErrParams, err.Error())
+	}
+	if p.URL == "" || p.SHA256 == "" {
+		return nil, protocol.NewError(protocol.ErrParams, "url and sha256 required")
+	}
+	up, err := upgradeSelf(&p)
+	if err != nil {
+		return nil, protocol.NewError(protocol.ErrInternal, err.Error())
+	}
+	return map[string]any{"ok": true, "note": up}, nil
 }
 
 // ---- 服务监控探测 ----
