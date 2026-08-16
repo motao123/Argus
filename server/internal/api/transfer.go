@@ -7,17 +7,24 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/motao123/Argus/server/internal/model"
+	trafficquota "github.com/motao123/Argus/server/internal/traffic"
 )
 
 // serverTransfer 查询服务器周期流量（日历桶：24h 小时桶 / 30d 自然日 / 12m 自然月）。
 func (s *Server) serverTransfer(c *gin.Context) {
 	id := mustID(c)
-	if _, ok := s.authorizePublicServer(c, id); !ok {
+	srv, authorized := s.authorizePublicServer(c, id)
+	if !authorized {
 		fail(c, http.StatusNotFound, "server not found")
 		return
 	}
 	period := c.DefaultQuery("period", "day")
 	now := time.Now()
+	usage, err := trafficquota.CurrentUsage(s.DB, srv, now)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	// 按自然日历对齐起点与步长
 	var step int64
@@ -36,7 +43,7 @@ func (s *Server) serverTransfer(c *gin.Context) {
 			in, outB := sumRange(rows, bStart.Unix(), bEnd.Unix())
 			out = append(out, gin.H{"ts": bStart.Unix(), "in": in, "out": outB})
 		}
-		ok(c, gin.H{"period": "month", "points": out})
+		ok(c, gin.H{"period": "month", "points": out, "usage": usage})
 		return
 	case "year":
 		step, points = 365*24*3600, 1
@@ -44,7 +51,7 @@ func (s *Server) serverTransfer(c *gin.Context) {
 		first := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
 		rows := s.queryTransfers(id, first.Unix())
 		in, outB := sumRange(rows, first.Unix(), first.AddDate(1, 0, 0).Unix())
-		ok(c, gin.H{"period": "year", "points": []gin.H{{"ts": first.Unix(), "in": in, "out": outB}}})
+		ok(c, gin.H{"period": "year", "points": []gin.H{{"ts": first.Unix(), "in": in, "out": outB}}, "usage": usage})
 		return
 	default:
 		period = "day"
@@ -61,7 +68,7 @@ func (s *Server) serverTransfer(c *gin.Context) {
 		in, outB := sumRange(rows, bStart.Unix(), bEnd.Unix())
 		out = append(out, gin.H{"ts": bStart.Unix(), "in": in, "out": outB})
 	}
-	ok(c, gin.H{"period": "day", "points": out})
+	ok(c, gin.H{"period": "day", "points": out, "usage": usage})
 	_ = step
 }
 

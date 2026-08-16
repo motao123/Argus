@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckSquare, Copy, KeyRound, Layers, Pencil, Plus, Search, Send, Square, TerminalSquare, Trash2 } from "lucide-react";
 import { api, type Server } from "../lib/api";
-import { fmtDateTime } from "../lib/format";
+import { fmtBytes, fmtDateTime } from "../lib/format";
 
 interface FormState {
   id?: number;
@@ -17,10 +17,15 @@ interface FormState {
   tags: string;
   sort_order: number;
   hidden: boolean;
+  traffic_quota_bytes: number;
+  traffic_cycle_day: number;
+  traffic_timezone: string;
+  traffic_accounting: "sum" | "in" | "out" | "max";
 }
 
 const emptyForm: FormState = {
   name: "", group: "", note: "", price: 0, cycle_days: 0, expire_at: "", auto_renew: false, tags: "", sort_order: 0, hidden: false,
+  traffic_quota_bytes: 0, traffic_cycle_day: 1, traffic_timezone: "UTC", traffic_accounting: "sum",
 };
 
 export default function Servers() {
@@ -184,6 +189,12 @@ export default function Servers() {
             <input placeholder="备注" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input type="number" placeholder="价格" value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input type="number" placeholder="计费周期（天）" value={form.cycle_days} onChange={(e) => setForm({ ...form, cycle_days: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            <input type="number" placeholder="流量额度（bytes，0=无限）" min={0} value={form.traffic_quota_bytes} onChange={(e) => setForm({ ...form, traffic_quota_bytes: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            <input type="number" placeholder="流量周期日（1-28）" min={1} max={28} value={form.traffic_cycle_day} onChange={(e) => setForm({ ...form, traffic_cycle_day: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            <input placeholder="流量时区（如 Asia/Shanghai）" value={form.traffic_timezone} onChange={(e) => setForm({ ...form, traffic_timezone: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            <select value={form.traffic_accounting} onChange={(e) => setForm({ ...form, traffic_accounting: e.target.value as FormState["traffic_accounting"] })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm">
+              <option value="sum">流量计费：入 + 出</option><option value="in">仅入向</option><option value="out">仅出向</option><option value="max">入/出取最大</option>
+            </select>
             <input type="datetime-local" value={form.expire_at} onChange={(e) => setForm({ ...form, expire_at: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input type="number" placeholder="排序" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input placeholder="标签（逗号分隔）" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
@@ -220,6 +231,7 @@ export default function Servers() {
               <th className="px-4 py-3 font-normal">分组</th>
               <th className="px-4 py-3 font-normal">系统</th>
               <th className="px-4 py-3 font-normal">状态</th>
+              <th className="px-4 py-3 font-normal">流量周期 / 用量</th>
               <th className="px-4 py-3 font-normal">到期</th>
               <th className="px-4 py-3 text-right font-normal">操作</th>
             </tr>
@@ -248,6 +260,13 @@ export default function Servers() {
                   <span className={`rounded-full px-2 py-0.5 text-xs ${s.online ? "bg-ok/15 text-ok" : "bg-err/15 text-err"}`}>
                     {s.online ? "在线" : "离线"}
                   </span>
+                </td>
+                <td className="px-4 py-3 text-xs text-muted">
+                  {s.traffic_usage ? <div className="space-y-1">
+                    <div>{new Date(s.traffic_usage.cycle_start).toLocaleDateString("zh-CN")} — {new Date(s.traffic_usage.cycle_end).toLocaleDateString("zh-CN")}</div>
+                    <div>↓ {fmtBytes(s.traffic_usage.in_bytes)} · ↑ {fmtBytes(s.traffic_usage.out_bytes)} · 计费 {fmtBytes(s.traffic_usage.accounted_bytes)}</div>
+                    {s.traffic_usage.quota_bytes > 0 && <div>剩余 {fmtBytes(s.traffic_usage.remaining_bytes)} · {s.traffic_usage.percentage?.toFixed(1)}%</div>}
+                  </div> : "—"}
                 </td>
                 <td className="px-4 py-3 text-xs text-muted">{s.expire_at ? fmtDateTime(s.expire_at) : "—"}</td>
                 <td className="px-4 py-3">
@@ -286,6 +305,8 @@ export default function Servers() {
                           id: s.id, name: s.name, group: s.group, note: s.note, price: s.price, cycle_days: s.cycle_days,
                           expire_at: s.expire_at ? s.expire_at.slice(0, 16) : "", auto_renew: s.auto_renew, tags: s.tags,
                           sort_order: s.sort_order, hidden: s.hidden,
+                          traffic_quota_bytes: s.traffic_quota_bytes, traffic_cycle_day: s.traffic_cycle_day || 1,
+                          traffic_timezone: s.traffic_timezone || "UTC", traffic_accounting: s.traffic_accounting || "sum",
                         })
                       }
                       title="编辑"
@@ -307,7 +328,7 @@ export default function Servers() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted">暂无服务器</td></tr>
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-muted">暂无服务器</td></tr>
             )}
           </tbody>
         </table>

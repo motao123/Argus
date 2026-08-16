@@ -10,25 +10,23 @@ import (
 
 // Config 服务端配置。
 type Config struct {
-	Listen               string // HTTP 监听地址
-	DBPath               string // SQLite 文件路径
-	JWTSecret            string // JWT 签名密钥（自动生成并持久化）
-	AdminUser            string // 初始管理员用户名
-	AdminPass            string // 初始管理员密码
-	MetricsRetentionDays int
-	TrustedProxies       []string // 可信反向代理（CIDR/IP），用于 ClientIP
+	Listen         string   // HTTP 监听地址
+	DBPath         string   // SQLite 文件路径
+	JWTSecret      string   // JWT 签名密钥（自动生成并持久化）
+	AdminUser      string   // 初始管理员用户名
+	AdminPass      string   // 初始管理员密码
+	TrustedProxies []string // 可信反向代理（CIDR/IP），用于 ClientIP
 }
 
 // Load 从环境变量/默认值加载配置。
 func Load() *Config {
 	c := &Config{
-		Listen:               getenv("ARGUS_LISTEN", "0.0.0.0:8080"),
-		DBPath:               getenv("ARGUS_DB", "./data/argus.db"),
-		JWTSecret:            os.Getenv("ARGUS_JWT_SECRET"),
-		AdminUser:            getenv("ARGUS_ADMIN_USER", "admin"),
-		AdminPass:            getenv("ARGUS_ADMIN_PASS", "argus123"),
-		MetricsRetentionDays: 30,
-		TrustedProxies:       splitCSV(os.Getenv("ARGUS_TRUSTED_PROXIES")),
+		Listen:         getenv("ARGUS_LISTEN", "0.0.0.0:8080"),
+		DBPath:         getenv("ARGUS_DB", "./data/argus.db"),
+		JWTSecret:      os.Getenv("ARGUS_JWT_SECRET"),
+		AdminUser:      getenv("ARGUS_ADMIN_USER", "admin"),
+		AdminPass:      getenv("ARGUS_ADMIN_PASS", "argus123"),
+		TrustedProxies: splitCSV(os.Getenv("ARGUS_TRUSTED_PROXIES")),
 	}
 	if c.JWTSecret == "" {
 		c.JWTSecret = loadOrGenerateJWT(c.DBPath)

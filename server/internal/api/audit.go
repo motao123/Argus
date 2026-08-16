@@ -22,14 +22,6 @@ func (s *Server) auditLog(c *gin.Context, action, detail string) {
 		IP:       currentIP(c),
 	}
 	s.DB.Create(&entry)
-	// 保留最近 5000 条
-	var count int64
-	s.DB.Model(&model.AuditLog{}).Count(&count)
-	if count > 5000 {
-		var oldest model.AuditLog
-		s.DB.Order("id").First(&oldest)
-		s.DB.Delete(&model.AuditLog{}, oldest.ID)
-	}
 }
 
 // listAuditLogs 审计日志（分页，admin）。

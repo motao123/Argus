@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/retention"
 )
 
 // 站点设置键
@@ -59,7 +60,7 @@ func (s *Server) getSettings(c *gin.Context) {
 	}
 	var settings []model.Setting
 	s.DB.Find(&settings)
-	m := map[string]string{}
+	m := retention.SettingDefaults()
 	for _, st := range settings {
 		m[st.Key] = st.Value
 	}
@@ -78,6 +79,10 @@ func (s *Server) saveSettings(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := retention.ValidateSettings(req.Settings); err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	for k, v := range req.Settings {

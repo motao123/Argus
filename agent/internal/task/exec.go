@@ -1,6 +1,7 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"time"
@@ -20,12 +21,14 @@ func (h *Handler) handleExec(params json.RawMessage) (any, *protocol.RPCError) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := commandFor(ctx, p.Command)
-	out, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
 	code := -1
 	if cmd.ProcessState != nil {
 		code = cmd.ProcessState.ExitCode()
 	}
-	result := protocol.ExecResult{Output: string(out), Code: code}
+	result := protocol.ExecResult{Output: stdout.String() + stderr.String(), Stdout: stdout.String(), Stderr: stderr.String(), Code: code}
 	if err != nil {
 		result.Error = err.Error()
 	}

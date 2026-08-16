@@ -24,6 +24,11 @@ type Server struct {
 	CycleDays int        `gorm:"default:0" json:"cycle_days"` // 计费周期（天），0 = 无
 	ExpireAt  *time.Time `json:"expire_at"`
 	AutoRenew bool       `gorm:"default:false" json:"auto_renew"`
+	// 月度流量额度。周期日在服务器时区的本地零点切换；额度 0 表示不限制。
+	TrafficQuotaBytes uint64 `gorm:"default:0" json:"traffic_quota_bytes"`
+	TrafficCycleDay   int    `gorm:"default:1" json:"traffic_cycle_day"`
+	TrafficTimezone   string `gorm:"size:64;default:'UTC'" json:"traffic_timezone"`
+	TrafficAccounting string `gorm:"size:8;default:'sum'" json:"traffic_accounting"` // sum/in/out/max
 	// 标签与展示（借鉴 komari 标签 + nezha 排序/隐藏）
 	Tags      string    `gorm:"size:512;default:''" json:"tags"` // 逗号分隔
 	SortOrder int       `gorm:"default:0" json:"sort_order"`
@@ -125,16 +130,49 @@ type Notification struct {
 
 // Cron 定时任务。
 type Cron struct {
-	ID         int64     `gorm:"primaryKey" json:"id"`
-	OwnerID    int64     `gorm:"index;default:0" json:"owner_id"` // 任务所有者；历史数据回填为管理员
-	Name       string    `gorm:"size:64;not null" json:"name"`
-	Expression string    `gorm:"size:64;not null" json:"expression"` // cron 表达式
-	Command    string    `gorm:"size:1024;not null" json:"command"`
-	ServerIDs  string    `gorm:"size:512;default:''" json:"server_ids"` // 逗号分隔；空 = 全部
-	Enabled    bool      `gorm:"default:true" json:"enabled"`
-	LastResult string    `gorm:"size:2048;default:''" json:"last_result"`
-	LastRunAt  time.Time `json:"last_run_at"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            int64     `gorm:"primaryKey" json:"id"`
+	OwnerID       int64     `gorm:"index;default:0" json:"owner_id"` // 任务所有者；历史数据回填为管理员
+	Name          string    `gorm:"size:64;not null" json:"name"`
+	Expression    string    `gorm:"size:64;not null" json:"expression"` // cron 表达式
+	Command       string    `gorm:"size:1024;not null" json:"command"`
+	ServerIDs     string    `gorm:"size:512;default:''" json:"server_ids"` // 逗号分隔；空 = 全部
+	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	SkipIfRunning bool      `gorm:"default:true" json:"skip_if_running"`
+	LastResult    string    `gorm:"size:2048;default:''" json:"last_result"` // 兼容旧客户端
+	LastRunAt     time.Time `json:"last_run_at"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// TaskRun 一次任务执行。Trigger: scheduled/manual/alert_failure/alert_recovery。
+type TaskRun struct {
+	ID          int64           `gorm:"primaryKey" json:"id"`
+	CronID      int64           `gorm:"index;not null" json:"cron_id"`
+	OwnerID     int64           `gorm:"index;not null" json:"owner_id"`
+	Trigger     string          `gorm:"size:32;not null" json:"trigger"`
+	Status      string          `gorm:"size:24;index;not null" json:"status"`
+	Command     string          `gorm:"size:1024;not null" json:"command"`
+	TargetCount int             `json:"target_count"`
+	StartedAt   *time.Time      `json:"started_at"`
+	FinishedAt  *time.Time      `json:"finished_at"`
+	DurationMS  int64           `json:"duration_ms"`
+	Error       string          `gorm:"size:2048;default:''" json:"error"`
+	CreatedAt   time.Time       `gorm:"index" json:"created_at"`
+	Results     []TaskRunResult `gorm:"foreignKey:RunID" json:"results,omitempty"`
+}
+
+// TaskRunResult 记录一次执行在单个目标上的结果。stdout/stderr 分别限制为 64KiB。
+type TaskRunResult struct {
+	ID         int64  `gorm:"primaryKey" json:"id"`
+	RunID      int64  `gorm:"index;not null" json:"run_id"`
+	ServerID   int64  `gorm:"index;not null" json:"server_id"`
+	ServerName string `gorm:"size:64;default:''" json:"server_name"`
+	Status     string `gorm:"size:24;not null" json:"status"`
+	ExitCode   int    `json:"exit_code"`
+	DurationMS int64  `json:"duration_ms"`
+	Stdout     string `gorm:"type:text" json:"stdout"`
+	Stderr     string `gorm:"type:text" json:"stderr"`
+	Error      string `gorm:"size:2048;default:''" json:"error"`
+	Truncated  bool   `gorm:"default:false" json:"truncated"`
 }
 
 // Metric 降采样指标（granularity: 60=分钟 / 300=5分钟 / 3600=小时）。
@@ -323,6 +361,17 @@ type TrafficBaseline struct {
 	In       uint64 `json:"in"`
 	Out      uint64 `json:"out"`
 	TS       int64  `json:"ts"`
+}
+
+// TrafficQuotaEvent 记录每台服务器每个流量周期已发送的额度阈值事件。
+// 唯一索引保证服务重启或并发检查时，80/90/100 通知在一个周期内各发送一次。
+type TrafficQuotaEvent struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	ServerID   int64     `gorm:"uniqueIndex:idx_traffic_quota_event" json:"server_id"`
+	CycleStart int64     `gorm:"uniqueIndex:idx_traffic_quota_event" json:"cycle_start"`
+	Threshold  int       `gorm:"uniqueIndex:idx_traffic_quota_event" json:"threshold"`
+	UsageBytes uint64    `json:"usage_bytes"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // ServerTransfer 服务器过户（借鉴 nezha server transfer 状态机简化版）。

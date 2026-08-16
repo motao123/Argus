@@ -25,8 +25,7 @@ function CycleTraffic({ serverId }: { serverId: number }) {
     refetchInterval: 60000,
   });
   const points = data?.points ?? [];
-  const totalIn = points.reduce((a, p) => a + p.in, 0);
-  const totalOut = points.reduce((a, p) => a + p.out, 0);
+  const usage = data?.usage;
   const maxV = Math.max(1, ...points.map((p) => p.in + p.out));
   const label = (ts: number) => (period === "day" ? fmtTime(ts) : new Date(ts * 1000).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }));
   return (
@@ -45,10 +44,17 @@ function CycleTraffic({ serverId }: { serverId: number }) {
           ))}
         </div>
       </div>
-      <div className="mb-3 flex gap-4 text-xs text-muted">
-        <span>↓ 累计 {fmtBytes(totalIn)}</span>
-        <span>↑ 累计 {fmtBytes(totalOut)}</span>
-      </div>
+      {usage && (
+        <div className="mb-3 space-y-2 text-xs text-muted">
+          <div>{new Date(usage.cycle_start).toLocaleString("zh-CN")} — {new Date(usage.cycle_end).toLocaleString("zh-CN")} · {usage.timezone}</div>
+          <div className="flex flex-wrap gap-4">
+            <span>↓ {fmtBytes(usage.in_bytes)}</span><span>↑ {fmtBytes(usage.out_bytes)}</span>
+            <span>计费 {fmtBytes(usage.accounted_bytes)}</span>
+            {usage.quota_bytes > 0 && <><span>剩余 {fmtBytes(usage.remaining_bytes)}</span><span>{usage.percentage?.toFixed(1)}%</span></>}
+          </div>
+          {usage.quota_bytes > 0 && <div className="h-2 overflow-hidden rounded-full bg-black/5 dark:bg-white/10"><div className="h-full bg-accent" style={{ width: `${Math.min(100, usage.percentage ?? 0)}%` }} /></div>}
+        </div>
+      )}
       <div className="flex h-24 items-end gap-[2px]">
         {points.map((p: TrafficPoint) => (
           <div key={p.ts} className="group relative flex-1" title={`${label(p.ts)}\n↓ ${fmtBytes(p.in)} ↑ ${fmtBytes(p.out)}`}>

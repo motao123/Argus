@@ -60,6 +60,24 @@ export interface Server {
   sort_order: number;
   hidden: boolean;
   owner_id: number;
+  traffic_quota_bytes: number;
+  traffic_cycle_day: number;
+  traffic_timezone: string;
+  traffic_accounting: "sum" | "in" | "out" | "max";
+  traffic_usage?: TrafficUsage;
+}
+
+export interface TrafficUsage {
+  cycle_start: string;
+  cycle_end: string;
+  timezone: string;
+  accounting: "sum" | "in" | "out" | "max";
+  in_bytes: number;
+  out_bytes: number;
+  accounted_bytes: number;
+  quota_bytes: number;
+  remaining_bytes: number;
+  percentage?: number;
 }
 
 export interface TrafficPoint {
@@ -154,8 +172,37 @@ export interface Cron {
   command: string;
   server_ids: string;
   enabled: boolean;
+  skip_if_running: boolean;
   last_result: string;
   last_run_at: string;
+}
+
+export interface TaskRunResult {
+  id: number;
+  run_id: number;
+  server_id: number;
+  server_name: string;
+  status: string;
+  exit_code: number;
+  duration_ms: number;
+  stdout: string;
+  stderr: string;
+  error: string;
+  truncated: boolean;
+}
+
+export interface TaskRun {
+  id: number;
+  cron_id: number;
+  trigger: string;
+  status: string;
+  target_count: number;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number;
+  error: string;
+  created_at: string;
+  results?: TaskRunResult[];
 }
 
 export interface ServiceItem {
@@ -413,13 +460,13 @@ export const api = {
   },
 
   servers: () => request<{ servers: Server[] }>("/api/v1/servers"),
-  createServer: (s: { name: string; group: string; note: string }) =>
+  createServer: (s: { name: string; group: string; note: string; traffic_quota_bytes?: number; traffic_cycle_day?: number; traffic_timezone?: string; traffic_accounting?: string }) =>
     request<{ server: Server; secret: string }>("/api/v1/servers", { method: "POST", body: JSON.stringify(s) }),
   updateServer: (id: number, s: Partial<Server>) =>
     request<Server>(`/api/v1/servers/${id}`, { method: "PUT", body: JSON.stringify(s) }),
   deleteServer: (id: number) => request(`/api/v1/servers/${id}`, { method: "DELETE" }),
   serverTraffic: (id: number, period: "day" | "month" | "year") =>
-    request<{ period: string; points: TrafficPoint[] }>(`/api/v1/servers/${id}/traffic?period=${period}`),
+    request<{ period: string; points: TrafficPoint[]; usage: TrafficUsage }>(`/api/v1/servers/${id}/traffic?period=${period}`),
   batchDeleteServers: (ids: number[]) =>
     request<{ ok: boolean; deleted: number }>("/api/v1/batch-delete/servers", { method: "POST", body: JSON.stringify({ ids }) }),
   batchMoveServers: (ids: number[], group: string) =>
@@ -551,7 +598,9 @@ export const api = {
       ? request<Cron>(`/api/v1/crons/${c.id}`, { method: "PUT", body: JSON.stringify(c) })
       : request<Cron>("/api/v1/crons", { method: "POST", body: JSON.stringify(c) }),
   deleteCron: (id: number) => request(`/api/v1/crons/${id}`, { method: "DELETE" }),
-  runCron: (id: number) => request<{ result: string }>(`/api/v1/crons/${id}/run`, { method: "POST" }),
+  runCron: (id: number) => request<{ run_id: number }>(`/api/v1/crons/${id}/run`, { method: "POST" }),
+  cronRuns: (id: number) => request<{ runs: TaskRun[] }>(`/api/v1/crons/${id}/runs?limit=20`),
+  cronRun: (cronId: number, runId: number) => request<TaskRun>(`/api/v1/crons/${cronId}/runs/${runId}`),
 };
 
 export function wsUrl(path: string): string {

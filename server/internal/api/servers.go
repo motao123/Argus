@@ -14,6 +14,7 @@ import (
 	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/model"
+	trafficquota "github.com/motao123/Argus/server/internal/traffic"
 )
 
 // authorizeServer verifies scope, ownership and PAT server whitelist for a server resource.
@@ -81,6 +82,7 @@ type serverView struct {
 	Uptime                  uint64                `json:"uptime"`
 	Online                  bool                  `json:"online"`
 	LastSeen                time.Time             `json:"last_seen"`
+	TrafficUsage            *trafficquota.Usage   `json:"traffic_usage,omitempty"`
 }
 
 type hostView struct {
@@ -135,6 +137,9 @@ func (s *Server) listServers(c *gin.Context) {
 			continue // PAT 白名单外服务器不可见
 		}
 		v := serverView{Server: servers[i]}
+		if usage, err := trafficquota.CurrentUsage(s.DB, &servers[i], time.Now()); err == nil {
+			v.TrafficUsage = &usage
+		}
 		if st, ok := snap[servers[i].ID]; ok {
 			v.CPU = st.Last.CPU
 			v.MemUsed = st.Last.MemUsed
@@ -189,15 +194,33 @@ func (s *Server) listServers(c *gin.Context) {
 // createServer 手动创建服务器（返回密钥，用于 Agent 配置）。
 func (s *Server) createServer(c *gin.Context) {
 	var req struct {
-		Name  string `json:"name"`
-		Group string `json:"group"`
-		Note  string `json:"note"`
+		Name              string `json:"name"`
+		Group             string `json:"group"`
+		Note              string `json:"note"`
+		TrafficQuotaBytes uint64 `json:"traffic_quota_bytes"`
+		TrafficCycleDay   int    `json:"traffic_cycle_day"`
+		TrafficTimezone   string `json:"traffic_timezone"`
+		TrafficAccounting string `json:"traffic_accounting"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
-	srv := model.Server{Name: req.Name, Group: req.Group, Note: req.Note, Secret: agent.GenSecret(), OwnerID: principalFromContext(c).UserID}
+	if req.TrafficCycleDay == 0 {
+		req.TrafficCycleDay = 1
+	}
+	if req.TrafficTimezone == "" {
+		req.TrafficTimezone = "UTC"
+	}
+	if req.TrafficAccounting == "" {
+		req.TrafficAccounting = trafficquota.AccountingSum
+	}
+	if err := trafficquota.ValidateConfig(req.TrafficCycleDay, req.TrafficTimezone, req.TrafficAccounting); err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	srv := model.Server{Name: req.Name, Group: req.Group, Note: req.Note, Secret: agent.GenSecret(), OwnerID: principalFromContext(c).UserID,
+		TrafficQuotaBytes: req.TrafficQuotaBytes, TrafficCycleDay: req.TrafficCycleDay, TrafficTimezone: req.TrafficTimezone, TrafficAccounting: req.TrafficAccounting}
 	if err := s.DB.Create(&srv).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -211,16 +234,20 @@ func (s *Server) createServer(c *gin.Context) {
 func (s *Server) updateServer(c *gin.Context) {
 	id := mustID(c)
 	var req struct {
-		Name      *string  `json:"name"`
-		Group     *string  `json:"group"`
-		Note      *string  `json:"note"`
-		Price     *float64 `json:"price"`
-		CycleDays *int     `json:"cycle_days"`
-		ExpireAt  *string  `json:"expire_at"` // RFC3339 或空
-		AutoRenew *bool    `json:"auto_renew"`
-		Tags      *string  `json:"tags"`
-		SortOrder *int     `json:"sort_order"`
-		Hidden    *bool    `json:"hidden"`
+		Name              *string  `json:"name"`
+		Group             *string  `json:"group"`
+		Note              *string  `json:"note"`
+		Price             *float64 `json:"price"`
+		CycleDays         *int     `json:"cycle_days"`
+		ExpireAt          *string  `json:"expire_at"` // RFC3339 或空
+		AutoRenew         *bool    `json:"auto_renew"`
+		Tags              *string  `json:"tags"`
+		SortOrder         *int     `json:"sort_order"`
+		Hidden            *bool    `json:"hidden"`
+		TrafficQuotaBytes *uint64  `json:"traffic_quota_bytes"`
+		TrafficCycleDay   *int     `json:"traffic_cycle_day"`
+		TrafficTimezone   *string  `json:"traffic_timezone"`
+		TrafficAccounting *string  `json:"traffic_accounting"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -263,6 +290,41 @@ func (s *Server) updateServer(c *gin.Context) {
 	}
 	if req.Hidden != nil {
 		updates["hidden"] = *req.Hidden
+	}
+	day, timezone, accounting := srv.TrafficCycleDay, srv.TrafficTimezone, srv.TrafficAccounting
+	if day == 0 {
+		day = 1
+	}
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	if accounting == "" {
+		accounting = trafficquota.AccountingSum
+	}
+	if req.TrafficCycleDay != nil {
+		day = *req.TrafficCycleDay
+	}
+	if req.TrafficTimezone != nil {
+		timezone = *req.TrafficTimezone
+	}
+	if req.TrafficAccounting != nil {
+		accounting = *req.TrafficAccounting
+	}
+	if err := trafficquota.ValidateConfig(day, timezone, accounting); err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.TrafficQuotaBytes != nil {
+		updates["traffic_quota_bytes"] = *req.TrafficQuotaBytes
+	}
+	if req.TrafficCycleDay != nil {
+		updates["traffic_cycle_day"] = day
+	}
+	if req.TrafficTimezone != nil {
+		updates["traffic_timezone"] = timezone
+	}
+	if req.TrafficAccounting != nil {
+		updates["traffic_accounting"] = accounting
 	}
 	if req.ExpireAt != nil {
 		if *req.ExpireAt == "" {

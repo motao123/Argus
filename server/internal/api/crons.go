@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/scheduler"
 )
 
 func (s *Server) listCrons(c *gin.Context) {
@@ -27,11 +28,12 @@ func (s *Server) listCrons(c *gin.Context) {
 }
 
 type cronRequest struct {
-	Name       string `json:"name"`
-	Expression string `json:"expression"`
-	Command    string `json:"command"`
-	ServerIDs  string `json:"server_ids"`
-	Enabled    *bool  `json:"enabled"`
+	Name          string `json:"name"`
+	Expression    string `json:"expression"`
+	Command       string `json:"command"`
+	ServerIDs     string `json:"server_ids"`
+	Enabled       *bool  `json:"enabled"`
+	SkipIfRunning *bool  `json:"skip_if_running"`
 }
 
 func (s *Server) authorizeCronTargets(c *gin.Context, ownerID int64, serverIDs string) bool {
@@ -79,7 +81,11 @@ func (s *Server) createCron(c *gin.Context) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	cr := model.Cron{OwnerID: p.UserID, Name: req.Name, Expression: req.Expression, Command: req.Command, ServerIDs: req.ServerIDs, Enabled: enabled}
+	skipIfRunning := true
+	if req.SkipIfRunning != nil {
+		skipIfRunning = *req.SkipIfRunning
+	}
+	cr := model.Cron{OwnerID: p.UserID, Name: req.Name, Expression: req.Expression, Command: req.Command, ServerIDs: req.ServerIDs, Enabled: enabled, SkipIfRunning: skipIfRunning}
 	if err := s.DB.Create(&cr).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -114,6 +120,9 @@ func (s *Server) updateCron(c *gin.Context) {
 	cr.Name, cr.Expression, cr.Command, cr.ServerIDs = req.Name, req.Expression, req.Command, req.ServerIDs
 	if req.Enabled != nil {
 		cr.Enabled = *req.Enabled
+	}
+	if req.SkipIfRunning != nil {
+		cr.SkipIfRunning = *req.SkipIfRunning
 	}
 	if err := s.DB.Save(&cr).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
@@ -162,7 +171,59 @@ func (s *Server) runCron(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "scheduler not started")
 		return
 	}
-	ok(c, gin.H{"result": s.Scheduler.RunOnce(&cr)})
+	runID, err := s.Scheduler.Enqueue(&cr, scheduler.TriggerManual, nil)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"run_id": runID}})
+}
+
+func (s *Server) listCronRuns(c *gin.Context) {
+	cronID := mustID(c)
+	var cr model.Cron
+	if err := s.DB.First(&cr, cronID).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.canManage(&cr.OwnerID, c) {
+		fail(c, http.StatusForbidden, "not your cron")
+		return
+	}
+	offset, limit := pagination(c)
+	q := s.DB.Model(&model.TaskRun{}).Where("cron_id = ? AND owner_id = ?", cr.ID, cr.OwnerID)
+	var total int64
+	q.Count(&total)
+	var runs []model.TaskRun
+	if err := q.Order("id DESC").Offset(offset).Limit(limit).Find(&runs).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	okPage(c, gin.H{"runs": runs}, total, offset, limit)
+}
+
+func (s *Server) getCronRun(c *gin.Context) {
+	cronID := mustID(c)
+	runID, err := strconv.ParseInt(c.Param("runId"), 10, 64)
+	if err != nil || runID <= 0 {
+		fail(c, http.StatusBadRequest, "invalid run id")
+		return
+	}
+	var cr model.Cron
+	if err := s.DB.First(&cr, cronID).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.canManage(&cr.OwnerID, c) {
+		fail(c, http.StatusForbidden, "not your cron")
+		return
+	}
+	var run model.TaskRun
+	if err := s.DB.Preload("Results").Where("id = ? AND cron_id = ? AND owner_id = ?", runID, cr.ID, cr.OwnerID).First(&run).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	ok(c, run)
 }
 
 func parseCronServerIDs(value string) ([]int64, bool) {

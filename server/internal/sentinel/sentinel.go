@@ -228,9 +228,4 @@ func (s *Sentinel) record(serviceID int64, r protocol.ServiceCheckResult) {
 	s.db.Create(&h)
 }
 
-// 保留 30 天
-func (s *Sentinel) Cleanup() {
-	s.db.Where("ts < ?", time.Now().Add(-30*24*time.Hour).Unix()).Delete(&model.ServiceHistory{})
-}
-
 var _ = log.Printf

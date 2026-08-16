@@ -40,7 +40,7 @@ func newAuthzEnv(t *testing.T) *authzTestEnv {
 	if err := gdb.AutoMigrate(
 		&model.User{}, &model.Server{}, &model.Service{}, &model.ServiceHistory{},
 		&model.APIToken{}, &model.Setting{}, &model.DDNSProfile{}, &model.NAT{}, &model.Metric{},
-		&model.AuditLog{}, &model.ServerTransfer{}, &model.Notification{}, &model.Alert{}, &model.Cron{},
+		&model.AuditLog{}, &model.ServerTransfer{}, &model.Notification{}, &model.Alert{}, &model.Cron{}, &model.TaskRun{}, &model.TaskRunResult{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +152,8 @@ func (e *authzTestEnv) do(t *testing.T, method, path string, token string, body 
 	authed.PUT("/crons/:id", requireScope(ScopeCronWrite), e.srv.updateCron)
 	authed.DELETE("/crons/:id", requireScope(ScopeCronDelete), e.srv.deleteCron)
 	authed.POST("/crons/:id/run", requireScope(ScopeCronWrite), e.srv.runCron)
+	authed.GET("/crons/:id/runs", requireScope(ScopeCronRead), e.srv.listCronRuns)
+	authed.GET("/crons/:id/runs/:runId", requireScope(ScopeCronRead), e.srv.getCronRun)
 
 	r.ServeHTTP(w, req)
 	return w
@@ -257,6 +259,22 @@ func TestCronCrossTenant(t *testing.T) {
 	w = e.do(t, http.MethodPost, "/crons/"+itoa(cr.ID)+"/run", bobToken, "")
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("bob run alice cron: got %d want 403", w.Code)
+	}
+	aliceRun := model.TaskRun{CronID: cr.ID, OwnerID: e.alice.ID, Trigger: "manual", Status: "success", Command: cr.Command}
+	if err := e.srv.DB.Create(&aliceRun).Error; err != nil {
+		t.Fatal(err)
+	}
+	w = e.do(t, http.MethodGet, "/crons/"+itoa(cr.ID)+"/runs", bobToken, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("bob list alice runs: got %d want 403", w.Code)
+	}
+	w = e.do(t, http.MethodGet, "/crons/"+itoa(cr.ID)+"/runs/"+itoa(aliceRun.ID), bobToken, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("bob detail alice run: got %d want 403", w.Code)
+	}
+	w = e.do(t, http.MethodGet, "/crons/"+itoa(cr.ID)+"/runs", aliceToken, "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"trigger":"manual"`) {
+		t.Fatalf("alice cannot list own runs: %d %s", w.Code, w.Body.String())
 	}
 
 	adminBody := `{"name":"admin-cron","expression":"* * * * *","command":"id","server_ids":"` + itoa(e.bobS.ID) + `"}`

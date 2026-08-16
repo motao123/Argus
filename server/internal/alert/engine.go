@@ -11,18 +11,20 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/notifier"
 	"github.com/motao123/Argus/server/internal/store"
+	trafficquota "github.com/motao123/Argus/server/internal/traffic"
 )
 
 // Engine 报警引擎。
 type Engine struct {
 	db    *gorm.DB
 	store *store.Hub
-	// Trigger 联动任务执行器（由 main 注入 scheduler.RunOnce 封装）。
-	Trigger func(cron *model.Cron, serverID int64)
+	// Trigger 联动任务执行器（kind 为 triggered/recovered）。
+	Trigger func(cron *model.Cron, serverID int64, kind string)
 
 	mu    sync.Mutex
 	state map[string]*violation // key: alertID:serverID
@@ -61,6 +63,7 @@ func (e *Engine) Run() {
 			return
 		case <-ticker.C:
 			e.checkOnce()
+			e.checkTrafficQuotas(time.Now())
 		}
 	}
 }
@@ -193,36 +196,69 @@ func (e *Engine) metricValue(a *model.Alert, st store.State) (float64, bool) {
 	case "load1":
 		return st.Last.Load1, true
 	case "traffic_in_cycle":
-		// 当前自然月入向流量（字节），借鉴 komari 周期流量告警
-		used, ok := e.cycleTraffic(st.Server.ID, true)
+		used, _, ok := e.cycleTraffic(st.Server)
 		return float64(used), ok
 	case "traffic_out_cycle":
-		used, ok := e.cycleTraffic(st.Server.ID, false)
+		_, used, ok := e.cycleTraffic(st.Server)
 		return float64(used), ok
 	default:
 		return 0, false
 	}
 }
 
-// cycleTraffic 当前自然月累计入/出流量（字节）。
-func (e *Engine) cycleTraffic(serverID int64, in bool) (uint64, bool) {
+// cycleTraffic uses the same configured cycle as quota accounting and the usage API.
+func (e *Engine) cycleTraffic(server *model.Server) (uint64, uint64, bool) {
 	if e.db == nil {
-		return 0, false
+		return 0, 0, false
 	}
-	now := time.Now()
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Unix()
-	col := "`out`"
-	if in {
-		col = "`in`"
+	usage, err := trafficquota.CurrentUsage(e.db, server, time.Now())
+	if err != nil {
+		return 0, 0, false
 	}
-	var sum struct{ V uint64 }
-	if err := e.db.Model(&model.Transfer{}).
-		Select("COALESCE(SUM("+col+"),0) as v").
-		Where("server_id = ? AND ts >= ?", serverID, monthStart).
-		Scan(&sum).Error; err != nil {
-		return 0, false
+	return usage.InBytes, usage.OutBytes, true
+}
+
+// checkTrafficQuotas persists threshold events before notifying. The unique event key
+// makes each 80/90/100 threshold notification idempotent within one cycle.
+func (e *Engine) checkTrafficQuotas(now time.Time) {
+	if e.db == nil {
+		return
 	}
-	return sum.V, true
+	var servers []model.Server
+	if err := e.db.Where("traffic_quota_bytes > 0").Find(&servers).Error; err != nil {
+		return
+	}
+	for i := range servers {
+		usage, err := trafficquota.CurrentUsage(e.db, &servers[i], now)
+		if err != nil || usage.Percentage == nil {
+			continue
+		}
+		for _, threshold := range []int{80, 90, 100} {
+			if *usage.Percentage < float64(threshold) {
+				continue
+			}
+			event := model.TrafficQuotaEvent{ServerID: servers[i].ID, CycleStart: usage.CycleStart.Unix(), Threshold: threshold, UsageBytes: usage.AccountedBytes}
+			result := e.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&event)
+			if result.Error != nil || result.RowsAffected == 0 {
+				continue // already sent in this cycle, or persistence failed
+			}
+			e.notifyTrafficQuota(&servers[i], usage, threshold)
+		}
+	}
+}
+
+func (e *Engine) notifyTrafficQuota(server *model.Server, usage trafficquota.Usage, threshold int) {
+	var report model.TrafficReport
+	if err := e.db.First(&report).Error; err != nil || report.WebhookID <= 0 {
+		return
+	}
+	var n model.Notification
+	if err := e.db.First(&n, report.WebhookID).Error; err != nil {
+		return
+	}
+	title := fmt.Sprintf("[Argus] %s 流量额度 %d%%", server.Name, threshold)
+	content := fmt.Sprintf("%s 当前周期 %s 至 %s，已计费 %d / %d bytes（%.2f%%）", server.Name, usage.CycleStart.Format(time.RFC3339), usage.CycleEnd.Format(time.RFC3339), usage.AccountedBytes, usage.QuotaBytes, *usage.Percentage)
+	go notifier.Send(&n, title, content)
 }
 
 // inRange 判定指标是否落在触发区间（低于下限或高于上限即触发）。
@@ -252,7 +288,7 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 			if targets := alertServerIDs(cron.ServerIDs); targets != nil && !targets[st.Server.ID] {
 				return
 			}
-			go e.Trigger(&cron, st.Server.ID)
+			go e.Trigger(&cron, st.Server.ID, kind)
 		}
 	}
 	if !a.Notify {

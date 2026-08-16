@@ -37,7 +37,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 
 	if err := gdb.AutoMigrate(
 		&model.Server{}, &model.User{}, &model.Alert{},
-		&model.Notification{}, &model.Cron{}, &model.Metric{},
+		&model.Notification{}, &model.Cron{}, &model.TaskRun{}, &model.TaskRunResult{}, &model.Metric{},
 		&model.APIToken{},
 		&model.Service{}, &model.ServiceHistory{},
 		&model.DDNSProfile{},
@@ -48,6 +48,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.NotificationGroup{},
 		&model.Transfer{},
 		&model.TrafficBaseline{},
+		&model.TrafficQuotaEvent{},
 		&model.ServerTransfer{},
 		&model.AuditLog{},
 		&model.Clipboard{},

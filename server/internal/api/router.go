@@ -153,6 +153,8 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/crons/:id", requireScope(ScopeCronWrite), s.updateCron)
 			authed.DELETE("/crons/:id", requireScope(ScopeCronDelete), s.deleteCron)
 			authed.POST("/crons/:id/run", requireScope(ScopeCronWrite), s.runCron)
+			authed.GET("/crons/:id/runs", requireScope(ScopeCronRead), s.listCronRuns)
+			authed.GET("/crons/:id/runs/:runId", requireScope(ScopeCronRead), s.getCronRun)
 
 			// 服务监控（管理）
 			authed.POST("/services", requireScope(ScopeServiceWrite), s.createService)

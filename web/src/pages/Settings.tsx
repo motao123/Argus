@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { api } from "../lib/api";
 
-// 站点设置：站点名/描述/favicon、私有站点（force_auth）、终端外观（借鉴 komari xtermjs 设置 + nezha force_auth）
-const fieldMeta: { key: string; label: string; type: "text" | "number" | "select" | "textarea"; help?: string; options?: { v: string; label: string }[] }[] = [
+// 全局设置：站点、终端外观与后台数据保留策略。
+const fieldMeta: { key: string; label: string; type: "text" | "number" | "select" | "textarea"; defaultValue?: string; min?: number; max?: number; section?: string; help?: string; options?: { v: string; label: string }[] }[] = [
   { key: "site_name", label: "站点名称", type: "text" },
   { key: "site_desc", label: "站点描述", type: "text" },
   { key: "favicon", label: "Favicon URL", type: "text" },
@@ -14,6 +14,14 @@ const fieldMeta: { key: string; label: string; type: "text" | "number" | "select
   { key: "custom_css", label: "自定义 CSS", type: "textarea", help: "注入所有页面 <head>，可用于白标定制" },
   { key: "custom_js", label: "自定义 JS", type: "textarea", help: "注入所有页面 </body> 前" },
   { key: "custom_footer", label: "前台页脚 HTML", type: "textarea", help: "注入前台 Powered by 之前" },
+  { key: "retention_metric_1m_days", label: "指标 1 分钟数据", type: "number", defaultValue: "1", min: 1, max: 30, section: "数据保留（天）" },
+  { key: "retention_metric_5m_days", label: "指标 5 分钟数据", type: "number", defaultValue: "7", min: 1, max: 365, section: "数据保留（天）" },
+  { key: "retention_metric_1h_days", label: "指标 1 小时数据", type: "number", defaultValue: "30", min: 1, max: 3650, section: "数据保留（天）" },
+  { key: "retention_service_history_days", label: "服务监控历史", type: "number", defaultValue: "30", min: 1, max: 3650, section: "数据保留（天）" },
+  { key: "retention_transfer_days", label: "流量历史", type: "number", defaultValue: "365", min: 1, max: 3650, section: "数据保留（天）" },
+  { key: "retention_task_run_days", label: "任务运行记录", type: "number", defaultValue: "30", min: 1, max: 3650, section: "数据保留（天）" },
+  { key: "retention_audit_days", label: "审计日志", type: "number", defaultValue: "365", min: 1, max: 3650, section: "数据保留（天）", help: "同时受下方最大条数限制" },
+  { key: "retention_audit_max_rows", label: "审计日志最大条数", type: "number", defaultValue: "5000", min: 100, max: 1000000, section: "数据保留（天）", help: "兼容现有默认上限 5000 条" },
 ];
 
 export default function Settings() {
@@ -26,7 +34,7 @@ export default function Settings() {
   useEffect(() => {
     if (Object.keys(form).length === 0) {
       const init: Record<string, string> = {};
-      for (const f of fieldMeta) init[f.key] = current[f.key] ?? (f.type === "number" ? "13" : f.type === "select" ? f.options?.[0].v ?? "" : "");
+      for (const f of fieldMeta) init[f.key] = current[f.key] ?? f.defaultValue ?? (f.type === "number" ? "13" : f.type === "select" ? f.options?.[0].v ?? "" : "");
       setForm(init);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -48,8 +56,15 @@ export default function Settings() {
 
       <div className="max-w-xl rounded-xl border border-border bg-panel p-5">
         <div className="space-y-4">
-          {fieldMeta.map((f) => (
-            <label key={f.key} className="block">
+          {fieldMeta.map((f, index) => (
+            <Fragment key={f.key}>
+              {f.section && f.section !== fieldMeta[index - 1]?.section && (
+                <div className="border-t border-border pt-4">
+                  <h2 className="text-base font-semibold">{f.section}</h2>
+                  <p className="mt-1 text-xs text-muted">保存后由后台清理任务生效，不会在本次请求中删除数据，也不会自动 VACUUM。</p>
+                </div>
+              )}
+            <label className="block">
               <span className="mb-1 block text-sm font-medium">{f.label}</span>
               {f.type === "textarea" ? (
                 <textarea
@@ -73,6 +88,8 @@ export default function Settings() {
               ) : (
                 <input
                   type={f.type === "number" ? "number" : "text"}
+                  min={f.min}
+                  max={f.max}
                   value={form[f.key] ?? ""}
                   onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
                   className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
@@ -80,6 +97,7 @@ export default function Settings() {
               )}
               {f.help && <span className="mt-1 block text-xs text-muted">{f.help}</span>}
             </label>
+            </Fragment>
           ))}
         </div>
         <div className="mt-5 flex items-center gap-3">

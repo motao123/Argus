@@ -29,6 +29,7 @@ import (
 	"github.com/motao123/Argus/server/internal/notifier"
 	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/plugin"
+	"github.com/motao123/Argus/server/internal/retention"
 	"github.com/motao123/Argus/server/internal/scheduler"
 	"github.com/motao123/Argus/server/internal/sentinel"
 	"github.com/motao123/Argus/server/internal/store"
@@ -101,18 +102,20 @@ func main() {
 	defer sched.Stop()
 
 	engine := alert.NewEngine(gdb, st)
-	engine.Trigger = func(cron *model.Cron, serverID int64) {
-		// 只对目标服务器执行（借鉴 nezha 触发任务按服务器分发）
-		old := cron.ServerIDs
-		cron.ServerIDs = fmt.Sprintf("%d", serverID)
-		sched.RunOnce(cron)
-		cron.ServerIDs = old
+	engine.Trigger = func(cron *model.Cron, serverID int64, kind string) {
+		// 只对目标服务器执行，统一进入持久化任务历史。
+		trigger := scheduler.TriggerAlertFailure
+		if kind == "recovered" {
+			trigger = scheduler.TriggerAlertRecovery
+		}
+		_, _ = sched.Enqueue(cron, trigger, &serverID)
 	}
 	go engine.Run()
 	defer engine.Stop()
 
-	// 指标 rollup 聚合与保留清理（借鉴 komari 分层 rollup）
+	// 指标 rollup 聚合与全局保留策略清理。
 	rollup := metric.New(gdb)
+	cleaner := retention.NewCleaner(gdb)
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -125,7 +128,7 @@ func main() {
 		defer ticker.Stop()
 		for range ticker.C {
 			rollup.AggregateHour()
-			rollup.Cleanup()
+			cleaner.Run()
 		}
 	}()
 
@@ -179,8 +182,11 @@ func main() {
 		if gdb.First(&server, svc.ServerID).Error != nil || server.OwnerID != svc.OwnerID {
 			return
 		}
-		cron.ServerIDs = fmt.Sprintf("%d", svc.ServerID)
-		go sched.RunOnce(&cron)
+		trigger := scheduler.TriggerAlertFailure
+		if up {
+			trigger = scheduler.TriggerAlertRecovery
+		}
+		_, _ = sched.Enqueue(&cron, trigger, &svc.ServerID)
 	}
 	go svcSentinel.Run(agents.Peers)
 	defer svcSentinel.Stop()

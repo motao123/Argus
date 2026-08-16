@@ -217,7 +217,9 @@ type ExecParams struct {
 
 // ExecResult 远程命令执行结果。
 type ExecResult struct {
-	Output string `json:"output"`
+	Output string `json:"output"` // 兼容旧 Agent 的合并输出
+	Stdout string `json:"stdout,omitempty"`
+	Stderr string `json:"stderr,omitempty"`
 	Code   int    `json:"code"`
 	Error  string `json:"error,omitempty"`
 }

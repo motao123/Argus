@@ -2,7 +2,6 @@
 package metric
 
 import (
-	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -130,15 +129,4 @@ func (r *Rollup) AggregateHour() {
 	r.aggregate(Gran5m, GranHour, time.Now().Add(-7*24*time.Hour))
 }
 
-// Cleanup 保留策略：分钟 24h / 5 分钟 7d / 小时 30d。
-func (r *Rollup) Cleanup() {
-	now := time.Now()
-	r.db.Where("granularity = ? AND ts < ?", GranMinute, now.Add(-24*time.Hour).Unix()).
-		Delete(&model.Metric{})
-	r.db.Where("granularity = ? AND ts < ?", Gran5m, now.Add(-7*24*time.Hour).Unix()).
-		Delete(&model.Metric{})
-	r.db.Where("granularity = ? AND ts < ?", GranHour, now.Add(-30*24*time.Hour).Unix()).
-		Delete(&model.Metric{})
-	r.db.Where("ts < ?", now.Add(-30*24*time.Hour).Unix()).Delete(&model.ServiceHistory{})
-	log.Printf("metric rollup cleanup done")
-}
+// Cleanup was moved to retention.Cleaner so all retained data shares one policy.
