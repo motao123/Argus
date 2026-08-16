@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Search, Server as ServerIcon, Wifi, WifiOff, ArrowUpDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import ServerCard from "../components/ServerCard";
+import WorldMap from "../components/WorldMap";
 import { useServers } from "../context/servers";
 import { api } from "../lib/api";
 import { fmtBytes } from "../lib/format";
@@ -116,6 +117,7 @@ export default function PublicOverview() {
 
   return (
     <div>
+      <WorldMap servers={servers} />
       {wsStatus === "reconnecting" && (
         <div className="mb-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
           实时连接中断，正在重连…

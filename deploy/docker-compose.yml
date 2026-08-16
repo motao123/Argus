@@ -10,6 +10,11 @@ services:
       ARGUS_ADMIN_USER: ${ARGUS_ADMIN_USER:-admin}
       # 生产环境必须在 .env 中设置强密码，不使用仓库默认值。
       ARGUS_ADMIN_PASS: ${ARGUS_ADMIN_PASS:?请在 deploy/.env 中设置 ARGUS_ADMIN_PASS}
+      # 下列均为可选项；空 GeoIP/JWT/可信代理沿用服务端现有默认行为。
+      ARGUS_GEOIP_ENDPOINT: ${ARGUS_GEOIP_ENDPOINT:-}
+      ARGUS_NAT_LISTEN: ${ARGUS_NAT_LISTEN:-0.0.0.0:9090}
+      ARGUS_TRUSTED_PROXIES: ${ARGUS_TRUSTED_PROXIES:-}
+      ARGUS_JWT_SECRET: ${ARGUS_JWT_SECRET:-}
     volumes:
       - argus-data:/app/data
     ports:

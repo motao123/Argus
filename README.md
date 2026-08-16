@@ -58,6 +58,17 @@ cd deploy && docker compose up -d
 docker build -f deploy/Dockerfile -t argus:local .
 ```
 
+常用部署变量（Compose 可在 `deploy/.env` 中设置，systemd 可在 `/etc/argus/argus.env` 中设置）：
+
+| 变量 | 默认行为 | 说明 |
+|---|---|---|
+| `ARGUS_GEOIP_ENDPOINT` | 空（不查询 GeoIP） | 可选 HTTP GeoIP 基础 URL；服务端请求 `<endpoint>/<ip>`，响应需包含 `country_code` 或 `countryCode`。地图依赖 GeoIP 国家码；未配置 provider 或查询无结果时，地图会安全隐藏，而非显示错误数据。 |
+| `ARGUS_NAT_LISTEN` | `:9090` | NAT Host 反向代理监听地址；Compose 中保持为 `0.0.0.0:9090`。NAT 仅提供基于 HTTP `Host` 的简化 TCP 隧道，不含 TLS 终止、租约、配额或能力协商。 |
+| `ARGUS_TRUSTED_PROXIES` | 空（不信任代理头） | 逗号分隔的代理 IP/CIDR。仅在可信反向代理后部署时填写，否则不得采信客户端传入的转发头。 |
+| `ARGUS_JWT_SECRET` | 自动生成并持久化到数据库旁的 `.jwt` 文件 | 可选固定 JWT 签名密钥；生产环境设置时请使用高强度随机值，并在多实例间保持一致。不要提交真实密钥。 |
+
+Agent 必须连接 `/ws/agent`，例如 `wss://your-domain/ws/agent`。
+
 ### 方式二：本地构建
 
 ```bash
@@ -72,7 +83,7 @@ cd ../server && go build -o argus-server ./cmd/argus-server
 
 # 4. 部署 Agent（在任意被监控机器上）
 cd ../agent && go build -o argus-agent ./cmd/argus-agent
-./argus-agent -s ws://server-ip:8080/ws -k <server密钥>
+./argus-agent -s ws://server-ip:8080/ws/agent -k <server密钥>
 ```
 
 ### 方式三：前端演示（无需后端）

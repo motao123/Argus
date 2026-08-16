@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Search, Server as ServerIcon, Wifi, WifiOff, ArrowUpDown } from "lucide-react";
 import ServerCard from "../components/ServerCard";
+import WorldMap from "../components/WorldMap";
 import { useServers } from "../context/servers";
 import { fmtBytes } from "../lib/format";
 
@@ -82,6 +83,7 @@ export default function Overview() {
 
   return (
     <div>
+      <WorldMap servers={servers} />
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">服务器总览</h1>

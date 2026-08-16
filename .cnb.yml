@@ -4,12 +4,13 @@ main:
       services:
         - docker
       stages:
-        - name: Go test and vet
+        - name: Go format, build, test and vet
           image: golang:1.26
           script:
-            - cd server
-            - go test ./...
-            - go vet ./...
+            - test -z "$(gofmt -l server agent protocol)"
+            - cd server && go build ./... && go test ./... && go vet ./...
+            - cd ../agent && go build ./... && go test ./... && go vet ./...
+            - cd ../protocol && go build ./... && go test ./... && go vet ./...
         - name: Web build
           image: node:22
           script:

@@ -20,20 +20,20 @@
 | GPU/温度采集 | nezha | State_SensorTemperature/GPU 字段 | agent hw.go 已采 GPU（nvidia-smi），温度待补 | ✅ GPU / 📋 温度 |
 | Ping/TCP/HTTP 服务监控 | nezha | ServiceSentinel + 探测任务分发 | **核心差异化功能** | ✅ 已实现 |
 | Ping 监控 | komari | PingTask + PingRecord（icmp/tcp/http） | 与 nezha 服务监控合并（第4项 服务统计聚合 借鉴 PingRecord 延迟/丢包统计） | ✅ 已融合 |
-| 流量周期统计 | nezha | Transfer 模型 + cycle_transfer_stats | 已有流量定时报告（B2），周期统计卡待补 | ⚠️ 部分（报告已实现） |
+| 流量周期统计 | nezha | Transfer 模型 + cycle_transfer_stats | 30s 流量台账落库，详情页提供 24 小时/30 天/12 月周期图表，并接入周期流量告警 | ✅ 已实现 |
 
 ### 1.2 任务与自动化
 
 | 资产 | 来源 | 用途 | 改造要点 | Argus 状态 |
 |---|---|---|---|---|
 | 定时任务调度 | komari/nezha | robfig cron 下发命令 | ✅ 已实现 | ✅ 已实现 |
-| 触发任务（报警联动） | nezha | 报警失败/恢复时执行命令 | 状态机扩展 | 📋 待实现 |
+| 触发任务（报警联动） | nezha | 报警失败/恢复时执行命令 | 报警规则可关联定时任务，触发时向任务目标下发命令 | ✅ 已实现 |
 | 手动触发防重放 | nezha | 一次性授权令牌 consume 语义 | cron run 已做登录/PAT 授权 | ✅ 已实现 |
 | 批量命令执行 | komari | admin:exec 批量下发 | 待实现 | 📋 待实现 |
 | 任务结果查询 | komari | getTaskResultsByTaskId | run 接口即时返回结果，历史未存 | ⚠️ 部分 |
-| 网页终端 | komari/nezha | WS 隧道 + IOStream 中继 | 单连接复用（第7项 xterm.js 外观设置） | ✅ 已实现 |
+| 网页终端 | komari/nezha | WS 隧道 + IOStream 中继 | 单连接复用；当前 Agent 使用 stdin/stdout pipe 启动 shell，并非 PTY，交互式 TTY、窗口尺寸和全屏程序支持有限 | ⚠️ 基础可用（非 PTY） |
 | 文件管理器 | nezha | FsList/FsRead/FsWrite/FsDelete 任务 | **核心差异化** | ✅ 已实现 |
-| Agent 升级下发 | nezha | TaskTypeUpgrade | 待实现 | 📋 待实现 |
+| Agent 升级下发 | nezha | TaskTypeUpgrade | 管理页支持批量选择 Agent、制品 URL、版本与 SHA-256，下发后展示逐机结果；任务记录仅保存在当前进程内存 | ⚠️ 基础可用（记录不持久化） |
 | MCP 自动化接入 | nezha | /mcp JSON-RPC 端点 + server.exec/fs.* 工具 | **独特资产**，供 AI 操作服务器 | ✅ 已实现 |
 
 ### 1.3 告警与通知
@@ -41,7 +41,7 @@
 | 资产 | 来源 | 用途 | 改造要点 | Argus 状态 |
 |---|---|---|---|---|
 | 阈值+时长状态机 | nezha | AlertSentinel 规则引擎 | ✅ 已实现基础版 | ✅ 已实现 |
-| 周期流量告警 | nezha | transfer_*_cycle 规则类型 | 依赖流量统计 | 📋 待实现 |
+| 周期流量告警 | nezha | transfer_*_cycle 规则类型 | `traffic_in_cycle` / `traffic_out_cycle` 已接入流量台账和规则管理 UI | ✅ 已实现 |
 | 负载达标比例告警 | komari | LoadNotification 采样判定 | 第2项 已实现 | ✅ 已实现 |
 | 离线/上线通知 | komari | notifier/offline（连接 ID 防抖） | A6 已实现（offline-notify 配置） | ✅ 已实现 |
 | 通知渠道 | komari | bark/telegram/webhook/email/serverchan/javascript | 第3项 JS 渠道已补，共 6 渠道 | ✅ 已实现 |
@@ -56,7 +56,7 @@
 | 服务器 CRUD + 分组 | komari/nezha | 基础管理 | A4 分组管理已实现 | ✅ 已实现 |
 | 服务器排序/搜索/过滤 | komari | orderClients + 分组/标签 | B6 标签/手动排序 + 前端 9 种排序 | ✅ 已实现 |
 | 批量操作 | nezha | batch-delete/batch-move | A5 已实现 | ✅ 已实现 |
-| 服务器过户转移 | nezha | transfer 状态机（跨账号） | 尚未实现；原 POST 路由已移除（曾误绑流量查询） | 📋 待实现 |
+| 服务器过户转移 | nezha | transfer 状态机（跨账号） | 可发起/取消并生成目标用户新密钥；Agent 使用新密钥重连后完成验证 | ✅ 已实现 |
 | 服务器计费信息 | komari | 价格/周期/自动续费字段 | B2 到期提醒 + model 字段（price/cycle_days/expire_at/auto_renew） | ✅ 已实现 |
 | 服务器隐藏（guest 不可见） | nezha | HideForGuest | B6 hidden 字段 + 前端联动 | ✅ 已实现 |
 | PAT 细粒度权限 | nezha | `nezha:{resource}:{verb}` + 白名单 | `argus:{resource}:{verb}` + server_ids 白名单 + 吊销 | ✅ 已实现 |
@@ -69,10 +69,10 @@
 |---|---|---|---|---|
 | OAuth2 登录 | komari/nezha | GitHub/Gitee/QQ/OIDC | 第5项 已实现（多 provider 可配置） | ✅ 已实现 |
 | TOTP 2FA | komari | 敏感操作二次验证 | twofa.go（setup/qrcode/enable/disable） | ✅ 已实现 |
-| GeoIP（mmdb 内嵌） | nezha | pkg/geoip 国家归属 | 默认空 provider；仅可选在线 HTTP provider，无内嵌 mmdb | ⚠️ 部分（默认不查询） |
+| GeoIP（HTTP provider） | nezha | 服务器国家归属 | 通过 `ARGUS_GEOIP_ENDPOINT` 配置在线 HTTP provider，无内嵌 mmdb；默认不查询。地图依赖国家码，无 provider 或无有效定位点时安全隐藏 | ⚠️ 可选能力（默认关闭） |
 | GeoIP 多 provider | komari | mmdb/ipinfo/ipapi/geojs 可插拔 | 待实现 | 📋 待实现 |
 | DDNS | nezha | libdns cloudflare/tencentcloud/HE/webhook | 仅 webhook/cloudflare；已补 server 归属校验 | ⚠️ 基础可用 |
-| NAT 内网穿透 | nezha | 域名→服务器映射 + IOStream 隧道 | 简化 Host 代理，无租约/配额/能力协商；已补 server 归属校验 | ⚠️ 基础可用 |
+| NAT 内网穿透 | nezha | 域名→服务器映射 + IOStream 隧道 | 简化的 HTTP Host 反向代理/TCP 隧道；无 TLS 终止、租约、配额或能力协商，且需单独暴露 `ARGUS_NAT_LISTEN`；已补 server 归属校验 | ⚠️ 基础可用（有限制） |
 
 ### 1.6 运维与系统能力
 
@@ -82,10 +82,10 @@
 | 数据迁移向导 | komari | legacy 库迁移 + 指标库恢复 | 待实现 | 📋 待实现 |
 | 运维子命令 | komari | chpasswd/disable-2fa/permitLogin | 仅 chpasswd / disable-2fa；无 permit-login 恢复流程 | ⚠️ 部分 |
 | pprof 性能剖析 | komari/nezha | /api/admin/pprof | 第6项 已实现（/debug/pprof + 鉴权中间件） | ✅ 已实现 |
-| 审计日志 | komari/nezha | Log/MCPAuditLog | 仅部分 handler 记录，无前端页面 | ⚠️ 部分 |
+| 审计日志 | komari/nezha | Log/MCPAuditLog | 后端分页查询与管理页均已实现；审计覆盖关键管理操作，但不是所有读取与内部任务 | ⚠️ 基础可用（非全量） |
 | 安装向导 | komari | 首启 install guide | 自动建 admin（ARGUS_ADMIN_USER/PASS） | ⚠️ 简化版 |
 | 主题系统 | komari | 主题包（zip+manifest）+ 主题市场 | 内置 light/dark + 自定义代码注入点 | ⚠️ 内置主题 |
-| 插件系统 | komari | goja 沙箱 JS 插件 + server 模块钩子 | 简化沙箱：无权限审批/路由/hook/页面/持久启停；fetch 任意 URL（SSRF 风险，已限 admin） | ⚠️ 演示级，待安全化 |
+| 插件系统 | komari | goja 沙箱 JS 插件 + server 模块钩子 | 已有本地市场、安装/删除、持久启停、权限审批、手动/cron 执行与日志 UI；仍无通用路由/hook/页面扩展，沙箱不是强隔离边界，仅适合受信插件 | ⚠️ 基础可用（受信插件） |
 | 分片上传 | komari | init/chunk/merge/cancel 通用上传 | 仅备份恢复 append 模式，无会话/顺序/哈希校验 | ⚠️ 简化，待重做 |
 | 私有站点模式 | komari | private_site 强制登录 | 第1项 force_auth（本次新增设置页入口） | ✅ 已实现 |
 | 自定义代码注入 | dash-v2/nezha | InjectContext 白标定制 | custom_code 设置项（komari 样式 head/body 注入） | ⚠️ 设置键待补全 |
@@ -100,13 +100,13 @@
 | 实时 WS 数据流 | dash-v2 | websocket-provider + 重连退避 | ✅ 已实现 |
 | 实时+历史图表拼接 | dash-v2 | use-chart-history + ServerDetailChart | B3 已实现 | ✅ 已实现 |
 | 多周期图表 | dash-v2 | realtime/1d/7d/30d + 降采样 | ✅ 已实现 1h/24h/7d |
-| 全球地图 | dash-v2 | GlobalMap + d3-geo + GeoJSON 内嵌 | ✅ 已实现（v0.21.0） |
+| 全球地图 | dash-v2 | GlobalMap + ECharts + GeoJSON | ✅ 已实现；依赖 GeoIP `country_code`，无 provider/无定位结果时组件安全隐藏 |
 | 服务可用率条 | dash-v2 | ServiceTracker 30 天色块 | B3 已实现（真实数据） | ✅ 已实现 |
-| 周期流量统计卡 | dash-v2 | CycleTransferStats | 📋 待实现 |
+| 周期流量统计卡 | dash-v2 | CycleTransferStats | ✅ 已实现（服务器详情 24 小时/30 天/12 月图表） |
 | 命令面板 Cmd+K | dash-v2 | DashCommand 搜索跳转 + 主题切换 | ✅ 已实现（CommandPalette） |
 | 实时时钟 | dash-v2 | Header AnimatedCount | ✅ 已实现 |
 | 登录用户检测轮询 | dash-v2 | fetchLoginUser 30s 触发重连 | ⚠️ 简化（登录态路由守卫） |
-| 错误边界 | dash-v2 | ErrorBoundary + ErrorPage | 📋 待实现 |
+| 错误边界 | dash-v2 | ErrorBoundary + ErrorPage | ✅ 已实现（应用根级 ErrorBoundary） |
 | 后端不可达提示 | dash-v2 | BackendErrorState | 📋 待实现 |
 | Mock 演示环境 | dash-v2 | mock-server + dev-mock 一键演示 | ✅ 已实现（web/scripts） |
 
@@ -122,14 +122,14 @@
 | 用户管理 | nezha | User CRUD + 在线会话 | ✅ 已实现（访问控制 + 本次新增在线会话页） |
 | PAT 令牌管理 | nezha | scope 勾选 + 白名单 | ✅ 已实现（访问控制页） |
 | 站点设置 | komari/nezha | 站点名/私有站点/终端外观 | ✅ 本次新增设置页 |
-| DDNS/NAT 管理 | nezha | 配置 CRUD | ⚠️ API 完整，管理界面待补 |
-| 服务器过户管理 | nezha | transfer 发起/取消/进度 | ⚠️ API 完整，管理界面待补 |
+| DDNS/NAT 管理 | nezha | 配置 CRUD | ✅ 已实现管理界面；DDNS 仅 webhook/Cloudflare，NAT 为简化 HTTP Host 代理/TCP 隧道 |
+| 服务器过户管理 | nezha | transfer 发起/取消/进度 | ✅ 已实现（新密钥重连验证完成过户） |
 | 主题管理 | komari | 主题列表/切换/配置/市场 | 📋 待实现 |
-| 插件管理 | komari | 插件启停/配置/日志 | ⚠️ API 完整（market/install/toggle/run），管理界面待补 |
-| 审计日志查看 | komari | Log 分页查询 | ⚠️ API 完整，管理界面待补 |
-| 数据库工具 | komari | 体积/VACUUM/受限 SQL | ⚠️ API 完整（db/size、db/vacuum），管理界面待补 |
-| 2FA 设置 | komari | TOTP 二维码生成 | ⚠️ API 完整，管理界面待补 |
-| 批量操作 | nezha | 批量删除/批量设标签 | ⚠️ API 完整（batch-delete/move），管理界面待补 |
+| 插件管理 | komari | 插件启停/配置/日志 | ⚠️ 管理界面已实现市场安装、启停、审批、执行、删除与日志；无通用配置表单及路由/hook/页面扩展，仅适合受信插件 |
+| 审计日志查看 | komari | Log 分页查询 | ✅ 已实现管理界面（关键管理操作审计，非全量访问日志） |
+| 数据库工具/维护 | komari | 体积/VACUUM/备份恢复 | ⚠️ 管理界面已实现；备份恢复仍直接操作活动 SQLite，需维护窗口并自行保留外部备份 |
+| 2FA 设置 | komari | TOTP 二维码生成 | ✅ 已实现安全设置界面（setup/qrcode/enable/disable） |
+| 批量操作 | nezha | 批量删除/批量设分组 | ✅ 已实现服务器管理界面的多选、批量删除与批量移动分组 |
 
 ### 2.3 通用支撑（前端）
 
@@ -145,6 +145,7 @@
 | 滑动指示器动画 | dash-v2 | use-active-indicator | ✅ 已实现基础版（分组 Tab） |
 | 自定义代码注入 | dash-v2 | InjectContext（白标定制） | ⚠️ 设置键待补全 |
 | 国旗/OS 图标 | dash-v2 | ServerFlag + GetOsName/logo-class | ✅ 已实现基础版 |
+| 轻量 i18n | dash-v2 | zh-CN / en 文案切换 | ⚠️ 基础骨架：仅少量导航/公共文案接入字典，管理页及多数业务文案仍为中文 |
 | 骨架屏 | dash-v2 | ChartSkeleton/ServerDetailLoading | ✅ 已实现 |
 
 ## 三、样式设计系统
@@ -185,17 +186,17 @@
 |---|---|---|
 | 服务监控（HTTP/TCP/Ping） | nezha | ✅ 已实现（核心差异化） |
 | 文件管理器 | nezha | ✅ 已实现 |
-| DDNS | nezha | ✅ API 已实现（界面待补） |
-| NAT 内网穿透 | nezha | ✅ API 已实现（界面待补） |
-| 服务器过户 | nezha | 📋 未实现（原路由误绑已移除） |
+| DDNS | nezha | ✅ API 与管理界面已实现（仅 webhook/Cloudflare） |
+| NAT 内网穿透 | nezha | ⚠️ API 与管理界面已实现；仅简化 HTTP Host 代理/TCP 隧道 |
+| 服务器过户 | nezha | ✅ API 与管理界面已实现（新密钥重连验证） |
 | PAT 细粒度权限 | nezha | ✅ 已实现 |
 | 多用户 | nezha | ✅ 已实现（本次补密钥读取链路） |
 | MCP 自动化 | nezha | ✅ 已实现 |
-| 全球地图 | dash-v2 | ✅ 已实现 |
+| 全球地图 | dash-v2 | ✅ 已实现（依赖 GeoIP；无 provider/无定位结果时隐藏） |
 | 服务可用率条 | dash-v2 | ✅ 已实现 |
 | 命令面板 | dash-v2 | ✅ 已实现 |
-| GeoIP | nezha | ⚠️ 部分（默认空 provider） |
-| 插件系统 | komari | ⚠️ 简化版（goja + 本地市场目录），待安全化与完整宿主 |
+| GeoIP | nezha | ⚠️ 可选 HTTP provider，默认关闭；地图无定位数据时安全隐藏 |
+| 插件系统 | komari | ⚠️ 简化版（goja + 本地市场/管理 UI/权限审批），仅适合受信插件且无完整宿主扩展点 |
 | 主题市场 | komari | 📋 待实现（内置主题 + 自定义代码） |
 | 计费/续费 | komari | ✅ 字段 + 到期提醒（界面待补） |
 | 多 GeoIP provider | komari | 📋 待实现 |

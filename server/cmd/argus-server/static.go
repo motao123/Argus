@@ -27,7 +27,8 @@ func serveEmbedded(w http.ResponseWriter, r *http.Request) {
 		serveFile(w, r, "index.html")
 		return
 	}
-	if strings.HasPrefix(path, "assets/") {
+	// 内嵌静态资源（css/js/图片/fonts/json 等）直接服务；不存在则回退 SPA
+	if _, err := embeddedFS.ReadFile(path); err == nil {
 		serveFile(w, r, path)
 		return
 	}

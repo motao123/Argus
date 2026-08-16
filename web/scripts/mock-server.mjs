@@ -1,6 +1,7 @@
 // Argus Mock Server：无后端演示环境（借鉴 nezha-dash-v2 的 mock 设计）。
 // 用法: pnpm mock:server  （配合 pnpm dev 使用，或 pnpm dev:mock 一键启动）
 import http from "node:http";
+import { WebSocketServer } from "ws";
 
 const port = Number(process.env.MOCK_ARGUS_PORT || 8008);
 const count = Number(process.env.MOCK_ARGUS_COUNT || 12);
@@ -12,6 +13,15 @@ const countries = ["CN", "US", "DE", "JP", "SG", "GB", "FR", "HK", "TW"];
 
 function rand(min, max) {
   return Math.random() * (max - min) + min;
+}
+
+function sendJson(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(body));
+}
+
+function sendData(res, data) {
+  sendJson(res, 200, { success: true, data });
 }
 
 const servers = Array.from({ length: count }, (_, i) => {
@@ -28,6 +38,8 @@ const servers = Array.from({ length: count }, (_, i) => {
       cpu_model: "Intel Xeon Platinum 8462Y+",
       cpu_cores: 4 + (i % 8) * 2,
       agent_version: "0.1.0",
+      ip: `203.0.113.${(i % 254) + 1}`,
+      country_code: countries[i % countries.length],
     },
     cpu: online ? rand(1, 70) : 0,
     mem_used: online ? rand(2, 28) * 1024 ** 3 : 0,
@@ -44,33 +56,39 @@ const servers = Array.from({ length: count }, (_, i) => {
 });
 
 const server = http.createServer((req, res) => {
-  res.setHeader("Content-Type", "application/json");
-  const auth = req.headers.authorization;
-  if (!auth) {
-    res.writeHead(200);
-    res.end(JSON.stringify({ error: "mock: 无需认证" }));
+  const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  const path = requestUrl.pathname;
+
+  // 服务器公开视图与真实后端一致，匿名请求也可以访问。
+  if (req.method === "GET" && path === "/api/v1/servers") {
+    sendData(res, { servers });
     return;
   }
-  const path = req.url.split("?")[0];
-  if (path === "/api/v1/servers") {
-    res.writeHead(200);
-    res.end(JSON.stringify({ servers }));
+  if (req.method === "GET" && path === "/api/v1/alerts") {
+    sendData(res, { alerts: [] });
     return;
   }
-  if (path === "/api/v1/alerts") return res.end(JSON.stringify({ alerts: [] }));
-  if (path === "/api/v1/notifications") return res.end(JSON.stringify({ notifications: [] }));
-  if (path === "/api/v1/crons") return res.end(JSON.stringify({ crons: [] }));
-  const m = path.match(/^\/api\/v1\/servers\/(\d+)\/metrics/);
-  if (m) {
-    const period = req.url.includes("period=24h") ? 24 * 3600 : req.url.includes("period=7d") ? 7 * 86400 : 3600;
-    const step = period === 3600 ? 60 : period === 86400 * 1 ? 300 : 3600;
+  if (req.method === "GET" && path === "/api/v1/notifications") {
+    sendData(res, { notifications: [] });
+    return;
+  }
+  if (req.method === "GET" && path === "/api/v1/crons") {
+    sendData(res, { crons: [] });
+    return;
+  }
+
+  const metricsMatch = path.match(/^\/api\/v1\/servers\/(\d+)\/metrics$/);
+  if (req.method === "GET" && metricsMatch) {
+    const requestedPeriod = requestUrl.searchParams.get("period");
+    const periodName = requestedPeriod === "24h" || requestedPeriod === "7d" ? requestedPeriod : "1h";
+    const period = periodName === "24h" ? 24 * 3600 : periodName === "7d" ? 7 * 86400 : 3600;
+    const step = periodName === "1h" ? 60 : periodName === "24h" ? 300 : 3600;
     const now = Math.floor(Date.now() / 1000);
     const points = [];
     for (let ts = now - period; ts <= now; ts += step) {
-      const cpu = rand(2, 70);
       points.push({
         ts,
-        cpu,
+        cpu: rand(2, 70),
         net_in: rand(1, 400) * 1024,
         net_out: rand(1, 200) * 1024,
         load1: rand(0.1, 3),
@@ -80,16 +98,14 @@ const server = http.createServer((req, res) => {
         disk_total: 512 * 1024 ** 3,
       });
     }
-    res.writeHead(200);
-    res.end(JSON.stringify({ period: period === 3600 ? "1h" : period === 86400 ? "24h" : "7d", points }));
+    sendData(res, { period: periodName, points });
     return;
   }
-  res.writeHead(404);
-  res.end(JSON.stringify({ error: "not found" }));
+
+  sendJson(res, 404, { success: false, data: null, error: "not found" });
 });
 
-// WebSocket 实时推送
-import { WebSocketServer } from "ws";
+// WebSocket 实时推送保持原始消息协议，不套 HTTP 响应壳。
 const wss = new WebSocketServer({ server });
 wss.on("connection", (ws) => {
   const timer = setInterval(() => {
