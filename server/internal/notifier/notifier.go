@@ -254,6 +254,18 @@ func send(n *model.Notification, title, content string) error {
 		return sendServerChan(n, title, content)
 	case "javascript":
 		return sendJS(n, title, content)
+	case "dingtalk":
+		return sendDingTalk(n, title, content)
+	case "wecom":
+		return sendWeCom(n, title, content)
+	case "feishu":
+		return sendFeishu(n, title, content)
+	case "slack":
+		return sendSlack(n, title, content)
+	case "wxpusher":
+		return sendWxPusher(n, title, content)
+	case "matrix":
+		return sendMatrix(n, title, content)
 	default: // webhook
 		return sendWebhook(n, title, content)
 	}

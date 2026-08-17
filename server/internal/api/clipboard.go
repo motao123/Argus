@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -39,6 +40,51 @@ func (s *Server) createClipboard(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.auditLog(c, "clipboard.create", fmt.Sprintf("item=%d", item.ID))
+	ok(c, item)
+}
+
+func (s *Server) updateClipboard(c *gin.Context) {
+	p := principalFromContext(c)
+	id := mustID(c)
+	var item model.Clipboard
+	if err := s.DB.First(&item, id).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if item.UserID != p.UserID && !p.IsAdmin {
+		fail(c, http.StatusForbidden, "not yours")
+		return
+	}
+	var req struct {
+		Title   *string `json:"title"`
+		Content *string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	updates := map[string]any{}
+	if req.Title != nil {
+		updates["title"] = *req.Title
+	}
+	if req.Content != nil {
+		if *req.Content == "" {
+			fail(c, http.StatusBadRequest, "content required")
+			return
+		}
+		updates["content"] = *req.Content
+	}
+	if len(updates) == 0 {
+		fail(c, http.StatusBadRequest, "nothing to update")
+		return
+	}
+	if err := s.DB.Model(&item).Updates(updates).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.DB.First(&item, id)
+	s.auditLog(c, "clipboard.update", fmt.Sprintf("item=%d", id))
 	ok(c, item)
 }
 
@@ -55,5 +101,6 @@ func (s *Server) deleteClipboard(c *gin.Context) {
 		return
 	}
 	s.DB.Delete(&model.Clipboard{}, id)
+	s.auditLog(c, "clipboard.delete", fmt.Sprintf("item=%d", id))
 	ok(c, gin.H{"ok": true})
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/notifier"
 )
 
 // ---- Alerts ----
@@ -296,6 +297,7 @@ func (s *Server) listNotifications(c *gin.Context) {
 		v.URL = maskURL(n.URL)
 		v.Headers = ""
 		v.Body = ""
+		v.Extra = "" // 预设渠道专属配置（含 token/secret）不回显
 		out = append(out, v)
 	}
 	okPage(c, gin.H{"notifications": out}, total, offset, limit)
@@ -306,6 +308,13 @@ func (s *Server) createNotification(c *gin.Context) {
 	var n model.Notification
 	if err := c.ShouldBindJSON(&n); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	if n.Type == "" {
+		n.Type = "webhook"
+	}
+	if !notifier.IsValidType(n.Type) {
+		fail(c, http.StatusBadRequest, "unsupported notification type: "+n.Type)
 		return
 	}
 	n.OwnerID = p.UserID
@@ -332,9 +341,11 @@ func (s *Server) updateNotification(c *gin.Context) {
 		Headers      *string `json:"headers"`
 		Body         *string `json:"body"`
 		ChatID       *string `json:"chat_id"`
+		Extra        *string `json:"extra"`
 		ClearURL     *bool   `json:"clear_url"`
 		ClearHeaders *bool   `json:"clear_headers"`
 		ClearBody    *bool   `json:"clear_body"`
+		ClearExtra   *bool   `json:"clear_extra"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -345,6 +356,10 @@ func (s *Server) updateNotification(c *gin.Context) {
 		updates["name"] = *req.Name
 	}
 	if req.Type != nil {
+		if *req.Type != "" && !notifier.IsValidType(*req.Type) {
+			fail(c, http.StatusBadRequest, "unsupported notification type: "+*req.Type)
+			return
+		}
 		updates["type"] = *req.Type
 	}
 	if req.ClearURL != nil && *req.ClearURL {
@@ -367,6 +382,11 @@ func (s *Server) updateNotification(c *gin.Context) {
 	}
 	if req.ChatID != nil {
 		updates["chat_id"] = *req.ChatID
+	}
+	if req.ClearExtra != nil && *req.ClearExtra {
+		updates["extra"] = ""
+	} else if req.Extra != nil && *req.Extra != "" {
+		updates["extra"] = *req.Extra
 	}
 	if len(updates) > 0 {
 		if err := s.DB.Model(&n).Updates(updates).Error; err != nil {

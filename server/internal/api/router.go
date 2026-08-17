@@ -158,6 +158,7 @@ func New(s *Server) *gin.Engine {
 			// 剪贴板
 			authed.GET("/clipboard", s.listClipboard)
 			authed.POST("/clipboard", s.createClipboard)
+			authed.PUT("/clipboard/:id", s.updateClipboard)
 			authed.DELETE("/clipboard/:id", s.deleteClipboard)
 
 			// 审计日志（admin）
@@ -237,6 +238,8 @@ func New(s *Server) *gin.Engine {
 			// 批量操作（admin）
 			authed.POST("/batch-delete/servers", s.batchDeleteServers)
 			authed.POST("/batch-move/servers", s.batchMoveServers)
+			authed.POST("/batch-config/servers", requireAdmin(), s.batchConfigServers)
+			authed.POST("/batch-ddns/servers", requireAdmin(), s.batchDDNSServers)
 
 			// 服务器过户状态机已实现（见 transfers.go），POST 原误绑已移除。
 

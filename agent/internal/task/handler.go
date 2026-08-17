@@ -44,7 +44,7 @@ func DefaultCapabilities() protocol.Capabilities {
 func (h *Handler) SetCapabilities(c protocol.Capabilities) { h.caps = c }
 
 func disabled() (any, *protocol.RPCError) {
-	return nil, protocol.NewError(protocol.ErrUnauthorized, "capability disabled")
+	return nil, protocol.NewError(protocol.ErrCapabilityDisabled, "capability disabled")
 }
 
 // SetPeer 设置 JSON-RPC 对等端（用于流式通知）。

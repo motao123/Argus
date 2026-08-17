@@ -20,6 +20,51 @@ export interface Availability { available: boolean; reason?: string }
 export interface GPUDevice { index: number; name: string; util: number; mem_used: number; mem_total: number }
 export interface GPUReport extends Availability { devices?: GPUDevice[] }
 
+// ---- Agent 能力开关与网卡/挂载过滤（配置下发） ----
+
+/** Agent 能力开关：与 protocol.Capabilities 七字段一一对应。 */
+export interface CapabilitiesConfig {
+  metrics: boolean;
+  probe: boolean;
+  command: boolean;
+  terminal: boolean;
+  files: boolean;
+  upgrade: boolean;
+  nat: boolean;
+}
+
+export const DEFAULT_CAPABILITIES: CapabilitiesConfig = {
+  metrics: true,
+  probe: true,
+  command: true,
+  terminal: true,
+  files: true,
+  upgrade: true,
+  nat: true,
+};
+
+/** 配置下发请求体（服务端 serverApplyConfig 支持的全部字段）。 */
+export interface ApplyServerConfig {
+  server_url?: string;
+  interval?: number;
+  secret?: string;
+  capabilities?: CapabilitiesConfig;
+  interface_include?: string[];
+  interface_exclude?: string[];
+  mount_include?: string[];
+  mount_exclude?: string[];
+}
+
+/** 逗号分隔 → 去空白/去空数组（配置下发 include/exclude glob 用）。 */
+export function parseCommaList(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// ---- 通用 ----
+
 export interface Server {
   id: number;
   name: string;
@@ -102,6 +147,23 @@ export interface AuditLog {
   created_at: string;
 }
 
+export interface ClipboardItem {
+  id: number;
+  user_id: number;
+  title: string;
+  content: string;
+  created_at: string;
+}
+
+/** 批量操作中单台服务器的独立结果（逐机回执，对齐 server batchServerResult）。 */
+export interface BatchServerResult {
+  server_id: number;
+  server_name: string;
+  status: "ok" | "offline" | "not_found" | "no_ip" | "error";
+  error?: string;
+  profile_id?: number;
+}
+
 export interface TransferRecord {
   id: number;
   server_id: number;
@@ -153,6 +215,7 @@ export interface Notification {
   headers: string;
   body: string;
   chat_id: string;
+  extra: string;
 }
 
 export interface NotificationDelivery {
@@ -174,6 +237,7 @@ export type NotificationUpdate = Partial<Notification> & {
   clear_url?: boolean;
   clear_headers?: boolean;
   clear_body?: boolean;
+  clear_extra?: boolean;
 };
 
 export function notificationUpdatePayload(n: NotificationUpdate): NotificationUpdate {
@@ -188,6 +252,8 @@ export function notificationUpdatePayload(n: NotificationUpdate): NotificationUp
   else if (n.headers) payload.headers = n.headers;
   if (n.clear_body) payload.clear_body = true;
   else if (n.body) payload.body = n.body;
+  if (n.clear_extra) payload.clear_extra = true;
+  else if (n.extra) payload.extra = n.extra;
   return payload;
 }
 
@@ -672,6 +738,16 @@ export const api = {
     request<{ ok: boolean; deleted: number }>("/api/v1/batch-delete/servers", { method: "POST", body: JSON.stringify({ ids }) }),
   batchMoveServers: (ids: number[], group: string) =>
     request<{ ok: boolean; moved: number }>("/api/v1/batch-move/servers", { method: "POST", body: JSON.stringify({ ids, group }) }),
+  batchConfigServers: (ids: number[], cfg: Omit<ApplyServerConfig, "secret">) =>
+    request<{ results: BatchServerResult[] }>("/api/v1/batch-config/servers", { method: "POST", body: JSON.stringify({ ids, ...cfg }) }),
+  batchDDNSServers: (ids: number[], profile_id: number) =>
+    request<{ results: BatchServerResult[] }>("/api/v1/batch-ddns/servers", { method: "POST", body: JSON.stringify({ ids, profile_id }) }),
+  clipboard: () => request<{ items: ClipboardItem[] }>("/api/v1/clipboard"),
+  createClipboard: (item: { title?: string; content: string }) =>
+    request<ClipboardItem>("/api/v1/clipboard", { method: "POST", body: JSON.stringify(item) }),
+  updateClipboard: (id: number, item: { title?: string; content?: string }) =>
+    request<ClipboardItem>(`/api/v1/clipboard/${id}`, { method: "PUT", body: JSON.stringify(item) }),
+  deleteClipboard: (id: number) => request(`/api/v1/clipboard/${id}`, { method: "DELETE" }),
   plugins: () => request<{ plugins: PluginInfo[] }>("/api/v1/plugins"),
   pluginToggle: (name: string, enabled: boolean) =>
     request<{ ok: boolean }>(`/api/v1/plugins/${encodeURIComponent(name)}/toggle`, { method: "POST", body: JSON.stringify({ enabled }) }),
@@ -696,7 +772,7 @@ export const api = {
   groups: () => request<{ groups: ServerGroup[] }>("/api/v1/groups"),
   createGroup: (name: string) => request<ServerGroup>("/api/v1/groups", { method: "POST", body: JSON.stringify({ name }) }),
   deleteGroup: (id: number) => request(`/api/v1/groups/${id}`, { method: "DELETE" }),
-  applyServerConfig: (id: number, cfg: { server_url?: string; interval?: number; secret?: string }) =>
+  applyServerConfig: (id: number, cfg: ApplyServerConfig) =>
     request<{ ok: boolean }>(`/api/v1/servers/${id}/config`, { method: "POST", body: JSON.stringify(cfg) }),
   exec: (id: number, command: string, timeout = 30) =>
     request<{ output: string; code: number; error?: string }>(`/api/v1/servers/${id}/exec`, {

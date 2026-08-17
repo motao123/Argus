@@ -2,7 +2,10 @@
 // 基于 WebSocket + JSON-RPC 2.0（借鉴 komari 的协议设计，免 protobuf 工具链）。
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // ProtocolVersion identifies the additive wire protocol version.
 const ProtocolVersion = "2"
@@ -53,6 +56,8 @@ const (
 	ErrInternal     = -32603
 	ErrUnauthorized = -32001
 	ErrNotFound     = -32002
+	// ErrCapabilityDisabled 目标 Agent 上对应能力被禁用（如 command/terminal 被关闭）。
+	ErrCapabilityDisabled = -32003
 )
 
 // ---- 方法名 ----
@@ -101,6 +106,56 @@ type Capabilities struct {
 	Files    bool `json:"files"`
 	Upgrade  bool `json:"upgrade"`
 	NAT      bool `json:"nat"`
+}
+
+// CapabilityNames 返回全部受支持的能力名（与 Capabilities 字段一一对应）。
+func CapabilityNames() []string {
+	return []string{CapabilityMetrics, CapabilityProbe, CapabilityCommand, CapabilityTerminal, CapabilityFiles, CapabilityUpgrade, CapabilityNAT}
+}
+
+// ValidCapability 报告 name 是否为受支持的能力名。
+func ValidCapability(name string) bool {
+	for _, n := range CapabilityNames() {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseCapabilities 校验并规范化能力配置：仅接受已知能力名（未知名报错），
+// 未提供的字段按禁用处理，保证返回的结构体七个字段全部显式设置。
+// raw 为空或 null 时返回 nil（表示"不修改"，兼容旧客户端）。
+func ParseCapabilities(raw json.RawMessage) (*Capabilities, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var m map[string]bool
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("capabilities: %w", err)
+	}
+	var caps Capabilities
+	for name, enabled := range m {
+		switch name {
+		case CapabilityMetrics:
+			caps.Metrics = enabled
+		case CapabilityProbe:
+			caps.Probe = enabled
+		case CapabilityCommand:
+			caps.Command = enabled
+		case CapabilityTerminal:
+			caps.Terminal = enabled
+		case CapabilityFiles:
+			caps.Files = enabled
+		case CapabilityUpgrade:
+			caps.Upgrade = enabled
+		case CapabilityNAT:
+			caps.NAT = enabled
+		default:
+			return nil, fmt.Errorf("unknown capability %q", name)
+		}
+	}
+	return &caps, nil
 }
 
 // UpgradeParams Agent 自升级参数（下载 → SHA-256 校验 → 原子替换 → 重启）。

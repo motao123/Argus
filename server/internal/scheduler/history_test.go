@@ -47,9 +47,15 @@ func (f *fakeExecutor) Exec(id int64, _ string, _ int) (*protocol.ExecResult, er
 
 func newHistoryDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	// 每次调用独立内存库并强制单连接：
+	// - 共享内存库按名字在进程内共享，-count=N 或全量并行时同名库会互相串扰；
+	// - 单连接保证内部 goroutine 并发读写同一库不丢表/不锁冲突。
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	if err := db.AutoMigrate(&model.User{}, &model.Server{}, &model.Cron{}, &model.TaskRun{}, &model.TaskRunResult{}); err != nil {
 		t.Fatal(err)

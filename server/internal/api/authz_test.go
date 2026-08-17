@@ -46,7 +46,7 @@ func newAuthzEnv(t *testing.T) *authzTestEnv {
 		&model.APIToken{}, &model.Setting{}, &model.DDNSProfile{}, &model.DDNSRecordState{}, &model.NAT{}, &model.Metric{},
 		&model.AuditLog{}, &model.ServerTransfer{}, &model.Notification{}, &model.Alert{}, &model.Cron{}, &model.TaskRun{}, &model.TaskRunResult{},
 		&model.UpgradeJob{}, &model.UpgradeResult{},
-		&model.Incident{}, &model.MaintenanceWindow{},
+		&model.Incident{}, &model.MaintenanceWindow{}, &model.Clipboard{},
 	); err != nil {
 		t.Fatal(err)
 	}

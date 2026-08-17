@@ -122,6 +122,9 @@ describe("i18n framework", () => {
     expect(translateError("zh-CN", "server.offline", "server offline")).toBe("服务器离线");
     expect(translateError("en", "server.offline", "server offline")).toBe("Server offline");
     expect(translateError("zh-CN", "auth.invalid_credentials", "invalid credentials")).toBe("用户名或密码错误");
+    // 被禁能力稳定码 → 友好提示
+    expect(translateError("zh-CN", "capability.disabled", "capability disabled")).toContain("该能力已被禁用");
+    expect(translateError("en", "capability.disabled", "capability disabled")).toContain("This capability is disabled");
     // 未知 code → 回退后端原文
     expect(translateError("en", "some.new_code", "raw backend message")).toBe("raw backend message");
     // 无 code → 回退原文

@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -472,17 +473,23 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ServerURL        string                 `json:"server_url"`
-		Interval         int                    `json:"interval"`
-		Secret           string                 `json:"secret"`
-		Capabilities     *protocol.Capabilities `json:"capabilities"`
-		InterfaceInclude []string               `json:"interface_include"`
-		InterfaceExclude []string               `json:"interface_exclude"`
-		MountInclude     []string               `json:"mount_include"`
-		MountExclude     []string               `json:"mount_exclude"`
+		ServerURL        string          `json:"server_url"`
+		Interval         int             `json:"interval"`
+		Secret           string          `json:"secret"`
+		Capabilities     json.RawMessage `json:"capabilities"`
+		InterfaceInclude []string        `json:"interface_include"`
+		InterfaceExclude []string        `json:"interface_exclude"`
+		MountInclude     []string        `json:"mount_include"`
+		MountExclude     []string        `json:"mount_exclude"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	// 校验能力名合法并规范化（未知名报 400；空/缺省表示不修改）
+	caps, err := protocol.ParseCapabilities(req.Capabilities)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	peer := s.Agents.Peer(id)
@@ -491,7 +498,7 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 		return
 	}
 	resp, err := peer.Call(protocol.MethodApplyConfig, protocol.AgentConfig{
-		ServerURL: req.ServerURL, Interval: req.Interval, Secret: req.Secret, Capabilities: req.Capabilities,
+		ServerURL: req.ServerURL, Interval: req.Interval, Secret: req.Secret, Capabilities: caps,
 		InterfaceInclude: req.InterfaceInclude, InterfaceExclude: req.InterfaceExclude, MountInclude: req.MountInclude, MountExclude: req.MountExclude,
 	}, 15*time.Second)
 	if err != nil {
@@ -499,11 +506,21 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 		return
 	}
 	if resp.Error != nil {
-		fail(c, http.StatusBadGateway, resp.Error.Message)
+		status, msg, apiCode := applyConfigError(resp.Error)
+		fail(c, status, msg, apiCode)
 		return
 	}
 	s.auditLog(c, "server.apply_config", "")
 	ok(c, gin.H{"ok": true})
+}
+
+// applyConfigError 把 Agent 返回的 RPC 错误映射为 HTTP 响应参数（含稳定 code，供前端 i18n 翻译）。
+// 被禁能力导致的 "capability disabled" 返回 capability.disabled 稳定码，其余错误回退原始消息。
+func applyConfigError(rpcErr *protocol.RPCError) (status int, msg, apiCode string) {
+	if rpcErr.Code == protocol.ErrCapabilityDisabled {
+		return http.StatusBadGateway, "capability disabled", "capability.disabled"
+	}
+	return http.StatusBadGateway, rpcErr.Message, ""
 }
 
 // serverExec 立即在指定服务器执行命令（管理台调试用）。

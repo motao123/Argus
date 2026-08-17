@@ -18,7 +18,72 @@ const metrics: { key: string; label: TKey }[] = [
   { key: "offline", label: "alerts.metricOffline" },
 ];
 
-const notifTypes = ["webhook", "bark", "telegram", "email", "serverchan"];
+const notifTypes = ["webhook", "bark", "telegram", "email", "serverchan", "javascript", "dingtalk", "wecom", "feishu", "slack", "wxpusher", "matrix"];
+
+// 渠道类型显示名（i18n）
+const notifTypeLabels: Record<string, TKey> = {
+  webhook: "alerts.typeWebhook",
+  bark: "alerts.typeBark",
+  telegram: "alerts.typeTelegram",
+  email: "alerts.typeEmail",
+  serverchan: "alerts.typeServerChan",
+  javascript: "alerts.typeJavascript",
+  dingtalk: "alerts.typeDingtalk",
+  wecom: "alerts.typeWecom",
+  feishu: "alerts.typeFeishu",
+  slack: "alerts.typeSlack",
+  wxpusher: "alerts.typeWxpusher",
+  matrix: "alerts.typeMatrix",
+};
+
+const typeLabel = (type: string): TKey => notifTypeLabels[type] ?? (type as TKey);
+
+// 预设渠道（dingtalk/wecom/feishu/slack/wxpusher/matrix）动态字段，映射到 Notification.extra 的 JSON key。
+// tags 为逗号分隔的数组字段；checkbox 为布尔字段。
+type ChannelField =
+  | { kind: "text"; key: string; labelKey: TKey }
+  | { kind: "tags"; key: string; labelKey: TKey }
+  | { kind: "checkbox"; key: string; labelKey: TKey };
+
+const presetFields: Record<string, ChannelField[]> = {
+  dingtalk: [
+    { kind: "text", key: "access_token", labelKey: "alerts.dingtalkAccessToken" },
+    { kind: "text", key: "secret", labelKey: "alerts.dingtalkSecret" },
+    { kind: "text", key: "keyword", labelKey: "alerts.dingtalkKeyword" },
+    { kind: "tags", key: "at_mobiles", labelKey: "alerts.dingtalkAtMobiles" },
+    { kind: "checkbox", key: "at_all", labelKey: "alerts.dingtalkAtAll" },
+  ],
+  wecom: [
+    { kind: "text", key: "key", labelKey: "alerts.wecomKey" },
+    { kind: "tags", key: "mentioned_list", labelKey: "alerts.wecomMentionedList" },
+    { kind: "tags", key: "mentioned_mobile_list", labelKey: "alerts.wecomMentionedMobileList" },
+  ],
+  feishu: [
+    { kind: "text", key: "token", labelKey: "alerts.feishuToken" },
+    { kind: "text", key: "secret", labelKey: "alerts.feishuSecret" },
+    { kind: "text", key: "keyword", labelKey: "alerts.feishuKeyword" },
+    { kind: "text", key: "msg_type", labelKey: "alerts.feishuMsgType" },
+  ],
+  slack: [
+    { kind: "text", key: "webhook_url", labelKey: "alerts.slackWebhookUrl" },
+    { kind: "text", key: "channel", labelKey: "alerts.slackChannel" },
+    { kind: "text", key: "username", labelKey: "alerts.slackUsername" },
+    { kind: "text", key: "icon_emoji", labelKey: "alerts.slackIconEmoji" },
+  ],
+  wxpusher: [
+    { kind: "text", key: "app_token", labelKey: "alerts.wxpusherAppToken" },
+    { kind: "tags", key: "uids", labelKey: "alerts.wxpusherUids" },
+    { kind: "tags", key: "topic_ids", labelKey: "alerts.wxpusherTopicIds" },
+    { kind: "text", key: "content_type", labelKey: "alerts.wxpusherContentType" },
+  ],
+  matrix: [
+    { kind: "text", key: "homeserver", labelKey: "alerts.matrixHomeserver" },
+    { kind: "text", key: "access_token", labelKey: "alerts.matrixAccessToken" },
+    { kind: "text", key: "room_id", labelKey: "alerts.matrixRoomId" },
+  ],
+};
+
+const isPresetType = (type: string) => type in presetFields;
 
 const emptyAlert = {
   name: "", metric: "cpu", min: null as number | null, max: null as number | null, duration: 30,
@@ -42,10 +107,41 @@ export default function Alerts() {
 
   const [form, setForm] = useState<(typeof emptyAlert) & { id?: number } | null>(null);
   const [nForm, setNForm] = useState<Partial<Notification> | null>(null);
+  // 预设渠道动态字段值（key → 字符串/布尔；tags 字段暂存逗号分隔字符串，保存时拆分）
+  const [extraObj, setExtraObj] = useState<Record<string, string | boolean>>({});
   const [error, setError] = useState("");
   const [testResult, setTestResult] = useState("");
   // 静默表单：{alertId, hours}
   const [silenceForm, setSilenceForm] = useState<{ id: number; hours: number } | null>(null);
+
+  // 打开通知渠道表单：编辑时 extra 已被脱敏（空串），动态字段一律从空开始，避免回显凭据。
+  const openChannelForm = (n?: Notification) => {
+    setExtraObj({});
+    setNForm(
+      n
+        ? { ...n }
+        : { name: "", type: "webhook", url: "", method: "POST", headers: "{}", body: '{"title":"{{title}}","content":"{{content}}"}', chat_id: "", extra: "" },
+    );
+  };
+
+  // 由动态字段构造渠道专属 extra JSON；空对象返回 "{}"（保存时跳过，编辑场景保留原值）。
+  const buildExtra = (type: string, obj: Record<string, string | boolean>): string => {
+    const out: Record<string, unknown> = {};
+    for (const f of presetFields[type] ?? []) {
+      const v = obj[f.key];
+      if (f.kind === "checkbox") {
+        out[f.key] = v === true;
+      } else if (typeof v === "string" && v.trim() !== "") {
+        if (f.kind === "tags") {
+          const parts = v.split(",").map((s) => s.trim()).filter(Boolean);
+          if (parts.length > 0) out[f.key] = parts;
+        } else {
+          out[f.key] = v.trim();
+        }
+      }
+    }
+    return JSON.stringify(out);
+  };
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["alerts"] });
@@ -91,7 +187,7 @@ export default function Alerts() {
 
   const saveN = useMutation({
     mutationFn: async (n: Partial<Notification>) => {
-      // 编辑时仅提交实际改动字段：读取已脱敏（url 掩码/headers/body 空），
+      // 编辑时仅提交实际改动字段：读取已脱敏（url 掩码/headers/body/extra 空），
       // 掩码 URL 与空凭据字段不回传，避免覆盖原值（对齐 nezha 脱敏规范）
       const payload: Partial<Notification> = { id: n.id };
       if (n.name) payload.name = n.name;
@@ -101,14 +197,28 @@ export default function Alerts() {
       if (n.headers && n.headers !== "{}") payload.headers = n.headers;
       if (n.body && n.body !== "{}") payload.body = n.body;
       if (n.chat_id) payload.chat_id = n.chat_id;
+      if (n.extra && n.extra !== "{}") payload.extra = n.extra;
       return api.saveNotification(payload);
     },
     onSuccess: () => {
       setNForm(null);
+      setExtraObj({});
       invalidate();
     },
     onError: (e) => setError((e as Error).message),
   });
+
+  // 保存通知渠道：预设渠道由动态字段构造 extra；无任何配置时不提交（编辑场景保留原值）。
+  const submitChannel = () => {
+    if (!nForm) return;
+    const type = nForm.type ?? "webhook";
+    const payload: Partial<Notification> = { ...nForm };
+    if (isPresetType(type)) {
+      const extra = buildExtra(type, extraObj);
+      payload.extra = extra === "{}" ? "" : extra;
+    }
+    saveN.mutate(payload);
+  };
   const deleteN = useMutation({ mutationFn: api.deleteNotification, onSuccess: invalidate });
   const testN = useMutation({
     mutationFn: (id: number) => api.testMessage(id),
@@ -381,7 +491,7 @@ export default function Alerts() {
       <div className="mb-3 mt-8 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("alerts.notifChannels")}</h2>
         <button
-          onClick={() => setNForm({ name: "", type: "webhook", url: "", method: "POST", headers: "{}", body: '{"title":"{{title}}","content":"{{content}}"}', chat_id: "" })}
+          onClick={() => openChannelForm()}
           className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5"
         >
           <Plus className="h-4 w-4" />
@@ -391,7 +501,7 @@ export default function Alerts() {
 
       {nForm && (
         <div className="mb-5 rounded-xl border border-border bg-panel p-4">
-          <h3 className="mb-3 text-sm font-medium">{t("alerts.channelOf", { type: nForm.type ?? "webhook" })}</h3>
+          <h3 className="mb-3 text-sm font-medium">{t("alerts.channelOf", { type: t(typeLabel(nForm.type ?? "webhook")) })}</h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <input
               placeholder={t("servers.name")}
@@ -401,47 +511,76 @@ export default function Alerts() {
             />
             <select
               value={nForm.type ?? "webhook"}
-              onChange={(e) => setNForm({ ...nForm, type: e.target.value })}
+              onChange={(e) => {
+                setNForm({ ...nForm, type: e.target.value });
+                setExtraObj({});
+              }}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
               {notifTypes.map((type) => (
-                <option key={type} value={type}>{type}</option>
+                <option key={type} value={type}>{t(typeLabel(type))}</option>
               ))}
             </select>
-            <input
-              placeholder={t("alerts.url")}
-              value={nForm.url ?? ""}
-              onChange={(e) => setNForm({ ...nForm, url: e.target.value })}
-              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
-            />
-            <input
-              placeholder={t("alerts.chatId")}
-              value={nForm.chat_id ?? ""}
-              onChange={(e) => setNForm({ ...nForm, chat_id: e.target.value })}
-              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
-            />
-            <input
-              placeholder={t("alerts.headers")}
-              value={nForm.headers ?? ""}
-              onChange={(e) => setNForm({ ...nForm, headers: e.target.value })}
-              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"
-            />
-            <textarea
-              placeholder={t("alerts.body")}
-              value={nForm.body ?? ""}
-              onChange={(e) => setNForm({ ...nForm, body: e.target.value })}
-              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"
-              rows={2}
-            />
+            {isPresetType(nForm.type ?? "") ? (
+              (presetFields[nForm.type ?? ""] ?? []).map((f) =>
+                f.kind === "checkbox" ? (
+                  <label key={f.key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={extraObj[f.key] === true}
+                      onChange={(e) => setExtraObj((o) => ({ ...o, [f.key]: e.target.checked }))}
+                      className="h-4 w-4"
+                    />
+                    {t(f.labelKey)}
+                  </label>
+                ) : (
+                  <input
+                    key={f.key}
+                    placeholder={t(f.labelKey)}
+                    value={typeof extraObj[f.key] === "string" ? (extraObj[f.key] as string) : ""}
+                    onChange={(e) => setExtraObj((o) => ({ ...o, [f.key]: e.target.value }))}
+                    className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"
+                  />
+                ),
+              )
+            ) : (
+              <>
+                <input
+                  placeholder={t("alerts.url")}
+                  value={nForm.url ?? ""}
+                  onChange={(e) => setNForm({ ...nForm, url: e.target.value })}
+                  className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+                />
+                <input
+                  placeholder={t("alerts.chatId")}
+                  value={nForm.chat_id ?? ""}
+                  onChange={(e) => setNForm({ ...nForm, chat_id: e.target.value })}
+                  className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+                />
+                <input
+                  placeholder={t("alerts.headers")}
+                  value={nForm.headers ?? ""}
+                  onChange={(e) => setNForm({ ...nForm, headers: e.target.value })}
+                  className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"
+                />
+                <textarea
+                  placeholder={t("alerts.body")}
+                  value={nForm.body ?? ""}
+                  onChange={(e) => setNForm({ ...nForm, body: e.target.value })}
+                  className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"
+                  rows={2}
+                />
+              </>
+            )}
           </div>
           <div className="mt-3 flex gap-2">
             <button
-              onClick={() => saveN.mutate(nForm)}
+              onClick={submitChannel}
               className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90"
             >
               {t("common.save")}
             </button>
-            <button onClick={() => setNForm(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">
+            <button onClick={() => { setNForm(null); setExtraObj({}); }} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">
               {t("common.cancel")}
             </button>
           </div>
@@ -463,7 +602,7 @@ export default function Alerts() {
             {notifications.map((n) => (
               <tr key={n.id} className="border-b border-border last:border-0">
                 <td className="px-4 py-3 font-medium">{n.name}</td>
-                <td className="px-4 py-3 text-xs text-muted">{n.type}</td>
+                <td className="px-4 py-3 text-xs text-muted">{t(typeLabel(n.type))}</td>
                 <td className="max-w-md truncate px-4 py-3 text-muted">{n.url}</td>
                 <td className="px-4 py-3 text-right">
                   <button
@@ -474,7 +613,7 @@ export default function Alerts() {
                     <Send className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => setNForm(n)}
+                    onClick={() => openChannelForm(n)}
                     className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
                   >
                     <Pencil className="h-4 w-4" />

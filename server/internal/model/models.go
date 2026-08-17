@@ -128,7 +128,9 @@ type Alert struct {
 }
 
 // Notification 通知渠道（借鉴 komari 多渠道设计 + nezha 模板）。
-// Type: webhook / bark / telegram / email / serverchan
+// Type: webhook / bark / telegram / email / serverchan / javascript /
+// dingtalk / wecom / feishu / slack / wxpusher / matrix
+// 预设渠道（dingtalk/wecom/feishu/slack/wxpusher/matrix）的专属配置存于 Extra（JSON）。
 type Notification struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
 	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
@@ -139,6 +141,7 @@ type Notification struct {
 	Headers   string    `gorm:"size:2048;default:'{}'" json:"headers"` // JSON 对象
 	Body      string    `gorm:"size:2048;default:'{}'" json:"body"`    // 支持 {{title}} {{content}} 模板
 	ChatID    string    `gorm:"size:64;default:''" json:"chat_id"`     // telegram/email 目标
+	Extra     string    `gorm:"type:text;default:''" json:"extra"`     // 预设渠道专属 JSON 配置（脱敏不回显）
 	CreatedAt time.Time `json:"created_at"`
 }
 

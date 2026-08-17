@@ -1,10 +1,80 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckSquare, Copy, Download, KeyRound, Layers, Pencil, Plus, Search, Send, Square, TerminalSquare, Trash2 } from "lucide-react";
-import { api, type Server } from "../lib/api";
+import { CheckSquare, Copy, Download, Globe, KeyRound, Layers, Pencil, Plus, Search, Send, Settings2, Square, TerminalSquare, Trash2 } from "lucide-react";
+import { api, DEFAULT_CAPABILITIES, parseCommaList, type BatchServerResult, type CapabilitiesConfig, type Server } from "../lib/api";
 import { fmtBytes } from "../lib/format";
-import { useI18n } from "../lib/i18n";
+import { useI18n, type TKey } from "../lib/i18n";
+
+// 能力开关：键与协议字段一致，值为 i18n 标签 key（默认全部启用）。
+const CAPABILITY_ITEMS: Array<[keyof CapabilitiesConfig, TKey]> = [
+  ["metrics", "servers.cfgCapMetrics"],
+  ["probe", "servers.cfgCapProbe"],
+  ["command", "servers.cfgCapCommand"],
+  ["terminal", "servers.cfgCapTerminal"],
+  ["files", "servers.cfgCapFiles"],
+  ["upgrade", "servers.cfgCapUpgrade"],
+  ["nat", "servers.cfgCapNAT"],
+];
+
+const FILTER_ITEMS: Array<["interface_include" | "interface_exclude" | "mount_include" | "mount_exclude", TKey]> = [
+  ["interface_include", "servers.cfgInterfaceInclude"],
+  ["interface_exclude", "servers.cfgInterfaceExclude"],
+  ["mount_include", "servers.cfgMountInclude"],
+  ["mount_exclude", "servers.cfgMountExclude"],
+];
+
+const BATCH_STATUS_KEYS: Record<BatchServerResult["status"], TKey> = {
+  ok: "servers.batchStatusOk",
+  offline: "servers.batchStatusOffline",
+  not_found: "servers.batchStatusNotFound",
+  no_ip: "servers.batchStatusNoIp",
+  error: "servers.batchStatusError",
+};
+
+// 批量操作逐机结果列表（批量配置 / 批量 DDNS 共用）。
+function BatchResultList({ results }: { results: BatchServerResult[] }) {
+  const { t } = useI18n();
+  const ok = results.filter((r) => r.status === "ok").length;
+  const failed = results.length - ok;
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-bg p-3">
+      <p className="mb-2 text-sm font-medium">{t("servers.batchResultsSummary", { ok, failed })}</p>
+      <ul className="max-h-52 space-y-1 overflow-auto text-xs">
+        {results.map((r) => (
+          <li key={r.server_id} className="flex items-start justify-between gap-2">
+            <span className="font-medium">{r.server_name || `#${r.server_id}`}</span>
+            <span className={`text-right ${r.status === "ok" ? "text-ok" : r.status === "error" || r.status === "not_found" ? "text-err" : "text-muted"}`}>
+              {t(BATCH_STATUS_KEYS[r.status])}
+              {r.error ? ` · ${r.error}` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// 批量配置表单（不含密钥字段：批量下发不接受密钥）。
+interface BatchConfigForm {
+  server_url: string;
+  interval: number;
+  capabilities: CapabilitiesConfig;
+  interface_include: string;
+  interface_exclude: string;
+  mount_include: string;
+  mount_exclude: string;
+}
+
+const emptyBatchConfig: BatchConfigForm = {
+  server_url: "",
+  interval: 2,
+  capabilities: { ...DEFAULT_CAPABILITIES },
+  interface_include: "",
+  interface_exclude: "",
+  mount_include: "",
+  mount_exclude: "",
+};
 
 // 表单字段：带标签与单位/示例说明，避免只依赖 placeholder。
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -45,7 +115,7 @@ const emptyForm: FormState = {
 };
 
 export default function Servers() {
-  const { t, fmtDate, fmtDateTime } = useI18n();
+  const { t, tErr, fmtDate, fmtDateTime } = useI18n();
   const qc = useQueryClient();
   // 管理页使用 REST 列表（含离线服务器；WS 快照只含在线上报）
   const { data: serverData } = useQuery({ queryKey: ["servers-list"], queryFn: api.servers, refetchInterval: 15000 });
@@ -58,15 +128,31 @@ export default function Servers() {
   const [installTarget, setInstallTarget] = useState<Server | null>(null);
   const [installCmd, setInstallCmd] = useState("");
   const [installCopied, setInstallCopied] = useState(false);
-  const [cfg, setCfg] = useState({ server_url: "", interval: 2, secret: "" });
+  const [cfg, setCfg] = useState({
+    server_url: "",
+    interval: 2,
+    secret: "",
+    capabilities: { ...DEFAULT_CAPABILITIES },
+    interface_include: "",
+    interface_exclude: "",
+    mount_include: "",
+    mount_exclude: "",
+  });
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showGroups, setShowGroups] = useState(false);
   const [newGroup, setNewGroup] = useState("");
   const [cfgTarget, setCfgTarget] = useState<Server | null>(null);
+  const [batchCfgOpen, setBatchCfgOpen] = useState(false);
+  const [batchCfg, setBatchCfg] = useState<BatchConfigForm>({ ...emptyBatchConfig, capabilities: { ...emptyBatchConfig.capabilities } });
+  const [batchDDNSOpen, setBatchDDNSOpen] = useState(false);
+  const [batchDDNSProfile, setBatchDDNSProfile] = useState(0);
+  const [batchResults, setBatchResults] = useState<BatchServerResult[] | null>(null);
 
   const { data: groupsData } = useQuery({ queryKey: ["groups"], queryFn: api.groups, enabled: showGroups });
   const groups = groupsData?.groups ?? [];
+  const { data: ddnsData } = useQuery({ queryKey: ["ddns"], queryFn: api.ddns, enabled: batchDDNSOpen });
+  const ddnsProfiles = ddnsData?.profiles ?? [];
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["servers"] });
@@ -124,17 +210,48 @@ export default function Servers() {
   });
   const deleteGroup = useMutation({ mutationFn: api.deleteGroup, onSuccess: invalidate });
   const applyCfg = useMutation({
-    mutationFn: () => api.applyServerConfig(cfgTarget!.id, { server_url: cfg.server_url || undefined, interval: cfg.interval, secret: cfg.secret || undefined }),
+    mutationFn: () => {
+      const c = cfg;
+      return api.applyServerConfig(cfgTarget!.id, {
+        server_url: c.server_url || undefined,
+        interval: c.interval,
+        secret: c.secret || undefined,
+        capabilities: c.capabilities,
+        interface_include: parseCommaList(c.interface_include),
+        interface_exclude: parseCommaList(c.interface_exclude),
+        mount_include: parseCommaList(c.mount_include),
+        mount_exclude: parseCommaList(c.mount_exclude),
+      });
+    },
     onSuccess: () => {
       setCfgTarget(null);
       setError(t("servers.cfgApplied"));
     },
-    onError: (e) => setError(t("servers.cfgFailed", { error: (e as Error).message })),
+    onError: (e) => setError(t("servers.cfgFailed", { error: tErr(e) })),
   });
   const runExec = useMutation({
     mutationFn: () => api.exec(execTarget!.id, execCmd),
     onSuccess: (r) => setExecResult(`exit=${r.code}\n${r.output || r.error || ""}`),
     onError: (e) => setExecResult((e as Error).message),
+  });
+  const runBatchCfg = useMutation({
+    mutationFn: (f: BatchConfigForm) =>
+      api.batchConfigServers(Array.from(selected), {
+        server_url: f.server_url || undefined,
+        interval: f.interval,
+        capabilities: f.capabilities,
+        interface_include: parseCommaList(f.interface_include),
+        interface_exclude: parseCommaList(f.interface_exclude),
+        mount_include: parseCommaList(f.mount_include),
+        mount_exclude: parseCommaList(f.mount_exclude),
+      }),
+    onSuccess: (r) => setBatchResults(r.results),
+    onError: (e) => setError(t("servers.batchCfgFailed", { error: tErr(e) })),
+  });
+  const runBatchDDNS = useMutation({
+    mutationFn: (profileId: number) => api.batchDDNSServers(Array.from(selected), profileId),
+    onSuccess: (r) => setBatchResults(r.results),
+    onError: (e) => setError(t("servers.batchDDNSFailed", { error: tErr(e) })),
   });
 
   const filtered = useMemo(
@@ -193,6 +310,26 @@ export default function Servers() {
               <option key={g.id} value={g.name}>{g.name}</option>
             ))}
           </select>
+          <button
+            onClick={() => {
+              setBatchResults(null);
+              setBatchCfg({ ...emptyBatchConfig, capabilities: { ...emptyBatchConfig.capabilities } });
+              setBatchCfgOpen(true);
+            }}
+            className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5"
+          >
+            <Settings2 className="h-4 w-4" /> {t("servers.batchConfig")}
+          </button>
+          <button
+            onClick={() => {
+              setBatchResults(null);
+              setBatchDDNSProfile(0);
+              setBatchDDNSOpen(true);
+            }}
+            className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5"
+          >
+            <Globe className="h-4 w-4" /> {t("servers.batchDDNS")}
+          </button>
           <button
             onClick={() => confirm(t("servers.confirmBatchDelete", { count: selected.size })) && batchDelete.mutate(Array.from(selected))}
             className="rounded-lg border border-err/40 px-3 py-1.5 text-sm text-err hover:bg-err/10"
@@ -334,7 +471,16 @@ export default function Servers() {
                     <button
                       onClick={() => {
                         setCfgTarget(s);
-                        setCfg({ server_url: "", interval: 2, secret: "" });
+                        setCfg({
+                          server_url: "",
+                          interval: 2,
+                          secret: "",
+                          capabilities: { ...DEFAULT_CAPABILITIES },
+                          interface_include: "",
+                          interface_exclude: "",
+                          mount_include: "",
+                          mount_exclude: "",
+                        });
                       }}
                       title={t("servers.configTitle")}
                       className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
@@ -441,16 +587,140 @@ export default function Servers() {
       {/* 配置下发 */}
       {cfgTarget && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setCfgTarget(null)}>
-          <div className="w-full max-w-lg rounded-xl border border-border bg-panel p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-border bg-panel p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 text-sm font-medium">{t("servers.cfgHeading", { name: cfgTarget.name })}</h3>
             <div className="grid grid-cols-1 gap-3">
               <input placeholder={t("servers.cfgServerUrl")} value={cfg.server_url} onChange={(e) => setCfg({ ...cfg, server_url: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
               <input type="number" placeholder={t("servers.cfgInterval")} value={cfg.interval} onChange={(e) => setCfg({ ...cfg, interval: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
               <input placeholder={t("servers.cfgSecret")} value={cfg.secret} onChange={(e) => setCfg({ ...cfg, secret: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+
+              {/* 能力开关 */}
+              <div className="rounded-lg border border-border bg-bg p-3">
+                <p className="mb-2 text-xs font-medium text-muted">{t("servers.cfgCapabilities")}</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  {CAPABILITY_ITEMS.map(([key, labelKey]) => (
+                    <label key={key} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={cfg.capabilities[key]}
+                        onChange={(e) => setCfg({ ...cfg, capabilities: { ...cfg.capabilities, [key]: e.target.checked } })}
+                      />
+                      {t(labelKey)}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 网卡 / 挂载过滤 */}
+              <div className="rounded-lg border border-border bg-bg p-3">
+                <p className="mb-1 text-xs font-medium text-muted">{t("servers.cfgFilters")}</p>
+                <p className="mb-2 text-[11px] text-muted/70">{t("servers.cfgFiltersHint")}</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {FILTER_ITEMS.map(([key, labelKey]) => (
+                    <Field key={key} label={t(labelKey)}>
+                      <input
+                        value={cfg[key]}
+                        placeholder="eth*, /data/*"
+                        onChange={(e) => setCfg({ ...cfg, [key]: e.target.value })}
+                        className={inputCls}
+                      />
+                    </Field>
+                  ))}
+                </div>
+              </div>
             </div>
             <button onClick={() => applyCfg.mutate()} disabled={!cfgTarget.online} className="mt-3 rounded-lg bg-accent px-4 py-1.5 text-sm text-white disabled:opacity-40">
               {t("servers.cfgSubmit")}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 批量配置 */}
+      {batchCfgOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setBatchCfgOpen(false)}>
+          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-border bg-panel p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-1 text-sm font-medium">{t("servers.batchCfgHeading", { count: selected.size })}</h3>
+            <p className="mb-3 text-xs text-muted">{t("servers.batchCfgHint")}</p>
+            <div className="grid grid-cols-1 gap-3">
+              <input placeholder={t("servers.cfgServerUrl")} value={batchCfg.server_url} onChange={(e) => setBatchCfg({ ...batchCfg, server_url: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+              <input type="number" placeholder={t("servers.cfgInterval")} value={batchCfg.interval} onChange={(e) => setBatchCfg({ ...batchCfg, interval: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+
+              <div className="rounded-lg border border-border bg-bg p-3">
+                <p className="mb-2 text-xs font-medium text-muted">{t("servers.cfgCapabilities")}</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  {CAPABILITY_ITEMS.map(([key, labelKey]) => (
+                    <label key={key} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={batchCfg.capabilities[key]}
+                        onChange={(e) => setBatchCfg({ ...batchCfg, capabilities: { ...batchCfg.capabilities, [key]: e.target.checked } })}
+                      />
+                      {t(labelKey)}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-bg p-3">
+                <p className="mb-1 text-xs font-medium text-muted">{t("servers.cfgFilters")}</p>
+                <p className="mb-2 text-[11px] text-muted/70">{t("servers.cfgFiltersHint")}</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {FILTER_ITEMS.map(([key, labelKey]) => (
+                    <Field key={key} label={t(labelKey)}>
+                      <input
+                        value={batchCfg[key]}
+                        placeholder="eth*, /data/*"
+                        onChange={(e) => setBatchCfg({ ...batchCfg, [key]: e.target.value })}
+                        className={inputCls}
+                      />
+                    </Field>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => runBatchCfg.mutate(batchCfg)}
+              disabled={runBatchCfg.isPending}
+              className="mt-3 rounded-lg bg-accent px-4 py-1.5 text-sm text-white disabled:opacity-40"
+            >
+              {runBatchCfg.isPending ? t("common.loading") : t("servers.batchCfgSubmit")}
+            </button>
+            {batchResults && <BatchResultList results={batchResults} />}
+          </div>
+        </div>
+      )}
+
+      {/* 批量 DDNS */}
+      {batchDDNSOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setBatchDDNSOpen(false)}>
+          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-border bg-panel p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-1 text-sm font-medium">{t("servers.batchDDNSHeading", { count: selected.size })}</h3>
+            <p className="mb-3 text-xs text-muted">{t("servers.batchDDNSHint")}</p>
+            <select
+              value={batchDDNSProfile}
+              onChange={(e) => setBatchDDNSProfile(Number(e.target.value))}
+              className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+            >
+              <option value={0}>{t("servers.batchSelectProfile")}</option>
+              {ddnsProfiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} · {servers.find((s) => s.id === p.server_id)?.name || `#${p.server_id}`} · {p.domains}
+                </option>
+              ))}
+            </select>
+            {ddnsProfiles.length === 0 && <p className="mt-2 text-xs text-muted">{t("servers.batchNoProfile")}</p>}
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => runBatchDDNS.mutate(batchDDNSProfile)}
+                disabled={!batchDDNSProfile || runBatchDDNS.isPending}
+                className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white disabled:opacity-40"
+              >
+                {runBatchDDNS.isPending ? t("common.loading") : t("servers.batchDDNSSubmit")}
+              </button>
+              <button onClick={() => setBatchDDNSOpen(false)} className="rounded-lg border border-border px-4 py-1.5 text-sm">{t("common.close")}</button>
+            </div>
+            {batchResults && <BatchResultList results={batchResults} />}
           </div>
         </div>
       )}
