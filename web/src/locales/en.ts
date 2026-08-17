@@ -47,6 +47,11 @@ export default {
   },
   nav: {
     overview: "Overview",
+    groupMonitor: "Monitoring",
+    groupOps: "Operations",
+    groupNotify: "Notifications",
+    groupSystem: "System",
+    groupExtend: "Extensions",
     servers: "Servers",
     compare: "Compare",
     clipboard: "Clipboard",

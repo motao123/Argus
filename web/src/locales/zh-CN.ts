@@ -46,6 +46,11 @@ export default {
   },
   nav: {
     overview: "总览",
+    groupMonitor: "监控",
+    groupOps: "运维",
+    groupNotify: "通知",
+    groupSystem: "系统",
+    groupExtend: "扩展",
     servers: "服务器",
     compare: "指标对比",
     clipboard: "剪贴板",
