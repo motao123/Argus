@@ -222,11 +222,12 @@ func (ch *connHandler) handleReport(params json.RawMessage) (any, *protocol.RPCE
 		return nil, protocol.NewError(protocol.ErrUnauthorized, "not registered")
 	}
 	if p.Host.Hostname != "" {
-		// 主机名变更则同步到 DB
+		// 主机名变更则同步到 DB，并回写 Store 快照（否则 WS 实时视图与 REST 名称不一致）
 		var srv model.Server
 		if err := ch.hub.db.First(&srv, id).Error; err == nil && srv.Name == "Server" {
 			srv.Name = p.Host.Hostname
 			ch.hub.db.Model(&srv).Update("name", srv.Name)
+			ch.hub.store.Upsert(&srv)
 		}
 		// IPv4 或 IPv6 变化均触发 DDNS，传递 Agent HostInfo 而不是请求来源 IP。
 		if ch.hub.IPChangeCb != nil {
