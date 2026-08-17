@@ -21,6 +21,7 @@ var ErrUnauthorized = errors.New("provider unauthorized")
 
 type Request struct {
 	Domain, RecordType, IP, AccessKey                      string
+	SecretID, SecretKey                                    string // tencent DNSPod 凭据
 	WebhookURL, WebhookMethod, WebhookHeaders, WebhookBody string
 }
 
@@ -39,10 +40,16 @@ func NewClient(httpClient *http.Client) *Client {
 }
 
 func (c *Client) Provider(name string) Provider {
-	if name == "cloudflare" {
+	switch name {
+	case "cloudflare":
 		return &cloudflareProvider{c: c}
+	case "tencent":
+		return &tencentProvider{c: c}
+	case "he":
+		return &heProvider{c: c}
+	default:
+		return &webhookProvider{c: c}
 	}
-	return &webhookProvider{c: c}
 }
 
 func NormalizeDomain(domain string) (string, error) {

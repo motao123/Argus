@@ -456,7 +456,7 @@ export interface DDNSProfile {
   owner_id: number;
   server_id: number;
   name: string;
-  provider: "cloudflare" | "webhook";
+  provider: "cloudflare" | "webhook" | "tencent" | "he";
   record_type: "A" | "AAAA" | "dual";
   domains: string;
   webhook_url: string;

@@ -381,7 +381,8 @@ type ServiceHistory struct {
 	LossSum       float64 `json:"loss_sum"`
 }
 
-// DDNSProfile 动态解析配置。RecordType: A / AAAA / dual。
+// DDNSProfile 动态解析配置。Provider: webhook / cloudflare / tencent / he。
+// RecordType: A / AAAA / dual。
 type DDNSProfile struct {
 	ID             int64             `gorm:"primaryKey" json:"id"`
 	OwnerID        int64             `gorm:"index;default:0" json:"owner_id"`
@@ -389,7 +390,9 @@ type DDNSProfile struct {
 	Name           string            `gorm:"size:64;not null" json:"name"`
 	Provider       string            `gorm:"size:32;default:'webhook'" json:"provider"`
 	RecordType     string            `gorm:"size:8;default:'A'" json:"record_type"`
-	AccessKey      string            `gorm:"size:256;default:''" json:"-"`
+	AccessKey      string            `gorm:"size:256;default:''" json:"-"`  // cloudflare token / HE key
+	SecretID       string            `gorm:"size:256;default:''" json:"-"`  // tencent SecretId
+	SecretKey      string            `gorm:"size:256;default:''" json:"-"`  // tencent SecretKey
 	Domains        string            `gorm:"size:2048;not null" json:"domains"`
 	WebhookURL     string            `gorm:"size:1024;default:''" json:"webhook_url"`
 	WebhookMethod  string            `gorm:"size:8;default:'GET'" json:"webhook_method"`

@@ -22,6 +22,8 @@ type ddnsInput struct {
 	Provider       *string `json:"provider"`
 	RecordType     *string `json:"record_type"`
 	AccessKey      *string `json:"access_key"`
+	SecretID       *string `json:"secret_id"`
+	SecretKey      *string `json:"secret_key"`
 	Domains        *string `json:"domains"`
 	WebhookURL     *string `json:"webhook_url"`
 	WebhookMethod  *string `json:"webhook_method"`
@@ -41,6 +43,8 @@ func (s *Server) ddnsClient() *ddns.Client {
 
 func redactDDNS(p *model.DDNSProfile) {
 	p.AccessKey = ""
+	p.SecretID = ""
+	p.SecretKey = ""
 	if p.WebhookURL != "" {
 		p.WebhookURL = redactedSecret
 	}
@@ -93,7 +97,7 @@ func validateDDNSInput(req ddnsInput, creating bool) (int64, string, string, str
 	if creating && (serverID <= 0 || name == "" || domainsRaw == "") {
 		return 0, "", "", "", "", fmt.Errorf("server_id/name/domains required")
 	}
-	if provider != "cloudflare" && provider != "webhook" {
+	if provider != "cloudflare" && provider != "webhook" && provider != "tencent" && provider != "he" {
 		return 0, "", "", "", "", fmt.Errorf("invalid provider")
 	}
 	if _, err := ddns.RecordTypes(recordType); err != nil {
@@ -109,9 +113,20 @@ func validateDDNSInput(req ddnsInput, creating bool) (int64, string, string, str
 	return serverID, name, provider, recordType, domainsRaw, nil
 }
 
-func validateProviderConfig(provider, accessKey string) error {
-	if provider == "cloudflare" && strings.TrimSpace(accessKey) == "" {
-		return fmt.Errorf("cloudflare API token required")
+func validateProviderConfig(provider, accessKey, secretID, secretKey string) error {
+	switch provider {
+	case "cloudflare":
+		if strings.TrimSpace(accessKey) == "" {
+			return fmt.Errorf("cloudflare API token required")
+		}
+	case "tencent":
+		if strings.TrimSpace(secretID) == "" || strings.TrimSpace(secretKey) == "" {
+			return fmt.Errorf("tencent SecretId and SecretKey required")
+		}
+	case "he":
+		if strings.TrimSpace(accessKey) == "" {
+			return fmt.Errorf("HE DDNS key required")
+		}
 	}
 	return nil
 }
@@ -136,6 +151,12 @@ func (s *Server) createDDNS(c *gin.Context) {
 	if req.AccessKey != nil {
 		profile.AccessKey = *req.AccessKey
 	}
+	if req.SecretID != nil {
+		profile.SecretID = *req.SecretID
+	}
+	if req.SecretKey != nil {
+		profile.SecretKey = *req.SecretKey
+	}
 	if req.WebhookURL != nil {
 		profile.WebhookURL = *req.WebhookURL
 	}
@@ -151,7 +172,7 @@ func (s *Server) createDDNS(c *gin.Context) {
 	if req.Enabled != nil {
 		profile.Enabled = *req.Enabled
 	}
-	if err := validateProviderConfig(profile.Provider, profile.AccessKey); err != nil {
+	if err := validateProviderConfig(profile.Provider, profile.AccessKey, profile.SecretID, profile.SecretKey); err != nil {
 		fail(c, 400, err.Error())
 		return
 	}
@@ -218,6 +239,12 @@ func (s *Server) updateDDNS(c *gin.Context) {
 	if req.AccessKey != nil && *req.AccessKey != "" && *req.AccessKey != redactedSecret {
 		updates["access_key"] = *req.AccessKey
 	}
+	if req.SecretID != nil && *req.SecretID != "" && *req.SecretID != redactedSecret {
+		updates["secret_id"] = *req.SecretID
+	}
+	if req.SecretKey != nil && *req.SecretKey != "" && *req.SecretKey != redactedSecret {
+		updates["secret_key"] = *req.SecretKey
+	}
 	if req.WebhookURL != nil && *req.WebhookURL != "" && *req.WebhookURL != redactedSecret {
 		updates["webhook_url"] = *req.WebhookURL
 	}
@@ -238,7 +265,15 @@ func (s *Server) updateDDNS(c *gin.Context) {
 	if v, ok := updates["access_key"].(string); ok {
 		accessKey = v
 	}
-	if err := validateProviderConfig(finalProvider, accessKey); err != nil {
+	secretID := profile.SecretID
+	if v, ok := updates["secret_id"].(string); ok {
+		secretID = v
+	}
+	secretKey := profile.SecretKey
+	if v, ok := updates["secret_key"].(string); ok {
+		secretKey = v
+	}
+	if err := validateProviderConfig(finalProvider, accessKey, secretID, secretKey); err != nil {
 		fail(c, 400, err.Error())
 		return
 	}
@@ -374,7 +409,12 @@ func (s *Server) runDDNSProfile(profile *model.DDNSProfile, ips map[string]strin
 			continue
 		}
 		attempt := time.Now()
-		err := s.ddnsClient().Provider(profile.Provider).Update(ddns.Request{Domain: state.Domain, RecordType: state.RecordType, IP: ip, AccessKey: profile.AccessKey, WebhookURL: profile.WebhookURL, WebhookMethod: profile.WebhookMethod, WebhookHeaders: profile.WebhookHeaders, WebhookBody: profile.WebhookBody})
+		err := s.ddnsClient().Provider(profile.Provider).Update(ddns.Request{
+			Domain: state.Domain, RecordType: state.RecordType, IP: ip,
+			AccessKey: profile.AccessKey, SecretID: profile.SecretID, SecretKey: profile.SecretKey,
+			WebhookURL: profile.WebhookURL, WebhookMethod: profile.WebhookMethod,
+			WebhookHeaders: profile.WebhookHeaders, WebhookBody: profile.WebhookBody,
+		})
 		updates := map[string]any{"last_attempt": attempt}
 		if err == nil {
 			updates["status"] = "success"

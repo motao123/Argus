@@ -155,7 +155,7 @@ func (s *Server) batchDDNSServers(c *gin.Context) {
 		fail(c, http.StatusNotFound, "ddns profile not found")
 		return
 	}
-	if err := validateProviderConfig(source.Provider, source.AccessKey); err != nil {
+	if err := validateProviderConfig(source.Provider, source.AccessKey, source.SecretID, source.SecretKey); err != nil {
 		fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
