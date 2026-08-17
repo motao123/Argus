@@ -82,6 +82,14 @@ type transfer struct {
 
 const protocolVersion = "2025-03-26"
 
+// version 服务端版本，用于 initialize 的 serverInfo.version。
+// 发布构建通过 ldflags 注入真实版本：
+//
+//	-X github.com/motao123/Argus/server/internal/mcp.version=$VERSION
+//
+// （参见 scripts/release-build.sh）；本地构建未注入时回退到开发版本常量。
+var version = "0.1.0"
+
 var toolDefinitions = []map[string]any{
 	{"name": "server.list", "description": "List authorized Argus servers", "inputSchema": map[string]any{"type": "object"}},
 	{"name": "server.get", "description": "Get an authorized server", "inputSchema": map[string]any{"type": "object", "required": []string{"id"}, "properties": map[string]any{"id": map[string]any{"type": "integer"}}}},
@@ -240,7 +248,7 @@ func (s *Server) dispatch(method string, params json.RawMessage, p *Principal) (
 	}
 	switch method {
 	case "initialize":
-		return map[string]any{"protocolVersion": protocolVersion, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]any{"name": "argus", "version": "milestone-6"}}, nil
+		return map[string]any{"protocolVersion": protocolVersion, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]any{"name": "argus", "version": version}}, nil
 	case "notifications/initialized":
 		return map[string]any{}, nil
 	case "ping":

@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-
-	"github.com/motao123/Argus/server/internal/model"
 )
 
 const (
@@ -120,6 +118,3 @@ func (c *Cleaner) trimRows(table string, keep int) {
 		}
 	}
 }
-
-// Compile-time references keep table naming coupled to the GORM models used above.
-var _ = []any{model.Metric{}, model.ServiceHistory{}, model.Transfer{}, model.AuditLog{}}

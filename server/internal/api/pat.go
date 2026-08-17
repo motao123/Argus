@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -124,6 +123,7 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 			return
 		}
 		c.Set("principal", p)
+		s.onlineTouch(c, p.Username, authMethodOf(p))
 		c.Next()
 	}
 }
@@ -136,8 +136,12 @@ func (s *Server) optionalAuthMiddleware() gin.HandlerFunc {
 		if strings.HasPrefix(auth, "Bearer ") {
 			if p, err := s.identify(strings.TrimPrefix(auth, "Bearer ")); err == nil {
 				c.Set("principal", p)
+				s.onlineTouch(c, p.Username, authMethodOf(p))
+				c.Next()
+				return
 			}
 		}
+		s.onlineTouch(c, "", "guest")
 		c.Next()
 	}
 }
@@ -186,6 +190,7 @@ func (s *Server) authWS(c *gin.Context) {
 		return
 	}
 	c.Set("principal", p)
+	s.onlineTouch(c, p.Username, authMethodOf(p))
 	c.Next()
 }
 
@@ -228,84 +233,9 @@ func (s *Server) readonlyGate() gin.HandlerFunc {
 	}
 }
 
-// ---- 全局爆破防护（借鉴 nezha WAF；真实固定时间窗口）----
-
-type wafState struct {
-	windowStart  time.Time
-	count        int
-	blockedUntil time.Time
-}
-
-type wafLimiter struct {
-	mu       sync.Mutex
-	entries  map[string]*wafState
-	now      func() time.Time
-	limit    int           // 每窗口最大请求数
-	window   time.Duration // 窗口长度
-	blockFor time.Duration // 超限封禁时长
-}
-
-// wafMiddleware 每 IP 每窗口限 limit 请求，超限封禁 blockFor。
-func wafMiddleware() gin.HandlerFunc {
-	return newWAF(300, time.Minute, 10*time.Minute).middleware()
-}
-
-func newWAF(limit int, window, blockFor time.Duration) *wafLimiter {
-	return &wafLimiter{
-		entries:  make(map[string]*wafState),
-		now:      time.Now,
-		limit:    limit,
-		window:   window,
-		blockFor: blockFor,
-	}
-}
-
-func (w *wafLimiter) middleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		w.mu.Lock()
-		now := w.now()
-		st, ok := w.entries[ip]
-		if !ok {
-			st = &wafState{windowStart: now}
-			w.entries[ip] = st
-		}
-		// 过期封禁自动解除并清理
-		if !st.blockedUntil.IsZero() && now.After(st.blockedUntil) {
-			delete(w.entries, ip)
-			st = &wafState{windowStart: now}
-			w.entries[ip] = st
-		}
-		// 窗口重置
-		if now.Sub(st.windowStart) >= w.window {
-			st.windowStart = now
-			st.count = 0
-		}
-		if !st.blockedUntil.IsZero() {
-			w.mu.Unlock()
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"success": false, "error": "ip temporarily blocked"})
-			return
-		}
-		st.count++
-		if st.count > w.limit {
-			st.blockedUntil = now.Add(w.blockFor)
-			st.count = 0
-			w.mu.Unlock()
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"success": false, "error": "ip temporarily blocked"})
-			return
-		}
-		// 周期性清理闲置条目，防止内存增长
-		if len(w.entries) > 4096 {
-			for k, e := range w.entries {
-				if now.Sub(e.windowStart) > 24*w.window {
-					delete(w.entries, k)
-				}
-			}
-		}
-		w.mu.Unlock()
-		c.Next()
-	}
-}
+// ---- 全局爆破防护（借鉴 nezha WAF）----
+// wafLimiter / wafBanManager / wafMiddleware 见 waf.go：限流状态在内存，
+// 封禁记录持久化到封禁表（rate/login/manual 三来源共用，到期自动解封）。
 
 // identify 识别 Bearer token：先试 JWT，再试 PAT。
 func (s *Server) identify(raw string) (*principal, error) {

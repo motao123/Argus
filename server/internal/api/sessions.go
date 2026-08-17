@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -157,6 +155,3 @@ func (s *Server) revokeAllSessions(c *gin.Context) {
 	s.auditLog(c, "session.revoke_all", fmt.Sprintf("user_id=%d revoked=%d", userID, revoked))
 	ok(c, gin.H{"ok": true, "revoked": revoked})
 }
-
-var _ = hex.EncodeToString
-var _ = rand.Read

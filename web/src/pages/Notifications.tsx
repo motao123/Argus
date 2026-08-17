@@ -16,6 +16,18 @@ const deliveryStatusLabel: Record<string, TKey> = {
   failed: "notifications.deliveryStatusFailed",
 };
 
+type TrafficReportCfg = { webhook_id: number; period: "daily" | "weekly" | "monthly"; hour: number; weekday: number; day: number; enabled: boolean };
+
+const weekdayLabels: Record<number, TKey> = {
+  0: "notifications.weekdaySun",
+  1: "notifications.weekdayMon",
+  2: "notifications.weekdayTue",
+  3: "notifications.weekdayWed",
+  4: "notifications.weekdayThu",
+  5: "notifications.weekdayFri",
+  6: "notifications.weekdaySat",
+};
+
 export default function Notifications() {
   const { t, tErr, fmtDateTime } = useI18n();
   const qc = useQueryClient();
@@ -23,13 +35,16 @@ export default function Notifications() {
   const { data: groupData } = useQuery({ queryKey: ["notification-groups"], queryFn: api.notificationGroups });
   const { data: offline } = useQuery({ queryKey: ["offline-notify"], queryFn: api.offlineNotify });
   const { data: traffic } = useQuery({ queryKey: ["traffic-report"], queryFn: api.trafficReport });
+  const { data: settingsData } = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const { data: deliveryData } = useQuery({ queryKey: ["deliveries"], queryFn: () => api.deliveries(0, 50) });
   const notifications = notifData?.notifications ?? [];
   const groups = groupData?.groups ?? [];
   const deliveries = deliveryData?.deliveries ?? [];
+  const settings = settingsData?.settings ?? {};
 
   const [offlineForm, setOfflineForm] = useState<{ webhook_id: number; offline_after: number; enabled: boolean } | null>(null);
-  const [trafficForm, setTrafficForm] = useState<{ webhook_id: number; hour: number; enabled: boolean } | null>(null);
+  const [trafficForm, setTrafficForm] = useState<TrafficReportCfg | null>(null);
+  const [expireDays, setExpireDays] = useState<string | null>(null);
   const [newGroup, setNewGroup] = useState("");
   const [msg, setMsg] = useState("");
 
@@ -41,6 +56,11 @@ export default function Notifications() {
   const saveTraffic = useMutation({
     mutationFn: api.saveTrafficReport,
     onSuccess: () => { setMsg(t("notifications.trafficSaved")); qc.invalidateQueries({ queryKey: ["traffic-report"] }); },
+    onError: (e) => setMsg(tErr(e)),
+  });
+  const saveExpire = useMutation({
+    mutationFn: (days: string) => api.saveSettings({ expire_notify_days: days }),
+    onSuccess: () => { setMsg(t("notifications.expireSaved")); setExpireDays(null); qc.invalidateQueries({ queryKey: ["settings"] }); },
     onError: (e) => setMsg(tErr(e)),
   });
   const createGroup = useMutation({
@@ -130,6 +150,45 @@ export default function Notifications() {
               {webhookSelect(trafficForm.webhook_id, (v) => setTrafficForm({ ...trafficForm, webhook_id: v }))}
             </div>
             <div>
+              <div className="mb-1 text-xs text-muted">{t("notifications.trafficPeriod")}</div>
+              <select
+                value={trafficForm.period}
+                onChange={(e) => setTrafficForm({ ...trafficForm, period: e.target.value as TrafficReportCfg["period"] })}
+                className="rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+              >
+                <option value="daily">{t("notifications.periodDaily")}</option>
+                <option value="weekly">{t("notifications.periodWeekly")}</option>
+                <option value="monthly">{t("notifications.periodMonthly")}</option>
+              </select>
+            </div>
+            {trafficForm.period === "weekly" && (
+              <div>
+                <div className="mb-1 text-xs text-muted">{t("notifications.sendWeekday")}</div>
+                <select
+                  value={trafficForm.weekday}
+                  onChange={(e) => setTrafficForm({ ...trafficForm, weekday: Number(e.target.value) })}
+                  className="rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+                >
+                  {Object.entries(weekdayLabels).map(([v, label]) => (
+                    <option key={v} value={v}>{t(label)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {trafficForm.period === "monthly" && (
+              <div>
+                <div className="mb-1 text-xs text-muted">{t("notifications.sendDay")}</div>
+                <input
+                  type="number"
+                  min={1}
+                  max={28}
+                  value={trafficForm.day}
+                  onChange={(e) => setTrafficForm({ ...trafficForm, day: Number(e.target.value) })}
+                  className="w-28 rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+                />
+              </div>
+            )}
+            <div>
               <div className="mb-1 text-xs text-muted">{t("notifications.sendHour")}</div>
               <input
                 type="number"
@@ -150,10 +209,55 @@ export default function Notifications() {
         ) : (
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted">
-              {traffic?.enabled ? t("notifications.trafficSummary", { hour: traffic.hour, channel: channelRef(traffic.webhook_id) }) : t("notifications.notEnabled")}
+              {traffic?.enabled ? (
+                traffic.period === "weekly"
+                  ? t("notifications.trafficSummaryWeekly", { weekday: t(weekdayLabels[traffic.weekday] ?? "notifications.weekdayMon"), hour: traffic.hour, channel: channelRef(traffic.webhook_id) })
+                  : traffic.period === "monthly"
+                    ? t("notifications.trafficSummaryMonthly", { day: traffic.day, hour: traffic.hour, channel: channelRef(traffic.webhook_id) })
+                    : t("notifications.trafficSummary", { hour: traffic.hour, channel: channelRef(traffic.webhook_id) })
+              ) : t("notifications.notEnabled")}
             </span>
             <button
-              onClick={() => setTrafficForm({ webhook_id: traffic?.webhook_id ?? 0, hour: traffic?.hour ?? 9, enabled: traffic?.enabled ?? true })}
+              onClick={() => setTrafficForm({
+                webhook_id: traffic?.webhook_id ?? 0,
+                period: (traffic?.period as TrafficReportCfg["period"]) || "daily",
+                hour: traffic?.hour ?? 9,
+                weekday: traffic?.weekday ?? 1,
+                day: traffic?.day ?? 1,
+                enabled: traffic?.enabled ?? true,
+              })}
+              className="rounded-lg border border-border px-3 py-1.5 text-sm"
+            >
+              {t("notifications.configure")}
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* 到期提醒 */}
+      <section className="rounded-xl border border-border bg-panel p-4">
+        <h2 className="mb-3 text-sm font-medium">{t("notifications.expireTitle")}</h2>
+        {expireDays !== null ? (
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <div className="mb-1 text-xs text-muted">{t("notifications.expireDays")}</div>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={expireDays}
+                onChange={(e) => setExpireDays(e.target.value)}
+                className="w-28 rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+              />
+            </div>
+            <button onClick={() => expireDays && saveExpire.mutate(expireDays)} className="rounded-lg bg-accent px-4 py-2 text-sm text-white">{t("common.save")}</button>
+            <button onClick={() => setExpireDays(null)} className="rounded-lg border border-border px-4 py-2 text-sm">{t("common.cancel")}</button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted">{t("notifications.expireSummary", { days: settings.expire_notify_days ?? "3" })}</span>
+            <button
+              onClick={() => setExpireDays(settings.expire_notify_days ?? "3")}
               className="rounded-lg border border-border px-3 py-1.5 text-sm"
             >
               {t("notifications.configure")}

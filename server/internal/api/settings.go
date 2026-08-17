@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,15 +12,16 @@ import (
 
 // 站点设置键
 const (
-	SettingSiteName     = "site_name"
-	SettingSiteDesc     = "site_desc"
-	SettingFavicon      = "favicon"
-	SettingForceAuth    = "force_auth"     // 1 = 强制登录
-	SettingTermFontSize = "term_font_size" // 终端字号（默认 13）
-	SettingTermTheme    = "term_theme"     // 终端主题：dark/light
-	SettingCustomCSS    = "custom_css"     // 注入两站 <head> 的 CSS
-	SettingCustomJS     = "custom_js"      // 注入两站 </body> 前的 JS
-	SettingCustomFooter = "custom_footer"  // 前台页脚自定义 HTML
+	SettingSiteName         = "site_name"
+	SettingSiteDesc         = "site_desc"
+	SettingFavicon          = "favicon"
+	SettingForceAuth        = "force_auth"         // 1 = 强制登录
+	SettingTermFontSize     = "term_font_size"     // 终端字号（默认 13）
+	SettingTermTheme        = "term_theme"         // 终端主题：dark/light
+	SettingCustomCSS        = "custom_css"         // 注入两站 <head> 的 CSS
+	SettingCustomJS         = "custom_js"          // 注入两站 </body> 前的 JS
+	SettingCustomFooter     = "custom_footer"      // 前台页脚自定义 HTML
+	SettingExpireNotifyDays = "expire_notify_days" // 到期提前提醒天数（默认 3，范围 1-30）
 )
 
 // GetSetting 读设置（默认值兜底）。
@@ -72,6 +74,7 @@ func (s *Server) getSettings(c *gin.Context) {
 	for _, st := range settings {
 		m[st.Key] = st.Value
 	}
+	m[SettingExpireNotifyDays] = s.GetSetting(SettingExpireNotifyDays, "3")
 	ok(c, gin.H{"settings": m})
 }
 
@@ -92,6 +95,12 @@ func (s *Server) saveSettings(c *gin.Context) {
 	if err := retention.ValidateSettings(req.Settings); err != nil {
 		fail(c, http.StatusBadRequest, err.Error())
 		return
+	}
+	if raw, ok := req.Settings[SettingExpireNotifyDays]; ok {
+		if v, err := strconv.Atoi(raw); err != nil || v < 1 || v > 30 {
+			fail(c, http.StatusBadRequest, "expire_notify_days must be an integer between 1 and 30")
+			return
+		}
 	}
 	for k, v := range req.Settings {
 		var st model.Setting

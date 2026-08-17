@@ -42,14 +42,22 @@ type Server struct {
 	Notifier  *notifier.Queue // 通知持久队列（送达记录 + 重试）
 	Backups   *backup.Manager // 定时加密备份管理器
 
+	// waf 全局 IP 封禁管理器（WAF 限流 / 登录限流 / 手动封禁共用，持久化封禁表）。
+	waf *wafBanManager
+	// online 在线访客/用户跟踪（最近请求 IP + 活跃会话 + WS/终端长连接）。
+	online *onlineTracker
+
 	// upgradeResumeDelay 控制重启后恢复 pending 升级任务的宽限期（仅测试覆盖）。
 	upgradeResumeDelay time.Duration
 }
 
 // New 构建 gin 引擎并注册全部路由。
 func New(s *Server) *gin.Engine {
+	// 先初始化 WAF 封禁管理器（载入持久化封禁）与在线跟踪器，再挂中间件
+	s.wafMgr()
+	s.onlineMgr()
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery(), wafMiddleware())
+	r.Use(gin.Logger(), gin.Recovery(), s.wafMiddleware())
 
 	api := r.Group("/api/v1")
 	{
@@ -231,6 +239,12 @@ func New(s *Server) *gin.Engine {
 			authed.GET("/sessions", s.listSessions)
 			authed.DELETE("/sessions/:id", s.revokeSession)
 			authed.DELETE("/sessions", s.revokeAllSessions)
+
+			// WAF 封禁与在线用户（admin；封禁记录与登录限流/全局 WAF 共用）
+			authed.GET("/admin/online", requireAdmin(), s.listOnline)
+			authed.GET("/admin/waf/bans", requireAdmin(), s.listBans)
+			authed.POST("/admin/waf/ban", requireAdmin(), s.banIP)
+			authed.DELETE("/admin/waf/ban/:ip", requireAdmin(), s.unbanIP)
 
 			// Agent 配置下发（admin）
 			authed.POST("/servers/:id/config", s.serverApplyConfig)

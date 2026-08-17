@@ -308,18 +308,27 @@ func main() {
 		log.Fatalf("initialize upgrade jobs: %v", err)
 	}
 
-	// 每日任务：流量报告 + 到期提醒（借鉴 komari 流量报告/renewal）
+	// 定时任务：流量报告（daily/weekly/monthly 计划）+ 到期提醒（借鉴 komari 流量报告/renewal）。
+	// RunScheduledReports 每小时检查各周期的计划（daily=hour；weekly=weekday+hour；monthly=day+hour），
+	// 命中则经通知持久队列发送；RunExpireCheck 每日一次。
 	go func() {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
 		lastDay := -1
-		for range ticker.C {
-			if time.Now().Day() == lastDay {
-				continue
+		lastFiredHour := -1
+		check := func(now time.Time) {
+			if now.Day() != lastDay {
+				lastDay = now.Day()
+				srv.RunExpireCheck()
 			}
-			lastDay = time.Now().Day()
-			srv.RunTrafficReport()
-			srv.RunExpireCheck()
+			if now.Hour() != lastFiredHour {
+				lastFiredHour = now.Hour()
+				srv.RunScheduledReports(now)
+			}
+		}
+		check(time.Now())
+		for range ticker.C {
+			check(time.Now())
 		}
 	}()
 

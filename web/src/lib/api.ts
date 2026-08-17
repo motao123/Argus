@@ -540,6 +540,27 @@ export interface Me {
   two_fa_enabled: boolean;
 }
 
+/** 在线访客/用户（GET /admin/online）。 */
+export interface OnlineUser {
+  ip: string;
+  username: string; // 游客为空
+  auth_method: "jwt" | "pat" | "guest";
+  last_active_at: string;
+  connections: number; // WS/终端等长连接数
+}
+
+/** IP 封禁记录（GET /admin/waf/bans）。 */
+export interface WafBan {
+  id: number;
+  ip: string;
+  reason: string;
+  count: number;
+  source: "rate" | "login" | "manual";
+  banned_at: string;
+  expire_at: string | null; // null = 永久
+  created_at: string;
+}
+
 export interface TwoFASetup {
   secret: string;
   otpauth_url: string;
@@ -822,8 +843,9 @@ export const api = {
   offlineNotify: () => request<{ webhook_id: number; offline_after: number; enabled: boolean }>("/api/v1/offline-notify"),
   saveOfflineNotify: (cfg: { webhook_id: number; offline_after: number; enabled: boolean }) =>
     request<{ ok: boolean }>("/api/v1/offline-notify", { method: "POST", body: JSON.stringify(cfg) }),
-  trafficReport: () => request<{ webhook_id: number; hour: number; enabled: boolean }>("/api/v1/traffic-report"),
-  saveTrafficReport: (cfg: { webhook_id: number; hour: number; enabled: boolean }) =>
+  trafficReport: () =>
+    request<{ webhook_id: number; period: string; hour: number; weekday: number; day: number; enabled: boolean }>("/api/v1/traffic-report"),
+  saveTrafficReport: (cfg: { webhook_id: number; period: string; hour: number; weekday: number; day: number; enabled: boolean }) =>
     request<{ ok: boolean }>("/api/v1/traffic-report", { method: "POST", body: JSON.stringify(cfg) }),
 
   transfers: () => request<{ transfers: TransferRecord[] }>("/api/v1/server-transfers"),
@@ -878,6 +900,14 @@ export const api = {
   sessions: () => request<{ sessions: Session[] }>("/api/v1/sessions"),
   kickSession: (id: number) => request(`/api/v1/sessions/${id}`, { method: "DELETE" }),
   kickAllSessions: (userId?: number) => request(`/api/v1/sessions${userId ? `?user_id=${userId}` : ""}`, { method: "DELETE" }),
+
+  // WAF 封禁与在线用户（admin）
+  onlineUsers: () => request<{ online: OnlineUser[] }>("/api/v1/admin/online"),
+  wafBans: (offset = 0, limit = 50) =>
+    request<{ bans: WafBan[]; pagination?: { total: number } }>(`/api/v1/admin/waf/bans?offset=${offset}&limit=${limit}`),
+  banIP: (ip: string, reason = "", hours = 24) =>
+    request<{ ban: WafBan }>("/api/v1/admin/waf/ban", { method: "POST", body: JSON.stringify({ ip, reason, hours }) }),
+  unbanIP: (ip: string) => request(`/api/v1/admin/waf/ban/${encodeURIComponent(ip)}`, { method: "DELETE" }),
 
   ddns: () => request<{ profiles: DDNSProfile[] }>("/api/v1/ddns"),
   saveDDNS: async (p: Partial<DDNSProfile> & { id?: number; access_key?: string }): Promise<DDNSProfile | { ok: boolean }> =>

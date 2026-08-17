@@ -5,7 +5,6 @@ package sentinel
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -227,5 +226,3 @@ func (s *Sentinel) record(serviceID int64, r protocol.ServiceCheckResult) {
 	}
 	s.db.Create(&h)
 }
-
-var _ = log.Printf

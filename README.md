@@ -154,6 +154,7 @@ bash scripts/release-build.sh   # 仅构建（需已存在 webdist）
 - [x] 文件管理器：远端目录浏览 / 上传 / 预览 / 删除
 - [x] 远程执行：管理台直接执行命令并查看输出
 - [x] Agent 批量升级：持久化 Job + 受控并发 + 逐机回执 + SHA-256 强制校验 + 失败回滚；Server 重启后自动恢复未完成任务
+- [x] Agent 能力开关与网卡/挂载过滤：按服务器开关 metrics / probe / command / terminal / files / upgrade / nat 采集能力，并按网卡名与挂载点 include/exclude 过滤上报（UI 入口：服务器 → 新建/编辑配置）
 - [x] 生命周期：服务器过户（密钥轮换 + 状态机 + 取消回滚）
 
 **MCP（默认关闭，`ARGUS_MCP_ENABLED=true` 启用）**
@@ -167,7 +168,7 @@ bash scripts/release-build.sh   # 仅构建（需已存在 webdist）
 - [x] 通知渠道：webhook / bark / telegram / email / serverchan
 
 **权限**
-- [x] 多用户：admin / user 两级，用户仅见名下服务器
+- [x] 多用户：admin / user / readonly 三级；readonly 只读角色仅可查看公开视图与名下服务器状态、调用只读 MCP 工具（UI 入口：访问控制 → 用户角色）
 - [x] PAT 令牌：argus:{resource}:{verb} scope + 白名单 + 吊销
 
 **前端**

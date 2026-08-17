@@ -18,8 +18,9 @@ func (f *fakeClock) advance(d time.Duration) { f.now = f.now.Add(d) }
 
 func TestWAFWindowResetAndBlock(t *testing.T) {
 	clk := &fakeClock{now: time.Now()}
-	lim := newWAF(5, time.Minute, 10*time.Minute)
-	lim.now = func() time.Time { return clk.now }
+	clock := func() time.Time { return clk.now }
+	lim := newWAF(5, time.Minute, 10*time.Minute, newWAFManager(nil, clock))
+	lim.clock = clock
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

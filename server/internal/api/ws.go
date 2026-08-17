@@ -48,6 +48,10 @@ func (s *Server) dashboardWS(c *gin.Context) {
 		_ = conn.Close()
 		return
 	}
+	// 在线跟踪：仪表盘 WebSocket 记为一条长连接
+	ip := c.ClientIP()
+	connID := s.onlineMgr().connOpen(ip, usernameOf(p), authMethodOf(p), "ws")
+	defer s.onlineMgr().connClose(ip, connID)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -170,6 +174,11 @@ func (s *Server) terminalWS(c *gin.Context) {
 		return
 	}
 
+	// 在线跟踪：终端连接记为一条长连接
+	ip := c.ClientIP()
+	connID := s.onlineMgr().connOpen(ip, usernameOf(principalFromContext(c)), authMethodOf(principalFromContext(c)), "term")
+	defer s.onlineMgr().connClose(ip, connID)
+
 	termMu.Lock()
 	termConns[sessionID] = conn
 	termMu.Unlock()
@@ -202,7 +211,6 @@ func (s *Server) terminalWS(c *gin.Context) {
 	}
 }
 
-// handleAgentTermData 由 agent.Hub 回调：Agent 输出 → 浏览器。
 // HandleAgentTermData 由 agent.Hub 回调：Agent 输出 → 浏览器。
 func (s *Server) HandleAgentTermData(serverID int64, data protocol.TerminalData) {
 	termMu.Lock()

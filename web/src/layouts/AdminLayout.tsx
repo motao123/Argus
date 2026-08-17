@@ -1,4 +1,4 @@
-import { Activity, Bell, BellRing, CalendarClock, ClipboardList, DatabaseBackup, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Palette, Radar, ScrollText, Settings as SettingsIcon, ShieldCheck, Sun, TriangleAlert, Users, Wrench, X, Zap } from "lucide-react";
+import { Activity, Bell, BellRing, CalendarClock, ClipboardList, DatabaseBackup, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Palette, Radar, ScrollText, Settings as SettingsIcon, ShieldAlert, ShieldCheck, Sun, TriangleAlert, Users, Wrench, X, Zap } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -22,6 +22,7 @@ const nav: { to: string; key: TKey; icon: typeof LayoutDashboard; roles?: string
   { to: "/admin/sessions", key: "nav.sessions", icon: Users },
   { to: "/admin/network", key: "nav.network", icon: NetworkIcon, roles: ["admin", "user"] },
   { to: "/admin/security", key: "nav.security", icon: ShieldCheck },
+  { to: "/admin/waf", key: "nav.waf", icon: ShieldAlert, roles: ["admin"] },
   { to: "/admin/notifications", key: "nav.notifications", icon: BellRing, roles: ["admin"] },
   { to: "/admin/plugins", key: "nav.plugins", icon: Zap, roles: ["admin"] },
   { to: "/admin/themes", key: "nav.themes", icon: Palette, roles: ["admin"] },

@@ -3,7 +3,6 @@ package api
 import (
 	"image/png"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pquerna/otp/totp"
@@ -133,5 +132,3 @@ func verifyTwoFA(user *model.User, code string) bool {
 	}
 	return totp.Validate(code, user.TwoFASecret)
 }
-
-var _ = time.Now

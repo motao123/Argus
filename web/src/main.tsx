@@ -22,6 +22,7 @@ import Sessions from "./pages/Sessions";
 import Settings from "./pages/Settings";
 import Network from "./pages/Network";
 import Security from "./pages/Security";
+import Waf from "./pages/Waf";
 import Maintenance from "./pages/Maintenance";
 import Backups from "./pages/Backups";
 import Incidents from "./pages/Incidents";
@@ -97,6 +98,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/admin/sessions" element={<Sessions />} />
             <Route path="/admin/network" element={<RequireRole roles={["admin", "user"]}><Network /></RequireRole>} />
             <Route path="/admin/security" element={<Security />} />
+            <Route path="/admin/waf" element={<RequireRole roles={["admin"]}><Waf /></RequireRole>} />
             <Route path="/admin/maintenance" element={<RequireRole roles={["admin"]}><Maintenance /></RequireRole>} />
             <Route path="/admin/backups" element={<RequireRole roles={["admin"]}><Backups /></RequireRole>} />
             <Route path="/admin/incidents" element={<RequireRole roles={["admin", "user"]}><Incidents /></RequireRole>} />

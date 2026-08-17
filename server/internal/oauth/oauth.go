@@ -54,13 +54,6 @@ func (c *Client) GetConfig(name string) (*ProviderConfig, bool) {
 	return cfg, ok
 }
 
-// RemoveConfig 删除 provider 配置。
-func (c *Client) RemoveConfig(name string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.configs, name)
-}
-
 // BuildAuthURL 生成授权跳转链接。
 func (c *Client) BuildAuthURL(name, redirectURI, state string) (string, error) {
 	cfg, ok := c.GetConfig(name)
@@ -136,26 +129,6 @@ func (c *ProviderConfig) IsAdminLogin(username string) bool {
 		}
 	}
 	return false
-}
-
-// DefaultProviders 内置 provider 模板。
-func DefaultProviders() map[string]*ProviderConfig {
-	return map[string]*ProviderConfig{
-		"github": {
-			Name:          "github",
-			AuthURL:       "https://github.com/login/oauth/authorize",
-			TokenURL:      "https://github.com/login/oauth/access_token",
-			UserInfoURL:   "https://api.github.com/user",
-			UsernameField: "login",
-		},
-		"gitee": {
-			Name:          "gitee",
-			AuthURL:       "https://gitee.com/oauth/authorize",
-			TokenURL:      "https://gitee.com/oauth/token",
-			UserInfoURL:   "https://gitee.com/api/v5/user",
-			UsernameField: "login",
-		},
-	}
 }
 
 // BuildCustomURL 通用 OIDC provider 校验。

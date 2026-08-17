@@ -2,7 +2,6 @@ package api
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"sync"
@@ -330,5 +329,3 @@ func randomHex(n int) string {
 }
 
 func agentGenSecret() string { return agent.GenSecret() }
-
-var _ = sha256.Sum256

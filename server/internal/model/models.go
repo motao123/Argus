@@ -65,10 +65,15 @@ type User struct {
 }
 
 // TrafficReport 流量定时报告配置（借鉴 komari 流量报告通知）。
+// Period: daily（每日，默认，兼容旧配置）/ weekly（每周）/ monthly（每月）。
+// 发送时刻：daily 用 Hour；weekly 用 Weekday+Hour；monthly 用 Day+Hour。
 type TrafficReport struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
 	WebhookID int64     `json:"webhook_id"`
-	Hour      int       `gorm:"default:9" json:"hour"` // 每天几点发送
+	Period    string    `gorm:"size:16;default:'daily'" json:"period"` // daily / weekly / monthly
+	Hour      int       `gorm:"default:9" json:"hour"`                 // 发送时刻（小时 0-23）
+	Weekday   int       `gorm:"default:1" json:"weekday"`              // weekly：星期几（0=周日 … 6=周六；默认 1=周一）
+	Day       int       `gorm:"default:1" json:"day"`                  // monthly：每月几号（1-28）
 	Enabled   bool      `gorm:"default:false" json:"enabled"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -400,6 +405,26 @@ type RevokedSession struct {
 	JTI       string    `gorm:"size:64;not null;uniqueIndex" json:"-"`
 	ExpiresAt time.Time `gorm:"index" json:"-"`
 	CreatedAt time.Time `json:"-"`
+}
+
+// WAF 封禁来源：全局速率超限 / 登录失败限流 / 管理员手动封禁。
+const (
+	BanSourceRate   = "rate"
+	BanSourceLogin  = "login"
+	BanSourceManual = "manual"
+)
+
+// WAFBan IP 封禁记录（持久化；全局 WAF 与登录限流共用，支持手动封禁/解封）。
+// ExpireAt 为空表示永久封禁；到期自动解封（中间件惰性清理，管理员解封即时生效）。
+type WAFBan struct {
+	ID        int64      `gorm:"primaryKey" json:"id"`
+	IP        string     `gorm:"size:64;not null;uniqueIndex" json:"ip"`
+	Reason    string     `gorm:"size:255;default:''" json:"reason"`
+	Count     int        `gorm:"default:1" json:"count"`                          // 累计触发次数（同一 IP 重复触发递增）
+	Source    string     `gorm:"size:16;not null;default:'manual'" json:"source"` // rate / login / manual
+	BannedAt  time.Time  `json:"banned_at"`
+	ExpireAt  *time.Time `json:"expire_at"` // nil = 永久
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // Setting 站点设置键值（借鉴 komari DB 存储配置）。
