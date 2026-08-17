@@ -185,6 +185,12 @@ func loadSecret(path string) (string, error) {
 }
 
 func saveSecret(path string, serverID int64, secret string) error {
+	// 配置目录可能不存在（首次安装未预建），先创建再写入，避免注册密钥无法持久化
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
 	m := map[string]any{"server_id": serverID, "secret": secret}
 	data, _ := json.MarshalIndent(m, "", "  ")
 	return os.WriteFile(path, data, 0600)
