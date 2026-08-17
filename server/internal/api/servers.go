@@ -194,14 +194,14 @@ func (s *Server) listServers(c *gin.Context) {
 // createServer 手动创建服务器（返回密钥，用于 Agent 配置）。
 func (s *Server) createServer(c *gin.Context) {
 	var req struct {
-		Name              string  `json:"name"`
-		Group             string  `json:"group"`
-		Note              string  `json:"note"`
+		Name              string   `json:"name"`
+		Group             string   `json:"group"`
+		Note              string   `json:"note"`
 		SloTarget         *float64 `json:"slo_target"` // 空 = 默认 99.9，0 = 不启用 SLO
-		TrafficQuotaBytes uint64  `json:"traffic_quota_bytes"`
-		TrafficCycleDay   int     `json:"traffic_cycle_day"`
-		TrafficTimezone   string  `json:"traffic_timezone"`
-		TrafficAccounting string  `json:"traffic_accounting"`
+		TrafficQuotaBytes uint64   `json:"traffic_quota_bytes"`
+		TrafficCycleDay   int      `json:"traffic_cycle_day"`
+		TrafficTimezone   string   `json:"traffic_timezone"`
+		TrafficAccounting string   `json:"traffic_accounting"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
