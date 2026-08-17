@@ -7,10 +7,15 @@
 # 可选参数（与旧版保持兼容）：
 #   -s <url>       Server WebSocket 地址（必填，如 ws://127.0.0.1:8080/ws/agent）
 #   -k <secret>    注册密钥（服务器密钥或用户 Agent 密钥，必填）
+#   -m <base>      国内镜像下载根 URL（如 AtomGit/Gitee Release 镜像，优先级最高）
 #   -u <base>      二进制下载根 URL（默认 GitHub Releases latest）
 #   -v <version>   Agent 版本（默认 latest）
 #   -c <dir>       Agent 配置目录（默认 /etc/argus-agent）
 #   -p <prefix>    安装前缀（默认 /usr/local，二进制在 $prefix/bin）
+#
+# 下载源优先级：-m/--mirror > ARGUS_AGENT_MIRROR > -u > ARGUS_AGENT_BASE_URL >
+# 默认 GitHub Releases latest。镜像根 URL 结构须与 GitHub Release 产物一致：
+# <base>/argus-agent-<os>-<arch> 与 <base>/checksums.txt。
 #
 # 平台支持：linux/darwin/freebsd，架构与 release 实际产物严格对齐——
 #   linux: 386 amd64 arm arm64 riscv64 s390x loong64 mips mipsle
@@ -25,13 +30,14 @@ set -eu
 
 SERVER_URL=""
 SECRET=""
+MIRROR="${ARGUS_AGENT_MIRROR:-}"
 BASE_URL="${ARGUS_AGENT_BASE_URL:-https://github.com/motao123/Argus/releases/latest/download}"
 VERSION="latest"
 CONF_DIR="/etc/argus-agent"
 PREFIX="/usr/local"
 
 usage() {
-    echo "用法: $0 -s <server-url> -k <secret> [-u <download-base>] [-v <version>] [-c <conf-dir>] [-p <prefix>]"
+    echo "用法: $0 -s <server-url> -k <secret> [-m <mirror>] [-u <download-base>] [-v <version>] [-c <conf-dir>] [-p <prefix>]"
     exit 1
 }
 
@@ -39,6 +45,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -s) SERVER_URL="$2"; shift 2 ;;
         -k) SECRET="$2"; shift 2 ;;
+        -m|--mirror) MIRROR="$2"; shift 2 ;;
         -u) BASE_URL="$2"; shift 2 ;;
         -v) VERSION="$2"; shift 2 ;;
         -c) CONF_DIR="$2"; shift 2 ;;
@@ -49,6 +56,9 @@ done
 
 [ -n "$SERVER_URL" ] || usage
 [ -n "$SECRET" ] || usage
+
+# 下载源优先级：-m/--mirror > ARGUS_AGENT_MIRROR > -u > ARGUS_AGENT_BASE_URL > 默认 GitHub。
+[ -n "$MIRROR" ] && BASE_URL="$MIRROR"
 
 # ---- 系统与架构识别（与 release 实际产物严格对齐）----
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"

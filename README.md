@@ -37,7 +37,7 @@ server/     Go 服务端（单二进制，go:embed 内嵌前端）
 agent/      Go Agent 采集端
 web/        React 19 前端
 docs/       设计文档与参考项目对比报告
-deploy/     docker-compose / systemd 部署样例
+deploy/     docker-compose / systemd / OpenRC 部署样例（见 deploy/README.md）
 ```
 
 ## 快速开始
@@ -87,10 +87,31 @@ curl -fsSL http://your-domain/install.sh | sh -s -- -s ws://your-domain/ws/agent
 SSH 登录目标服务器（Linux/macOS/FreeBSD，需 root）后执行即可：脚本自动识别系统与架构、
 从发布源下载 Agent 二进制、校验 SHA-256、安装为 systemd/OpenRC 服务并注册上线，幂等可重装。
 
+**Windows**：以管理员 PowerShell 执行（脚本由同一后台端点下发，用法与 install.sh 对齐）：
+
+```powershell
+# 1) 下载脚本（PowerShell 5.1 内置 curl.exe 别名，需显式调用；也可用 Invoke-WebRequest）
+curl.exe -fsSL http://your-domain/install.ps1 -o install.ps1
+# 2) 以管理员身份执行（管理员 PowerShell 中 .\install.ps1 即可）
+powershell -ExecutionPolicy Bypass -File install.ps1 -ServerUrl ws://your-domain/ws/agent -Secret <密钥>
+```
+
 - 服务器模式：使用该服务器专属密钥（补装/重连同一节点）。
 - 用户模式：使用你的 Agent 注册密钥，一条命令可批量部署任意新机器（自动创建服务器）。
 - 二进制下载源默认 GitHub Releases latest（`argus-agent-<os>-<arch>` + `checksums.txt`）；
-  可用 `-u <base>` 参数或 `ARGUS_AGENT_BASE_URL` 环境变量覆盖。
+  下载源优先级：`-m <mirror>` > `ARGUS_AGENT_MIRROR` > `-u <base>` > `ARGUS_AGENT_BASE_URL`
+  > 默认 GitHub。国内网络可用镜像根 URL（如 AtomGit/Gitee 的 Release 镜像，目录结构须与
+  GitHub Release 一致，含 `checksums.txt`）：
+
+  ```bash
+  # 方式一：-m/--mirror 参数（优先级最高）
+  curl -fsSL http://your-domain/install.sh | sh -s -- -s ws://your-domain/ws/agent -k <密钥> \
+      -m https://gitee.com/mirrors/Argus/releases/latest/download
+
+  # 方式二：环境变量 ARGUS_AGENT_MIRROR（同样适用于 install.ps1 的 -BaseUrl 参数）
+  ARGUS_AGENT_MIRROR=https://atomgit.com/Argus/releases/latest/download \
+      curl -fsSL http://your-domain/install.sh | sh -s -- -s ws://your-domain/ws/agent -k <密钥>
+  ```
 - HTTPS 反代场景请在「设置 → 安装命令基础 URL」填写公网地址，命令会自动推导为 `wss://`。
 
 ### 方式三：本地构建

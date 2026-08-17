@@ -198,6 +198,7 @@ type GPUDevice struct {
 	Util     float64 `json:"util"`
 	MemUsed  uint64  `json:"mem_used"`
 	MemTotal uint64  `json:"mem_total"`
+	Temp     float64 `json:"temp,omitempty"` // 摄氏度，传感器不可用时省略（0 表示无数据）
 }
 
 // GPUReport represents multi-GPU data and explicit platform/collector availability.
