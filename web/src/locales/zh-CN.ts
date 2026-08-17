@@ -256,6 +256,7 @@ export default {
     tags: "标签（逗号分隔）",
     autoRenew: "自动续费",
     hiddenFromGuests: "对游客隐藏",
+    createHint: "先填名称即可创建并获取安装命令；价格、计费、到期、流量额度等可在部署上线后通过「编辑」补录。",
     id: "ID",
     system: "系统",
     status: "状态",

@@ -219,48 +219,54 @@ export default function Servers() {
               <input className={inputCls} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
             </Field>
 
-            <Field label={t("servers.price")}>
-              <input type="number" min={0} className={inputCls} value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} />
-            </Field>
-            <Field label={t("servers.cycleDays")}>
-              <input type="number" min={0} className={inputCls} value={form.cycle_days} onChange={(e) => setForm({ ...form, cycle_days: Number(e.target.value) })} />
-            </Field>
-            <Field label={t("servers.expireLabel")}>
-              <input type="datetime-local" className={inputCls} value={form.expire_at} onChange={(e) => setForm({ ...form, expire_at: e.target.value })} />
-            </Field>
+            {/* 创建时只填基础信息，资产字段在部署上线后通过「编辑」补录 */}
+            {form.id && (
+              <>
+                <Field label={t("servers.price")}>
+                  <input type="number" min={0} className={inputCls} value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} />
+                </Field>
+                <Field label={t("servers.cycleDays")}>
+                  <input type="number" min={0} className={inputCls} value={form.cycle_days} onChange={(e) => setForm({ ...form, cycle_days: Number(e.target.value) })} />
+                </Field>
+                <Field label={t("servers.expireLabel")}>
+                  <input type="datetime-local" className={inputCls} value={form.expire_at} onChange={(e) => setForm({ ...form, expire_at: e.target.value })} />
+                </Field>
 
-            <Field label={t("servers.trafficQuota")} hint={t("servers.trafficQuotaHint")}>
-              <input type="number" min={0} className={inputCls} value={form.traffic_quota_bytes} onChange={(e) => setForm({ ...form, traffic_quota_bytes: Number(e.target.value) })} />
-            </Field>
-            <Field label={t("servers.trafficCycleDay")}>
-              <input type="number" min={1} max={28} className={inputCls} value={form.traffic_cycle_day} onChange={(e) => setForm({ ...form, traffic_cycle_day: Number(e.target.value) })} />
-            </Field>
-            <Field label={t("servers.trafficTimezone")}>
-              <input className={inputCls} value={form.traffic_timezone} onChange={(e) => setForm({ ...form, traffic_timezone: e.target.value })} />
-            </Field>
+                <Field label={t("servers.trafficQuota")} hint={t("servers.trafficQuotaHint")}>
+                  <input type="number" min={0} className={inputCls} value={form.traffic_quota_bytes} onChange={(e) => setForm({ ...form, traffic_quota_bytes: Number(e.target.value) })} />
+                </Field>
+                <Field label={t("servers.trafficCycleDay")}>
+                  <input type="number" min={1} max={28} className={inputCls} value={form.traffic_cycle_day} onChange={(e) => setForm({ ...form, traffic_cycle_day: Number(e.target.value) })} />
+                </Field>
+                <Field label={t("servers.trafficTimezone")}>
+                  <input className={inputCls} value={form.traffic_timezone} onChange={(e) => setForm({ ...form, traffic_timezone: e.target.value })} />
+                </Field>
 
-            <Field label={t("servers.trafficAccounting")}>
-              <select value={form.traffic_accounting} onChange={(e) => setForm({ ...form, traffic_accounting: e.target.value as FormState["traffic_accounting"] })} className={inputCls}>
-                <option value="sum">{t("servers.accountingSum")}</option><option value="in">{t("servers.accountingIn")}</option><option value="out">{t("servers.accountingOut")}</option><option value="max">{t("servers.accountingMax")}</option>
-              </select>
-            </Field>
-            <Field label={t("servers.sortOrder")}>
-              <input type="number" className={inputCls} value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} />
-            </Field>
-            <Field label={t("servers.sloTarget")} hint={t("servers.sloTargetHint")}>
-              <input type="number" step="0.1" min={0} className={inputCls} value={form.slo_target} onChange={(e) => setForm({ ...form, slo_target: Number(e.target.value) })} />
-            </Field>
+                <Field label={t("servers.trafficAccounting")}>
+                  <select value={form.traffic_accounting} onChange={(e) => setForm({ ...form, traffic_accounting: e.target.value as FormState["traffic_accounting"] })} className={inputCls}>
+                    <option value="sum">{t("servers.accountingSum")}</option><option value="in">{t("servers.accountingIn")}</option><option value="out">{t("servers.accountingOut")}</option><option value="max">{t("servers.accountingMax")}</option>
+                  </select>
+                </Field>
+                <Field label={t("servers.sortOrder")}>
+                  <input type="number" className={inputCls} value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} />
+                </Field>
+                <Field label={t("servers.sloTarget")} hint={t("servers.sloTargetHint")}>
+                  <input type="number" step="0.1" min={0} className={inputCls} value={form.slo_target} onChange={(e) => setForm({ ...form, slo_target: Number(e.target.value) })} />
+                </Field>
 
-            <Field label={t("servers.tags")}>
-              <input className={inputCls} value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
-            </Field>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.auto_renew} onChange={(e) => setForm({ ...form, auto_renew: e.target.checked })} /> {t("servers.autoRenew")}
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.hidden} onChange={(e) => setForm({ ...form, hidden: e.target.checked })} /> {t("servers.hiddenFromGuests")}
-            </label>
+                <Field label={t("servers.tags")}>
+                  <input className={inputCls} value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
+                </Field>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={form.auto_renew} onChange={(e) => setForm({ ...form, auto_renew: e.target.checked })} /> {t("servers.autoRenew")}
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={form.hidden} onChange={(e) => setForm({ ...form, hidden: e.target.checked })} /> {t("servers.hiddenFromGuests")}
+                </label>
+              </>
+            )}
           </div>
+          {!form.id && <p className="mt-3 text-xs text-muted">{t("servers.createHint")}</p>}
           <div className="mt-3 flex gap-2">
             <button onClick={() => save.mutate(form)} className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white">{t("common.save")}</button>
             <button onClick={() => setForm(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">{t("common.cancel")}</button>

@@ -257,6 +257,7 @@ export default {
     tags: "Tags (comma separated)",
     autoRenew: "Auto renew",
     hiddenFromGuests: "Hide from guests",
+    createHint: "Only a name is needed to create and get the install command; price, billing, expiry and traffic quota can be added later via Edit after the agent is online.",
     id: "ID",
     system: "Platform",
     status: "Status",
