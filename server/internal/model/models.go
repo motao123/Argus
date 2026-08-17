@@ -140,7 +140,13 @@ type Alert struct {
 	// EscalateAfterMinutes = 0 表示触发后立即升级。
 	EscalateToChannelID  int64     `json:"escalate_to_channel_id"`
 	EscalateAfterMinutes int       `json:"escalate_after_minutes"`
-	CreatedAt            time.Time `json:"created_at"`
+	// 周期流量规则的周期（借鉴 nezha CycleStart/CycleUnit/CycleInterval）：
+	// CycleStart 为空（或 CycleUnit 为空）时回退服务器配置的月度周期
+	// （TrafficCycleDay/TrafficTimezone）。
+	CycleStart    *time.Time `json:"cycle_start,omitempty"`
+	CycleUnit     string     `gorm:"size:8;default:''" json:"cycle_unit,omitempty"` // hour/day/week/month/year
+	CycleInterval int        `gorm:"default:1" json:"cycle_interval,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // AlertState 告警持续状态（报警引擎持久化，重启后恢复重复提醒/升级进度）。
@@ -152,6 +158,17 @@ type AlertState struct {
 	LastNotifyAt time.Time  `json:"last_notify_at"` // 上次通知时间（重复间隔基准）
 	EscalatedAt  *time.Time `json:"escalated_at"`   // 升级时间（nil = 未升级）
 	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// AlertBaseline 累计流量规则（transfer_in/out/all）的计数基线：
+// 规则首次评估时基线 = 当前累计值（自规则启用起计），触发通知后重置为当前值
+// （衡量自上次告警以来的流量）。key = alert_id + server_id。
+type AlertBaseline struct {
+	AlertID   int64     `gorm:"primaryKey" json:"alert_id"`
+	ServerID  int64     `gorm:"primaryKey" json:"server_id"`
+	In        uint64    `json:"in"`
+	Out       uint64    `json:"out"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Notification 通知渠道（借鉴 komari 多渠道设计 + nezha 模板）。

@@ -53,6 +53,92 @@ func ValidateConfig(day int, timezone, accounting string) error {
 	}
 }
 
+// ValidUnit 报告单位是否为支持的流量周期单位（hour/day/week/month/year）。
+func ValidUnit(unit string) bool {
+	switch unit {
+	case "hour", "day", "week", "month", "year":
+		return true
+	}
+	return false
+}
+
+// AnchorWindow 以 anchor 为锚点、按 unit×interval 步进，返回包含 now 的周期窗口
+// （借鉴 nezha GetTransferDurationStart/End 的锚点步进语义）。
+// hour 用固定时长对齐（保留锚点的分/秒）；day/week/month/year 用日历步进
+// （AddDate），窗口为 [start, end) 半开区间。
+func AnchorWindow(now, anchor time.Time, unit string, interval int) (Window, error) {
+	if !ValidUnit(unit) {
+		return Window{}, fmt.Errorf("invalid cycle unit %q (must be hour, day, week, month, or year)", unit)
+	}
+	if interval <= 0 {
+		interval = 1
+	}
+	step := func(t time.Time, n int) time.Time {
+		switch unit {
+		case "hour":
+			return t.Add(time.Duration(n*interval) * time.Hour)
+		case "day":
+			return t.AddDate(0, 0, n*interval)
+		case "week":
+			return t.AddDate(0, 0, n*7*interval)
+		case "month", "year":
+			return addCalendar(t, unit, n*interval)
+		default: // unreachable（ValidUnit 已校验）
+			return t
+		}
+	}
+	// 小时周期可用算术直接定位；日历周期循环步进（成本低，锚点异常偏远也有限）。
+	if unit == "hour" {
+		stepDur := time.Duration(interval) * time.Hour
+		n := int(now.Sub(anchor) / stepDur)
+		if now.Before(anchor.Add(stepDur * time.Duration(n))) {
+			n--
+		}
+		start := anchor.Add(stepDur * time.Duration(n))
+		return Window{Start: start, End: start.Add(stepDur)}, nil
+	}
+	start := anchor
+	if start.After(now) {
+		for start.After(now) {
+			start = step(start, -1)
+		}
+	} else {
+		for {
+			next := step(start, 1)
+			if next.After(now) {
+				break
+			}
+			start = next
+		}
+	}
+	return Window{Start: start, End: step(start, 1)}, nil
+}
+
+// addCalendar 按日历月/年步进 n 步（支持负数），并钳制溢出日
+// （如 1/29 + 1 月 = 2/28，闰日 2/29 + 1 年 = 2/28），
+// 避免 Go AddDate 的「日溢出归一化」（1/29 + 1 月 → 3/1）造成周期漂移。
+func addCalendar(t time.Time, unit string, n int) time.Time {
+	y, m, d := t.Date()
+	if unit == "year" {
+		y += n
+	} else {
+		total := (int(m) - 1) + n
+		q := total / 12
+		r := total % 12
+		if r < 0 {
+			q--
+			r += 12
+		}
+		y += q
+		m = time.Month(r + 1)
+	}
+	last := time.Date(y, m+1, 0, 0, 0, 0, 0, t.Location()).Day()
+	if d > last {
+		d = last
+	}
+	return time.Date(y, m, d, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+}
+
 // CycleWindow returns the monthly window containing now, using the configured local cycle day.
 func CycleWindow(now time.Time, cycleDay int, timezone string) (Window, error) {
 	if cycleDay < 1 || cycleDay > 28 {

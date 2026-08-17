@@ -10,6 +10,55 @@ import (
 	"github.com/motao123/Argus/server/internal/model"
 )
 
+func TestAnchorWindow(t *testing.T) {
+	must := func(s string) time.Time {
+		t.Helper()
+		v, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	tests := []struct {
+		name, unit string
+		anchor     string
+		now        string
+		interval   int
+		start, end string
+	}{
+		{"hour in same window", "hour", "2026-08-17T10:30:00Z", "2026-08-17T10:45:00Z", 1, "2026-08-17T10:30:00Z", "2026-08-17T11:30:00Z"},
+		{"hour next window", "hour", "2026-08-17T10:30:00Z", "2026-08-17T12:10:00Z", 1, "2026-08-17T11:30:00Z", "2026-08-17T12:30:00Z"},
+		{"hour interval 6 aligned", "hour", "2026-08-17T00:00:00Z", "2026-08-17T13:00:00Z", 6, "2026-08-17T12:00:00Z", "2026-08-17T18:00:00Z"},
+		{"hour before anchor", "hour", "2026-08-17T10:30:00Z", "2026-08-17T09:00:00Z", 1, "2026-08-17T08:30:00Z", "2026-08-17T09:30:00Z"},
+		{"day", "day", "2026-08-10T08:00:00Z", "2026-08-17T12:00:00Z", 1, "2026-08-17T08:00:00Z", "2026-08-18T08:00:00Z"},
+		{"day before anchor", "day", "2026-08-20T08:00:00Z", "2026-08-17T12:00:00Z", 1, "2026-08-17T08:00:00Z", "2026-08-18T08:00:00Z"},
+		{"week", "week", "2026-08-03T00:00:00Z", "2026-08-17T00:00:00Z", 1, "2026-08-17T00:00:00Z", "2026-08-24T00:00:00Z"},
+		{"month", "month", "2026-01-15T00:00:00Z", "2026-08-17T00:00:00Z", 1, "2026-08-15T00:00:00Z", "2026-09-15T00:00:00Z"},
+		{"month interval 3", "month", "2026-01-15T00:00:00Z", "2026-08-17T00:00:00Z", 3, "2026-07-15T00:00:00Z", "2026-10-15T00:00:00Z"},
+		{"month before anchor", "month", "2026-10-15T00:00:00Z", "2026-08-17T00:00:00Z", 1, "2026-08-15T00:00:00Z", "2026-09-15T00:00:00Z"},
+		{"year", "year", "2024-06-01T00:00:00Z", "2026-08-17T00:00:00Z", 1, "2026-06-01T00:00:00Z", "2027-06-01T00:00:00Z"},
+		{"leap day anchor", "month", "2024-02-29T00:00:00Z", "2025-02-01T00:00:00Z", 1, "2025-01-29T00:00:00Z", "2025-02-28T00:00:00Z"},
+		{"leap day year clamp", "year", "2024-02-29T00:00:00Z", "2026-06-01T00:00:00Z", 1, "2026-02-28T00:00:00Z", "2027-02-28T00:00:00Z"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, err := AnchorWindow(must(tt.now), must(tt.anchor), tt.unit, tt.interval)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w.Start.Format(time.RFC3339) != tt.start || w.End.Format(time.RFC3339) != tt.end {
+				t.Fatalf("window = %s..%s, want %s..%s", w.Start.Format(time.RFC3339), w.End.Format(time.RFC3339), tt.start, tt.end)
+			}
+			if w.Start.After(must(tt.now)) || !w.End.After(must(tt.now)) {
+				t.Fatalf("window %s..%s does not contain now %s", w.Start.Format(time.RFC3339), w.End.Format(time.RFC3339), tt.now)
+			}
+		})
+	}
+	if _, err := AnchorWindow(must("2026-08-17T00:00:00Z"), must("2026-08-17T00:00:00Z"), "fortnight", 1); err == nil {
+		t.Fatal("invalid unit should error")
+	}
+}
+
 func TestCycleWindowCalendarBoundaries(t *testing.T) {
 	tests := []struct {
 		name, now, zone, start, end string

@@ -67,6 +67,86 @@ func TestMetricValue(t *testing.T) {
 	}
 }
 
+func TestMetricValueExtended(t *testing.T) {
+	e := &Engine{baselines: map[string]transferBaseline{}}
+	h := store.NewHub()
+	h.Upsert(&model.Server{ID: 2, Name: "t2"})
+	h.SetReport(2, protocol.HostInfo{}, &protocol.ReportParams{
+		SwapUsed: 200, SwapTotal: 400,
+		Temperature: 71.5,
+		GPU:         protocol.GPUReport{Availability: protocol.Availability{Available: true}, Devices: []protocol.GPUDevice{{Util: 30}, {Util: 95}}},
+		GPUUtil:     62.5,
+		NetInSpeed:  10, NetOutSpeed: 20,
+		Load5: 1.5, Load15: 2.5,
+		TCPEstablished: 42, TCPCount: 99, UDPCount: 7, ProcessCount: 123,
+		NetInTransfer: 1000, NetOutTransfer: 2000,
+		Timestamp: 106,
+	})
+	st := h.Get(2)
+
+	cases := []struct {
+		metric string
+		want   float64
+	}{
+		{"swap", 50},
+		{"temperature", 71.5},
+		{"gpu", 95},        // 多卡取最大
+		{"gpu_max", 95},    // 别名
+		{"net_all_speed", 30},
+		{"load5", 1.5},
+		{"load15", 2.5},
+		{"tcp_conn_count", 42}, // established 优先
+		{"udp_conn_count", 7},
+		{"process_count", 123},
+		{"transfer_in", 0},  // 首次评估基线 = 当前值
+		{"transfer_out", 0}, // 首次评估基线 = 当前值
+		{"transfer_all", 0},
+	}
+	for _, c := range cases {
+		if v, ok := e.metricValue(&model.Alert{Metric: c.metric}, *st); !ok || v != c.want {
+			t.Errorf("%s = %v,%v, want %v,true", c.metric, v, ok, c.want)
+		}
+	}
+
+	// 累计流量：基线建立后按差值计
+	h.SetReport(2, protocol.HostInfo{}, &protocol.ReportParams{
+		NetInTransfer: 1100, NetOutTransfer: 2500, Timestamp: 108,
+	})
+	st = h.Get(2)
+	if v, ok := e.metricValue(&model.Alert{Metric: "transfer_in"}, *st); !ok || v != 100 {
+		t.Errorf("transfer_in delta = %v,%v, want 100,true", v, ok)
+	}
+	if v, ok := e.metricValue(&model.Alert{Metric: "transfer_out"}, *st); !ok || v != 500 {
+		t.Errorf("transfer_out delta = %v,%v, want 500,true", v, ok)
+	}
+	if v, ok := e.metricValue(&model.Alert{Metric: "transfer_all"}, *st); !ok || v != 600 {
+		t.Errorf("transfer_all delta = %v,%v, want 600,true", v, ok)
+	}
+	// Agent 重启（计数器归零）→ 差值按 0 处理
+	h.SetReport(2, protocol.HostInfo{}, &protocol.ReportParams{NetInTransfer: 50, NetOutTransfer: 60, Timestamp: 110})
+	st = h.Get(2)
+	if v, ok := e.metricValue(&model.Alert{Metric: "transfer_in"}, *st); !ok || v != 0 {
+		t.Errorf("transfer_in after reset = %v,%v, want 0,true", v, ok)
+	}
+	// 触发通知后重置基线
+	e.resetBaseline(&model.Alert{Metric: "transfer_all"}, *st)
+	if v, ok := e.metricValue(&model.Alert{Metric: "transfer_all"}, *st); !ok || v != 0 {
+		t.Errorf("transfer_all after baseline reset = %v,%v, want 0,true", v, ok)
+	}
+}
+
+func TestMetricValueLegacyTCPFallback(t *testing.T) {
+	e := &Engine{baselines: map[string]transferBaseline{}}
+	h := store.NewHub()
+	h.Upsert(&model.Server{ID: 3, Name: "t3"})
+	// 旧 Agent：仅 TCPCount（总连接数）
+	h.SetReport(3, protocol.HostInfo{}, &protocol.ReportParams{TCPCount: 77, Timestamp: 1})
+	st := h.Get(3)
+	if v, ok := e.metricValue(&model.Alert{Metric: "tcp_conn_count"}, *st); !ok || v != 77 {
+		t.Errorf("tcp_conn_count legacy = %v,%v, want 77,true", v, ok)
+	}
+}
+
 func TestStateMachine(t *testing.T) {
 	e := &Engine{state: map[string]*violation{}}
 	max := 90.0

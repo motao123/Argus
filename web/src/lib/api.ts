@@ -211,6 +211,10 @@ export interface Alert {
   repeat_minutes: number;
   escalate_to_channel_id: number;
   escalate_after_minutes: number;
+  // 周期流量规则的周期（锚点 + 单位 + 间隔；空单位 = 服务器月度周期）
+  cycle_start: string | null;
+  cycle_unit: string;
+  cycle_interval: number;
 }
 
 export interface Notification {
@@ -316,7 +320,7 @@ export interface ServiceItem {
   owner_id: number;
   server_id: number;
   name: string;
-  type: "http" | "tcp" | "ping";
+  type: "http" | "tcp" | "ping" | "command";
   target: string;
   interval: number;
   enabled: boolean;

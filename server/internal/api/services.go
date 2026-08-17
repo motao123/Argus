@@ -177,9 +177,13 @@ func (s *Server) createService(c *gin.Context) {
 		return
 	}
 	switch req.Type {
-	case "http", "tcp", "ping":
+	case "http", "tcp", "ping", "command":
 	default:
 		req.Type = "http"
+	}
+	if req.Type == "command" && len(req.Target) > 512 {
+		fail(c, http.StatusBadRequest, "command too long")
+		return
 	}
 	if req.HTTPMethod == "" {
 		req.HTTPMethod = "GET"
@@ -325,6 +329,12 @@ func (s *Server) updateService(c *gin.Context) {
 		updates["name"] = *req.Name
 	}
 	if req.Type != nil {
+		switch *req.Type {
+		case "http", "tcp", "ping", "command":
+		default:
+			fail(c, http.StatusBadRequest, "unsupported service type: "+*req.Type)
+			return
+		}
 		updates["type"] = *req.Type
 	}
 	if req.Target != nil {

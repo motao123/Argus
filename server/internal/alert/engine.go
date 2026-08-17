@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/maintenance"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/notifyctx"
@@ -35,10 +36,19 @@ type Engine struct {
 
 	mu    sync.Mutex
 	state map[string]*violation // key: alertID:serverID
-	stop  chan struct{}
-	done  chan struct{}
+	// baselines 累计流量规则（transfer_in/out/all）的计数基线（key: alertID:serverID）；
+	// 首次评估时初始化为当前累计值，触发通知后重置（持久化于 model.AlertBaseline）。
+	baselines map[string]transferBaseline
+	stop      chan struct{}
+	done      chan struct{}
 	// nowFn 可注入时钟（测试用）；nil 时回退 time.Now。
 	nowFn func() time.Time
+}
+
+// transferBaseline 累计流量规则的计数基线。
+type transferBaseline struct {
+	in  uint64
+	out uint64
 }
 
 // violation 一条规则 × 一台服务器的触发状态。
@@ -57,11 +67,12 @@ type violation struct {
 
 func NewEngine(db *gorm.DB, st *store.Hub) *Engine {
 	e := &Engine{
-		db:    db,
-		store: st,
-		state: make(map[string]*violation),
-		stop:  make(chan struct{}),
-		done:  make(chan struct{}),
+		db:        db,
+		store:     st,
+		state:     make(map[string]*violation),
+		baselines: make(map[string]transferBaseline),
+		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 	e.loadStates()
 	return e
@@ -184,6 +195,8 @@ func (e *Engine) checkOnce() {
 					v.lastNotifyAt = now
 					e.persistState(&a, serverID, v)
 					e.notify(&a, st, value, "triggered", true, false)
+					// 累计流量规则：触发后重置基线（衡量自上次告警以来的流量）
+					e.resetBaseline(&a, st)
 				}
 				// 升级：告警持续超过升级延迟后，发一条 event=escalated 并切换渠道
 				// （实际投递后才记录升级，静默/确认/渠道缺失时不升级）。
@@ -242,6 +255,11 @@ func (e *Engine) metricValue(a *model.Alert, st store.State) (float64, bool) {
 			return 0, false
 		}
 		return float64(st.Last.MemUsed) / float64(st.Last.MemTotal) * 100, true
+	case "swap":
+		if st.Last.SwapTotal == 0 {
+			return 0, false
+		}
+		return float64(st.Last.SwapUsed) / float64(st.Last.SwapTotal) * 100, true
 	case "disk":
 		if st.Last.DiskTotal == 0 {
 			return 0, false
@@ -251,31 +269,157 @@ func (e *Engine) metricValue(a *model.Alert, st store.State) (float64, bool) {
 		return st.Last.NetInSpeed, true
 	case "net_out_speed":
 		return st.Last.NetOutSpeed, true
+	case "net_all_speed":
+		return st.Last.NetInSpeed + st.Last.NetOutSpeed, true
 	case "load1":
 		return st.Last.Load1, true
+	case "load5":
+		return st.Last.Load5, true
+	case "load15":
+		return st.Last.Load15, true
+	case "tcp_conn_count":
+		if st.Last.TCPEstablished > 0 {
+			return float64(st.Last.TCPEstablished), true
+		}
+		return float64(st.Last.TCPCount), true // 旧 Agent 仅上报总连接数
+	case "udp_conn_count":
+		return float64(st.Last.UDPCount), true
+	case "process_count":
+		return float64(st.Last.ProcessCount), true
+	case "temperature", "temperature_max":
+		return st.Last.Temperature, true
+	case "gpu", "gpu_max":
+		return gpuUtilMax(st.Last), true
 	case "latency":
 		// 延迟以毫秒为单位；0 = 无测量（旧 Agent 未上报），不参与判定
 		if st.LatencyMs <= 0 {
 			return 0, false
 		}
 		return float64(st.LatencyMs), true
+	case "transfer_in":
+		b, ok := e.transferBaseline(a, st)
+		if !ok {
+			return 0, false
+		}
+		return float64(subBaseline(st.Last.NetInTransfer, b.in)), true
+	case "transfer_out":
+		b, ok := e.transferBaseline(a, st)
+		if !ok {
+			return 0, false
+		}
+		return float64(subBaseline(st.Last.NetOutTransfer, b.out)), true
+	case "transfer_all":
+		b, ok := e.transferBaseline(a, st)
+		if !ok {
+			return 0, false
+		}
+		return float64(subBaseline(st.Last.NetInTransfer, b.in) + subBaseline(st.Last.NetOutTransfer, b.out)), true
 	case "traffic_in_cycle":
-		used, _, ok := e.cycleTraffic(st.Server)
+		used, _, ok := e.cycleTraffic(a, st.Server)
 		return float64(used), ok
 	case "traffic_out_cycle":
-		_, used, ok := e.cycleTraffic(st.Server)
+		_, used, ok := e.cycleTraffic(a, st.Server)
 		return float64(used), ok
 	default:
 		return 0, false
 	}
 }
 
-// cycleTraffic uses the same configured cycle as quota accounting and the usage API.
-func (e *Engine) cycleTraffic(server *model.Server) (uint64, uint64, bool) {
+// gpuUtilMax 返回多卡 GPU 的最大利用率（兼容旧字段：无明细时用平均利用率）。
+func gpuUtilMax(last protocol.ReportParams) float64 {
+	max := last.GPUUtil
+	for _, d := range last.GPU.Devices {
+		if d.Util > max {
+			max = d.Util
+		}
+	}
+	return max
+}
+
+// subBaseline 计算累计值与基线的差值，Agent 重启（计数器归零）时按 0 处理。
+func subBaseline(current, baseline uint64) uint64 {
+	if current <= baseline {
+		return 0
+	}
+	return current - baseline
+}
+
+// transferBaseline 返回规则 × 服务器的累计流量基线；
+// 首次评估时以当前累计值为基线（自规则启用起计）并持久化。
+func (e *Engine) transferBaseline(a *model.Alert, st store.State) (transferBaseline, bool) {
+	key := fmt.Sprintf("%d:%d", a.ID, st.Server.ID)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if b, ok := e.baselines[key]; ok {
+		return b, true
+	}
+	b := transferBaseline{in: st.Last.NetInTransfer, out: st.Last.NetOutTransfer}
+	e.baselines[key] = b
+	if e.db != nil {
+		_ = e.db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "alert_id"}, {Name: "server_id"}},
+			UpdateAll: true,
+		}).Create(&model.AlertBaseline{
+			AlertID: a.ID, ServerID: st.Server.ID, In: b.in, Out: b.out, UpdatedAt: time.Now(),
+		}).Error
+	}
+	return b, true
+}
+
+// resetBaseline 触发通知后重置累计流量基线（衡量自上次告警以来的流量）。
+func (e *Engine) resetBaseline(a *model.Alert, st store.State) {
+	if !isTransferMetric(a.Metric) {
+		return
+	}
+	key := fmt.Sprintf("%d:%d", a.ID, st.Server.ID)
+	b := transferBaseline{in: st.Last.NetInTransfer, out: st.Last.NetOutTransfer}
+	e.mu.Lock()
+	e.baselines[key] = b
+	e.mu.Unlock()
+	if e.db != nil {
+		_ = e.db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "alert_id"}, {Name: "server_id"}},
+			UpdateAll: true,
+		}).Create(&model.AlertBaseline{
+			AlertID: a.ID, ServerID: st.Server.ID, In: b.in, Out: b.out, UpdatedAt: time.Now(),
+		}).Error
+	}
+}
+
+func isTransferMetric(metric string) bool {
+	switch metric {
+	case "transfer_in", "transfer_out", "transfer_all":
+		return true
+	}
+	return false
+}
+
+// cycleTraffic 计算周期流量规则的当前周期用量。
+// 规则配置了 CycleStart（锚点 + 单位 + 间隔）时按锚点步进计算窗口并汇总 Transfer 表；
+// 否则回退服务器配置的月度周期（与流量额度记账同口径）。
+func (e *Engine) cycleTraffic(a *model.Alert, server *model.Server) (uint64, uint64, bool) {
 	if e.db == nil {
 		return 0, 0, false
 	}
-	usage, err := trafficquota.CurrentUsage(e.db, server, time.Now())
+	now := e.now()
+	if a.CycleStart != nil && trafficquota.ValidUnit(a.CycleUnit) {
+		window, err := trafficquota.AnchorWindow(now, *a.CycleStart, a.CycleUnit, a.CycleInterval)
+		if err != nil {
+			return 0, 0, false
+		}
+		var total struct {
+			In  uint64
+			Out uint64
+		}
+		if err := e.db.Model(&model.Transfer{}).
+			Select("COALESCE(SUM(`in`),0) AS `in`, COALESCE(SUM(`out`),0) AS `out`").
+			Where("server_id = ? AND ts >= ? AND ts < ?", server.ID, window.Start.Unix(), window.End.Unix()).
+			Scan(&total).Error; err != nil {
+			return 0, 0, false
+		}
+		return total.In, total.Out, true
+	}
+	usage, err := trafficquota.CurrentUsage(e.db, server, now)
 	if err != nil {
 		return 0, 0, false
 	}
@@ -480,7 +624,7 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 
 // loadStates 启动时从 DB 恢复进行中的告警状态（重启后重复提醒/升级进度不丢失）。
 // 恢复的条目视为已通知（避免重启后重复发送 triggered），lastNotifyAt/escalatedAt
-// 决定后续重复/升级节奏。
+// 决定后续重复/升级节奏。同时恢复累计流量规则的计数基线。
 func (e *Engine) loadStates() {
 	if e.db == nil {
 		return
@@ -499,6 +643,13 @@ func (e *Engine) loadStates() {
 			notified:     true,
 			lastNotifyAt: r.LastNotifyAt,
 			escalatedAt:  r.EscalatedAt,
+		}
+	}
+	var baselines []model.AlertBaseline
+	if err := e.db.Find(&baselines).Error; err == nil {
+		for i := range baselines {
+			b := &baselines[i]
+			e.baselines[fmt.Sprintf("%d:%d", b.AlertID, b.ServerID)] = transferBaseline{in: b.In, out: b.Out}
 		}
 	}
 }
@@ -527,6 +678,7 @@ func (e *Engine) clearState(a *model.Alert, serverID int64) {
 		return
 	}
 	_ = e.db.Where("alert_id = ? AND server_id = ?", a.ID, serverID).Delete(&model.AlertState{}).Error
+	_ = e.db.Where("alert_id = ? AND server_id = ?", a.ID, serverID).Delete(&model.AlertBaseline{}).Error
 }
 
 // alertThreshold 触发时对应的阈值文本：低于下限取 min，高于上限取 max；

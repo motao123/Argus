@@ -7,17 +7,39 @@ import { useI18n, type TKey } from "../lib/i18n";
 const metrics: { key: string; label: TKey }[] = [
   { key: "cpu", label: "alerts.metricCpu" },
   { key: "mem", label: "alerts.metricMem" },
+  { key: "swap", label: "alerts.metricSwap" },
   { key: "disk", label: "alerts.metricDisk" },
   { key: "net_in_speed", label: "alerts.metricNetIn" },
   { key: "net_out_speed", label: "alerts.metricNetOut" },
+  { key: "net_all_speed", label: "alerts.metricNetAll" },
   { key: "load1", label: "alerts.metricLoad" },
-  { key: "latency", label: "alerts.metricLatency" },
+  { key: "load5", label: "alerts.metricLoad5" },
+  { key: "load15", label: "alerts.metricLoad15" },
+  { key: "tcp_conn_count", label: "alerts.metricTCPConn" },
+  { key: "udp_conn_count", label: "alerts.metricUDPConn" },
+  { key: "process_count", label: "alerts.metricProcess" },
   { key: "temperature", label: "alerts.metricTemp" },
   { key: "gpu", label: "alerts.metricGpu" },
+  { key: "latency", label: "alerts.metricLatency" },
+  { key: "transfer_in", label: "alerts.metricTransferIn" },
+  { key: "transfer_out", label: "alerts.metricTransferOut" },
+  { key: "transfer_all", label: "alerts.metricTransferAll" },
   { key: "traffic_in_cycle", label: "alerts.metricTrafficIn" },
   { key: "traffic_out_cycle", label: "alerts.metricTrafficOut" },
   { key: "offline", label: "alerts.metricOffline" },
 ];
+
+// 周期单位选项（traffic_*_cycle 规则的周期步进；空 = 服务器月度周期）。
+const cycleUnits: { key: string; label: TKey }[] = [
+  { key: "", label: "alerts.cycleMonth" },
+  { key: "hour", label: "alerts.cycleHour" },
+  { key: "day", label: "alerts.cycleDay" },
+  { key: "week", label: "alerts.cycleWeek" },
+  { key: "month", label: "alerts.cycleMonthFixed" },
+  { key: "year", label: "alerts.cycleYear" },
+];
+
+const isCycleMetric = (m: string) => m === "traffic_in_cycle" || m === "traffic_out_cycle";
 
 const notifTypes = ["webhook", "bark", "telegram", "email", "serverchan", "javascript", "dingtalk", "wecom", "feishu", "slack", "wxpusher", "matrix"];
 
@@ -91,6 +113,7 @@ const emptyAlert = {
   notify: true, webhook_id: 0, group_id: 0, trigger_cron_id: 0, trigger_ratio: null as number | null,
   template: "", enabled: true,
   repeat_minutes: 0, escalate_to_channel_id: 0, escalate_after_minutes: 0,
+  cycle_start: null as string | null, cycle_unit: "", cycle_interval: 1,
 };
 
 // 静默时长选项（小时）
@@ -351,6 +374,40 @@ export default function Alerts() {
               ))}
             </select>
           </div>
+          {/* 周期流量规则：周期锚点 + 单位 + 间隔（空单位 = 服务器月度周期） */}
+          {isCycleMetric(form.metric) && (
+            <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-4">
+              <label className="flex items-center gap-2">
+                <span className="text-xs text-muted">{t("alerts.cycleAnchor")}</span>
+                <input
+                  type="datetime-local"
+                  value={form.cycle_start ?? ""}
+                  onChange={(e) => setForm({ ...form, cycle_start: e.target.value || null })}
+                  className="rounded-lg border border-border bg-bg px-2 py-1.5 text-sm outline-none"
+                />
+              </label>
+              <select
+                value={form.cycle_unit}
+                onChange={(e) => setForm({ ...form, cycle_unit: e.target.value })}
+                className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+              >
+                {cycleUnits.map((u) => (
+                  <option key={u.key} value={u.key}>
+                    {t(u.label)}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={366}
+                placeholder={t("alerts.cycleInterval")}
+                value={form.cycle_interval}
+                onChange={(e) => setForm({ ...form, cycle_interval: Math.max(1, Number(e.target.value)) })}
+                className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+              />
+            </div>
+          )}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <label className="flex items-center gap-2 text-sm">
               {t("alerts.repeatLabel")}

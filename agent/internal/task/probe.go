@@ -1,6 +1,7 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -16,6 +17,9 @@ import (
 
 // maxProbeBodyBytes 断言读取的响应体上限（超出部分截断，不参与关键字匹配）。
 const maxProbeBodyBytes = 1 << 20
+
+// maxProbeErrorBytes 命令探测 stderr 计入错误信息的长度上限。
+const maxProbeErrorBytes = 512
 
 // probeService executes one bounded service probe.
 func probeService(p protocol.ServiceCheckParams) *protocol.ServiceCheckResult {
@@ -33,9 +37,41 @@ func probeService(p protocol.ServiceCheckParams) *protocol.ServiceCheckResult {
 		return probeTCP(ctx, p.Target)
 	case "ping":
 		return probePing(ctx, p.Target, p.PingCount)
+	case "command":
+		return probeCommand(ctx, p)
 	default:
 		return &protocol.ServiceCheckResult{Up: false, Error: "unknown type: " + p.Type}
 	}
+}
+
+// probeCommand 执行自定义命令探测（借鉴 Uptime Kuma command 探测）：
+// 命令放在 Target 字段，退出码 0 视为 Up，DelayMs 为命令耗时，
+// stderr 截断后计入 Error（截断标记注明）。
+func probeCommand(ctx context.Context, p protocol.ServiceCheckParams) *protocol.ServiceCheckResult {
+	started := time.Now()
+	cmd := commandFor(ctx, p.Target)
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	res := &protocol.ServiceCheckResult{DelayMs: durationMS(time.Since(started))}
+	if err != nil {
+		res.Error = truncateString(stderr.String(), maxProbeErrorBytes)
+		if res.Error == "" {
+			res.Error = err.Error()
+		}
+		return res
+	}
+	res.Up = true
+	return res
+}
+
+// truncateString 截断字符串并追加省略标记（UTF-8 安全，按字节截断边界兜底）。
+func truncateString(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…(truncated)"
 }
 
 func probeHTTP(ctx context.Context, p protocol.ServiceCheckParams) *protocol.ServiceCheckResult {

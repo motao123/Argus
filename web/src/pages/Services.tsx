@@ -100,7 +100,7 @@ function UptimeBlocks({ svcId }: { svcId: number }) {
   );
 }
 
-const typeLabels: Record<string, string> = { http: "HTTP", tcp: "TCP", ping: "Ping" };
+const typeLabels: Record<string, string> = { http: "HTTP", tcp: "TCP", ping: "Ping", command: "Command" };
 
 export default function Services() {
   const { t } = useI18n();
@@ -190,9 +190,10 @@ export default function Services() {
               <option value="http">HTTP</option>
               <option value="tcp">TCP</option>
               <option value="ping">Ping</option>
+              <option value="command">{t("services.typeCommand")}</option>
             </select>
             <input
-              placeholder={t("services.target")}
+              placeholder={form.type === "command" ? t("services.commandPlaceholder") : t("services.target")}
               value={form.target ?? ""}
               onChange={(e) => setForm({ ...form, target: e.target.value })}
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none sm:col-span-2"

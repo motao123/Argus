@@ -11,6 +11,7 @@ import (
 
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/notifier"
+	trafficquota "github.com/motao123/Argus/server/internal/traffic"
 )
 
 // ---- Alerts ----
@@ -45,6 +46,9 @@ func (s *Server) createAlert(c *gin.Context) {
 	if !s.validateAlertTargets(c, &a) {
 		return
 	}
+	if !validateAlertCycle(c, &a) {
+		return
+	}
 	if err := s.DB.Create(&a).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -74,6 +78,9 @@ func (s *Server) updateAlert(c *gin.Context) {
 		a.OwnerID = p.UserID
 	}
 	if !s.validateAlertTargets(c, &a) {
+		return
+	}
+	if !validateAlertCycle(c, &a) {
 		return
 	}
 	if err := s.DB.Save(&a).Error; err != nil {
@@ -202,6 +209,29 @@ func (s *Server) unsilenceAlert(c *gin.Context) {
 	}
 	s.auditLog(c, "alert.unsilence", fmt.Sprintf("alert_id=%d name=%s", a.ID, a.Name))
 	ok(c, gin.H{"ok": true})
+}
+
+// validateAlertCycle 校验周期流量规则的周期配置：
+// 仅当 CycleStart 与 CycleUnit 同时配置时启用锚点周期（hour/day/week/month/year）；
+// CycleUnit 为空或非法时回退服务器月度周期（兼容旧规则）。
+func validateAlertCycle(c *gin.Context, a *model.Alert) bool {
+	if a.CycleStart == nil && a.CycleUnit == "" {
+		a.CycleStart, a.CycleUnit, a.CycleInterval = nil, "", 1
+		return true
+	}
+	if !trafficquota.ValidUnit(a.CycleUnit) {
+		fail(c, http.StatusBadRequest, "invalid cycle unit (must be hour, day, week, month, or year)")
+		return false
+	}
+	if a.CycleStart == nil {
+		now := time.Now()
+		a.CycleStart = &now
+	}
+	if a.CycleInterval < 1 || a.CycleInterval > 366 {
+		fail(c, http.StatusBadRequest, "cycle interval must be between 1 and 366")
+		return false
+	}
+	return true
 }
 
 // validateAlertTargets enforces server ownership and PAT whitelist for alert rules.
