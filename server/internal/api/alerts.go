@@ -1,9 +1,11 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -95,6 +97,109 @@ func (s *Server) deleteAlert(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	ok(c, gin.H{"ok": true})
+}
+
+// ---- 告警确认 / 静默 ----
+
+// ackAlert 确认告警：记录确认人与时间；确认期间该规则不再发送触发通知
+// （任务联动与插件 hook 不受影响），恢复时自动清除。
+func (s *Server) ackAlert(c *gin.Context) {
+	p := principalFromContext(c)
+	var a model.Alert
+	if err := s.DB.First(&a, mustID(c)).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !p.IsAdmin && a.OwnerID != p.UserID {
+		fail(c, http.StatusForbidden, "alert access denied")
+		return
+	}
+	now := time.Now()
+	if err := s.DB.Model(&a).Updates(map[string]any{"acked_at": now, "acked_by": p.Username}).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.auditLog(c, "alert.ack", fmt.Sprintf("alert_id=%d name=%s by=%s", a.ID, a.Name, p.Username))
+	ok(c, gin.H{"ok": true, "acked_at": now, "acked_by": p.Username})
+}
+
+// unackAlert 取消确认。
+func (s *Server) unackAlert(c *gin.Context) {
+	p := principalFromContext(c)
+	var a model.Alert
+	if err := s.DB.First(&a, mustID(c)).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !p.IsAdmin && a.OwnerID != p.UserID {
+		fail(c, http.StatusForbidden, "alert access denied")
+		return
+	}
+	if err := s.DB.Model(&a).Updates(map[string]any{"acked_at": nil, "acked_by": ""}).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.auditLog(c, "alert.unack", fmt.Sprintf("alert_id=%d name=%s", a.ID, a.Name))
+	ok(c, gin.H{"ok": true})
+}
+
+// silenceAlert 静默：body {"until": "RFC3339", "from"?: "RFC3339"}。
+// 静默起止时间内该规则不发送通知（任务联动与插件 hook 不受影响）。
+func (s *Server) silenceAlert(c *gin.Context) {
+	p := principalFromContext(c)
+	var a model.Alert
+	if err := s.DB.First(&a, mustID(c)).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !p.IsAdmin && a.OwnerID != p.UserID {
+		fail(c, http.StatusForbidden, "alert access denied")
+		return
+	}
+	var req struct {
+		From  *time.Time `json:"from"`
+		Until *time.Time `json:"until"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "bad request")
+		return
+	}
+	if req.Until == nil || !req.Until.After(time.Now()) {
+		fail(c, http.StatusBadRequest, "until must be a future time")
+		return
+	}
+	from := time.Now()
+	if req.From != nil && req.From.After(time.Now()) {
+		from = *req.From
+	}
+	if err := s.DB.Model(&a).Updates(map[string]any{
+		"silence_from": from, "silence_to": *req.Until,
+	}).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.auditLog(c, "alert.silence", fmt.Sprintf("alert_id=%d name=%s from=%s until=%s", a.ID, a.Name, from.Format(time.RFC3339), req.Until.Format(time.RFC3339)))
+	ok(c, gin.H{"ok": true, "silence_from": from, "silence_to": *req.Until})
+}
+
+// unsilenceAlert 取消静默。
+func (s *Server) unsilenceAlert(c *gin.Context) {
+	p := principalFromContext(c)
+	var a model.Alert
+	if err := s.DB.First(&a, mustID(c)).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found")
+		return
+	}
+	if !p.IsAdmin && a.OwnerID != p.UserID {
+		fail(c, http.StatusForbidden, "alert access denied")
+		return
+	}
+	if err := s.DB.Model(&a).Updates(map[string]any{"silence_from": nil, "silence_to": nil}).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.auditLog(c, "alert.unsilence", fmt.Sprintf("alert_id=%d name=%s", a.ID, a.Name))
 	ok(c, gin.H{"ok": true})
 }
 

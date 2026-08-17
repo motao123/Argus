@@ -10,11 +10,13 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/motao123/Argus/server/internal/agent"
+	"github.com/motao123/Argus/server/internal/backup"
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/ddns"
 	"github.com/motao123/Argus/server/internal/geoip"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/nat"
+	"github.com/motao123/Argus/server/internal/notifier"
 	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/plugin"
 	"github.com/motao123/Argus/server/internal/scheduler"
@@ -37,6 +39,8 @@ type Server struct {
 	Themes    *theme.Manager
 	DDNS      *ddns.Client
 	NAT       *nat.Proxy
+	Notifier  *notifier.Queue // 通知持久队列（送达记录 + 重试）
+	Backups   *backup.Manager // 定时加密备份管理器
 
 	// upgradeResumeDelay 控制重启后恢复 pending 升级任务的宽限期（仅测试覆盖）。
 	upgradeResumeDelay time.Duration
@@ -72,10 +76,15 @@ func New(s *Server) *gin.Engine {
 			pub.GET("/services", s.forceAuth, s.listServices)
 			pub.GET("/services/:id/history", s.forceAuth, s.serviceHistory)
 			pub.GET("/services/:id/stats", s.forceAuth, s.serviceStats)
+
+			// 状态页：事故时间线 / 维护窗口 / 月度 SLA（公开读取）
+			pub.GET("/incidents", s.listIncidents)
+			pub.GET("/maintenance-windows", s.listMaintenanceWindows)
+			pub.GET("/servers/:id/sla", s.serverSLA)
 		}
 
-		// 写接口：必须登录
-		authed := api.Group("", s.authMiddleware())
+		// 写接口：必须登录。readonlyGate 拦截只读角色的一切写操作（白名单读接口除外）。
+		authed := api.Group("", s.authMiddleware(), s.readonlyGate())
 		{
 			// 用户管理（admin）
 			authed.GET("/users", s.listUsers)
@@ -101,6 +110,12 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/alerts/:id", requireScope(ScopeAlertWrite), s.updateAlert)
 			authed.DELETE("/alerts/:id", requireScope(ScopeAlertDelete), s.deleteAlert)
 
+			// 告警确认 / 静默（owner 或 admin；审计）
+			authed.POST("/alerts/:id/ack", requireScope(ScopeAlertWrite), s.ackAlert)
+			authed.DELETE("/alerts/:id/ack", requireScope(ScopeAlertWrite), s.unackAlert)
+			authed.POST("/alerts/:id/silence", requireScope(ScopeAlertWrite), s.silenceAlert)
+			authed.DELETE("/alerts/:id/silence", requireScope(ScopeAlertWrite), s.unsilenceAlert)
+
 			// 流量报告配置（admin）
 			authed.GET("/traffic-report", s.getTrafficReport)
 			authed.POST("/traffic-report", s.saveTrafficReport)
@@ -121,6 +136,15 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/admin/backup/restore", s.backupRestore)
 			authed.GET("/admin/db/size", s.dbSize)
 			authed.POST("/admin/db/vacuum", s.dbVacuum)
+
+			// 定时加密备份（admin：整库数据 + 密钥派生信息，仅管理员可管）
+			authed.GET("/admin/backup-schedules", requireAdmin(), s.listBackupSchedules)
+			authed.POST("/admin/backup-schedules", requireAdmin(), s.createBackupSchedule)
+			authed.PUT("/admin/backup-schedules/:id", requireAdmin(), s.updateBackupSchedule)
+			authed.DELETE("/admin/backup-schedules/:id", requireAdmin(), s.deleteBackupSchedule)
+			authed.POST("/admin/backup-schedules/:id/run", requireAdmin(), s.runBackupSchedule)
+			authed.GET("/admin/backup-schedules/:id/runs", requireAdmin(), s.listBackupRuns)
+			authed.POST("/admin/backup-schedules/:id/drill", requireAdmin(), s.backupDrill)
 
 			// 服务器分组
 			authed.GET("/groups", s.listGroups)
@@ -164,6 +188,10 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/notifications", requireAdmin(), s.createNotification)
 			authed.PUT("/notifications/:id", requireAdmin(), s.updateNotification)
 			authed.DELETE("/notifications/:id", requireAdmin(), s.deleteNotification)
+
+			// 通知送达记录（owner/admin 隔离）与手动重试
+			authed.GET("/notifications/deliveries", s.listNotificationDeliveries)
+			authed.POST("/notifications/deliveries/:id/retry", s.retryNotificationDelivery)
 
 			// 定时任务
 			authed.GET("/crons", requireScope(ScopeCronRead), s.listCrons)
@@ -225,6 +253,15 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/nats", s.createNAT)
 			authed.PUT("/nats/:id", s.updateNAT)
 			authed.DELETE("/nats/:id", s.deleteNAT)
+
+			// 状态页事故与维护窗口（管理端 CRUD，owner/admin 隔离 + 审计）
+			authed.POST("/incidents", s.createIncident)
+			authed.PUT("/incidents/:id", s.updateIncident)
+			authed.DELETE("/incidents/:id", s.deleteIncident)
+			authed.POST("/incidents/:id/resolve", s.resolveIncident)
+			authed.POST("/maintenance-windows", s.createMaintenanceWindow)
+			authed.PUT("/maintenance-windows/:id", s.updateMaintenanceWindow)
+			authed.DELETE("/maintenance-windows/:id", s.deleteMaintenanceWindow)
 		}
 		// 仪表盘实时推送（游客可连，借鉴 komari 公开节点列表）
 		api.GET("/ws", s.optionalAuthMiddleware(), s.dashboardWS)

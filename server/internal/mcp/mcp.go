@@ -42,10 +42,11 @@ type Server struct {
 
 // Principal is the MCP authorization context supplied by the API package.
 type Principal struct {
-	UserID    int64
-	IsAdmin   bool
-	Scopes    map[string]bool
-	ServerIDs map[int64]bool
+	UserID     int64
+	IsAdmin    bool
+	IsReadonly bool // readonly 角色：仅允许只读工具
+	Scopes     map[string]bool
+	ServerIDs  map[int64]bool
 }
 
 // 消息结构（MCP 用 JSON-RPC 2.0）。
@@ -207,10 +208,29 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, &rpcMsg{ID: msg.ID, Result: result, Error: rpcErr})
 }
 
+// readonlyTools readonly 角色可调用的 MCP 只读工具。
+var readonlyTools = map[string]bool{
+	"initialize":                true,
+	"notifications/initialized": true,
+	"ping":                      true,
+	"tools/list":                true,
+	"tools/call":                true,
+	"server.list":               true,
+	"server.get":                true,
+	"fs.list":                   true,
+	"fs.read":                   true,
+	"fs.download_url":           true,
+	"meta.whoami":               true,
+}
+
 // dispatch 分发工具调用。
 func (s *Server) dispatch(method string, params json.RawMessage, p *Principal) (any, *rpcErr) {
 	if p == nil {
 		return nil, &rpcErr{-32001, "unauthorized"}
+	}
+	// readonly 角色仅放行只读工具（列表/详情/只读文件/下载），其余一律拒绝。
+	if p.IsReadonly && !readonlyTools[method] {
+		return nil, &rpcErr{-32003, "readonly role: read-only access only"}
 	}
 	need := func(scope string) *rpcErr {
 		if p.IsAdmin || p.Scopes["argus:*"] || p.Scopes["argus:admin:*"] || p.Scopes[scope] {

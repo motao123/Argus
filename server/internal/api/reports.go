@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/motao123/Argus/server/internal/model"
-	"github.com/motao123/Argus/server/internal/notifier"
 )
 
 // ---- 流量定时报告（借鉴 komari 流量报告通知）----
@@ -78,7 +77,7 @@ func (s *Server) RunTrafficReport() {
 			sv.Name, fmtBytes(agg.In), fmtBytes(agg.Out)))
 	}
 	content := "今日流量报告\n" + joinLines(lines)
-	go notifier.Send(&n, "[Argus] 流量日报", content)
+	s.sendViaQueue(&n, "[Argus] 流量日报", content)
 }
 
 func fmtBytes(n int64) string {
@@ -129,7 +128,15 @@ func (s *Server) RunExpireCheck() {
 	if len(lines) == 0 {
 		return
 	}
-	go notifier.Send(&n, "[Argus] 服务器到期提醒", joinLines(lines))
+	s.sendViaQueue(&n, "[Argus] 服务器到期提醒", joinLines(lines))
+}
+
+// sendViaQueue 通过持久队列发送（未接线时仅记录日志，不阻塞每日任务）。
+func (s *Server) sendViaQueue(n *model.Notification, title, content string) {
+	if s.Notifier == nil {
+		return
+	}
+	_ = s.Notifier.Enqueue(n, title, content, 0)
 }
 
 func remainingStr(t *time.Time) string {

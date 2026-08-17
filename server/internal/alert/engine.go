@@ -13,8 +13,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/motao123/Argus/server/internal/maintenance"
 	"github.com/motao123/Argus/server/internal/model"
-	"github.com/motao123/Argus/server/internal/notifier"
 	"github.com/motao123/Argus/server/internal/store"
 	trafficquota "github.com/motao123/Argus/server/internal/traffic"
 )
@@ -27,6 +27,9 @@ type Engine struct {
 	Trigger func(cron *model.Cron, serverID int64, kind string)
 	// AlertHook 报警触发/恢复事件回调（main 注入，如插件 onAlert hook）。
 	AlertHook func(a *model.Alert, st store.State, value float64, kind string)
+	// Notify 发送单条通知到指定渠道（main 注入 notifier.Queue.Enqueue；
+	// ownerID 为报警规则 owner，用于送达记录 owner/admin 隔离）。
+	Notify func(n *model.Notification, title, content string, ownerID int64)
 
 	mu    sync.Mutex
 	state map[string]*violation // key: alertID:serverID
@@ -83,6 +86,16 @@ func (e *Engine) checkOnce() {
 	}
 	snap := e.store.Snapshot()
 
+	// 仅当存在 offline 规则时查询维护窗口（避免每轮无谓查询）。
+	var inMaint map[int64]bool
+	var maintAll bool
+	for i := range alerts {
+		if alerts[i].Metric == "offline" {
+			inMaint, maintAll, _ = maintenance.ActiveServerIDs(e.db, time.Now())
+			break
+		}
+	}
+
 	for _, a := range alerts {
 		allowed := alertServerIDs(a.ServerIDs)
 		for serverID, st := range snap {
@@ -90,6 +103,10 @@ func (e *Engine) checkOnce() {
 				continue
 			}
 			if a.OwnerID != 0 && allowed != nil && !allowed[serverID] {
+				continue
+			}
+			// 维护窗口内不判定 offline 告警（避免维护期误报）
+			if a.Metric == "offline" && (maintAll || inMaint[serverID]) {
 				continue
 			}
 			key := fmt.Sprintf("%d:%d", a.ID, serverID)
@@ -150,9 +167,10 @@ func (e *Engine) checkOnce() {
 				}
 			} else {
 				if v != nil {
-					// 从触发态恢复 → 发恢复通知（如已通知过）
+					// 从触发态恢复 → 发恢复通知（如已通知过）；恢复同时清除确认状态
 					if v.notified && !v.recovering {
 						v.recovering = true
+						e.clearAck(&a)
 						e.notify(&a, st, value, "recovered")
 					}
 					// 恢复 60s 后清除状态
@@ -260,7 +278,9 @@ func (e *Engine) notifyTrafficQuota(server *model.Server, usage trafficquota.Usa
 	}
 	title := fmt.Sprintf("[Argus] %s 流量额度 %d%%", server.Name, threshold)
 	content := fmt.Sprintf("%s 当前周期 %s 至 %s，已计费 %d / %d bytes（%.2f%%）", server.Name, usage.CycleStart.Format(time.RFC3339), usage.CycleEnd.Format(time.RFC3339), usage.AccountedBytes, usage.QuotaBytes, *usage.Percentage)
-	go notifier.Send(&n, title, content)
+	if e.Notify != nil {
+		e.Notify(&n, title, content, server.OwnerID)
+	}
 }
 
 // inRange 判定指标是否落在触发区间（低于下限或高于上限即触发）。
@@ -275,6 +295,30 @@ func (e *Engine) inRange(a *model.Alert, v float64) bool {
 		return true
 	}
 	return false
+}
+
+// silencedAt 判定规则在指定时刻是否处于静默窗口（起止时间内不通知；
+// SilenceFrom 为空视为从现在起）。
+func (e *Engine) silencedAt(a *model.Alert, now time.Time) bool {
+	if a.SilenceTo == nil || !now.Before(*a.SilenceTo) {
+		return false
+	}
+	if a.SilenceFrom != nil && now.Before(*a.SilenceFrom) {
+		return false
+	}
+	return true
+}
+
+// clearAck 恢复时清除确认状态（内存 + DB）。
+func (e *Engine) clearAck(a *model.Alert) {
+	if a.AckedAt == nil {
+		return
+	}
+	a.AckedAt, a.AckedBy = nil, ""
+	if e.db != nil {
+		_ = e.db.Model(&model.Alert{}).Where("id = ?", a.ID).
+			Updates(map[string]any{"acked_at": nil, "acked_by": ""}).Error
+	}
 }
 
 // notify 发送通知（多渠道）。
@@ -298,6 +342,16 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 		}
 	}
 	if !a.Notify {
+		return
+	}
+	// 静默窗口内 / 已确认的告警不发送通知（任务联动与插件 hook 不受影响）
+	now := time.Now()
+	if e.silencedAt(a, now) {
+		log.Printf("alert %s (%s): silenced until %s, notification skipped", a.Name, kind, a.SilenceTo.Format(time.RFC3339))
+		return
+	}
+	if a.AckedAt != nil {
+		log.Printf("alert %s (%s): acknowledged by %s, notification skipped", a.Name, kind, a.AckedBy)
 		return
 	}
 	serverName := st.Server.Name
@@ -326,7 +380,11 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 	}
 	for i := range targets {
 		n := targets[i]
-		go notifier.Send(&n, title, content)
+		if e.Notify != nil {
+			e.Notify(&n, title, content, a.OwnerID)
+		} else {
+			log.Printf("alert notify: no queue wired, drop delivery to channel #%d", n.ID)
+		}
 	}
 	log.Printf("alert %s (%s): %s", a.Name, kind, content)
 }

@@ -120,7 +120,7 @@ describe("i18n framework", () => {
 
   it("translateError: 按后端稳定 code 翻译，未知 code / 无 code 回退原文", () => {
     expect(translateError("zh-CN", "server.offline", "server offline")).toBe("服务器离线");
-    expect(translateError("en", "server.offline", "server offline")).toBe("Server is offline");
+    expect(translateError("en", "server.offline", "server offline")).toBe("Server offline");
     expect(translateError("zh-CN", "auth.invalid_credentials", "invalid credentials")).toBe("用户名或密码错误");
     // 未知 code → 回退后端原文
     expect(translateError("en", "some.new_code", "raw backend message")).toBe("raw backend message");

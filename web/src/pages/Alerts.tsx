@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Send, Trash2 } from "lucide-react";
+import { BellOff, CheckCheck, Pencil, Plus, Send, Trash2, Undo2 } from "lucide-react";
 import { api, type Alert, type Notification } from "../lib/api";
 import { useI18n, type TKey } from "../lib/i18n";
 
@@ -25,8 +25,11 @@ const emptyAlert = {
   notify: true, webhook_id: 0, group_id: 0, trigger_cron_id: 0, trigger_ratio: null as number | null, enabled: true,
 };
 
+// 静默时长选项（小时）
+const silenceOptions = [1, 6, 24, 72];
+
 export default function Alerts() {
-  const { t } = useI18n();
+  const { t, fmtDateTime } = useI18n();
   const qc = useQueryClient();
   const { data: alertData } = useQuery({ queryKey: ["alerts"], queryFn: api.alerts });
   const { data: notifData } = useQuery({ queryKey: ["notifications"], queryFn: api.notifications });
@@ -41,6 +44,8 @@ export default function Alerts() {
   const [nForm, setNForm] = useState<Partial<Notification> | null>(null);
   const [error, setError] = useState("");
   const [testResult, setTestResult] = useState("");
+  // 静默表单：{alertId, hours}
+  const [silenceForm, setSilenceForm] = useState<{ id: number; hours: number } | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["alerts"] });
@@ -56,6 +61,33 @@ export default function Alerts() {
     onError: (e) => setError((e as Error).message),
   });
   const deleteAlert = useMutation({ mutationFn: api.deleteAlert, onSuccess: invalidate });
+
+  const ackAlert = useMutation({
+    mutationFn: api.ackAlert,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+    onError: (e) => setError((e as Error).message),
+  });
+  const unackAlert = useMutation({
+    mutationFn: api.unackAlert,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+    onError: (e) => setError((e as Error).message),
+  });
+  const silenceAlert = useMutation({
+    mutationFn: async ({ id, hours }: { id: number; hours: number }) => {
+      const until = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+      return api.silenceAlert(id, until);
+    },
+    onSuccess: () => {
+      setSilenceForm(null);
+      qc.invalidateQueries({ queryKey: ["alerts"] });
+    },
+    onError: (e) => setError((e as Error).message),
+  });
+  const unsilenceAlert = useMutation({
+    mutationFn: api.unsilenceAlert,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+    onError: (e) => setError((e as Error).message),
+  });
 
   const saveN = useMutation({
     mutationFn: async (n: Partial<Notification>) => {
@@ -217,6 +249,31 @@ export default function Alerts() {
         </div>
       )}
 
+      {/* 静默表单 */}
+      {silenceForm && (
+        <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-panel p-4">
+          <span className="text-sm font-medium">{t("alerts.silenceFor")}</span>
+          <select
+            value={silenceForm.hours}
+            onChange={(e) => setSilenceForm({ ...silenceForm, hours: Number(e.target.value) })}
+            className="rounded-lg border border-border bg-bg px-3 py-1.5 text-sm outline-none"
+          >
+            {silenceOptions.map((h) => (
+              <option key={h} value={h}>{t("alerts.silenceHours", { hours: h })}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => silenceAlert.mutate(silenceForm)}
+            className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90"
+          >
+            {t("alerts.silenceApply")}
+          </button>
+          <button onClick={() => setSilenceForm(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">
+            {t("common.cancel")}
+          </button>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-xl border border-border bg-panel">
         <table className="w-full text-sm">
           <thead>
@@ -241,12 +298,58 @@ export default function Alerts() {
                 <td className="px-4 py-3 tabular">{a.duration}s</td>
                 <td className="px-4 py-3">{a.notify ? notifications.find((n) => n.id === a.webhook_id)?.name ?? `#${a.webhook_id}` : t("alerts.notifOff")}</td>
                 <td className="px-4 py-3">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${a.enabled ? "bg-ok/15 text-ok" : "bg-muted/20 text-muted"}`}>
-                    {a.enabled ? t("common.enabled") : t("common.disabled")}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${a.enabled ? "bg-ok/15 text-ok" : "bg-muted/20 text-muted"}`}>
+                      {a.enabled ? t("common.enabled") : t("common.disabled")}
+                    </span>
+                    {a.acked_at && (
+                      <span className="rounded-full bg-accent/15 px-2 py-0.5 text-xs text-accent" title={fmtDateTime(a.acked_at)}>
+                        {t("alerts.ackedBadge", { by: a.acked_by || "—" })}
+                      </span>
+                    )}
+                    {a.silence_to && (
+                      <span className="rounded-full bg-muted/20 px-2 py-0.5 text-xs text-muted" title={fmtDateTime(a.silence_from ?? "")}>
+                        {t("alerts.silencedBadge", { until: fmtDateTime(a.silence_to) })}
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
+                    {a.acked_at ? (
+                      <button
+                        onClick={() => unackAlert.mutate(a.id)}
+                        title={t("alerts.unackTitle")}
+                        className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <Undo2 className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => ackAlert.mutate(a.id)}
+                        title={t("alerts.ackTitle")}
+                        className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <CheckCheck className="h-4 w-4" />
+                      </button>
+                    )}
+                    {a.silence_to ? (
+                      <button
+                        onClick={() => unsilenceAlert.mutate(a.id)}
+                        title={t("alerts.unsilenceTitle")}
+                        className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <Undo2 className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setSilenceForm({ id: a.id, hours: 24 })}
+                        title={t("alerts.silenceTitle")}
+                        className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <BellOff className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => setForm({ ...emptyAlert, ...a, id: a.id })}
                       className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"

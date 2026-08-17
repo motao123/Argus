@@ -1,18 +1,32 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellRing, Plus, Trash2 } from "lucide-react";
-import { api, type Notification, type NotificationGroup } from "../lib/api";
-import { useI18n } from "../lib/i18n";
+import { BellRing, Plus, RotateCw, Trash2 } from "lucide-react";
+import { api, type Notification, type NotificationDelivery, type NotificationGroup } from "../lib/api";
+import { useI18n, type TKey } from "../lib/i18n";
+
+const deliveryStatusClass: Record<string, string> = {
+  pending: "bg-accent/15 text-accent",
+  sent: "bg-ok/15 text-ok",
+  failed: "bg-err/15 text-err",
+};
+
+const deliveryStatusLabel: Record<string, TKey> = {
+  pending: "notifications.deliveryStatusPending",
+  sent: "notifications.deliveryStatusSent",
+  failed: "notifications.deliveryStatusFailed",
+};
 
 export default function Notifications() {
-  const { t, tErr } = useI18n();
+  const { t, tErr, fmtDateTime } = useI18n();
   const qc = useQueryClient();
   const { data: notifData } = useQuery({ queryKey: ["notifications"], queryFn: api.notifications });
   const { data: groupData } = useQuery({ queryKey: ["notification-groups"], queryFn: api.notificationGroups });
   const { data: offline } = useQuery({ queryKey: ["offline-notify"], queryFn: api.offlineNotify });
   const { data: traffic } = useQuery({ queryKey: ["traffic-report"], queryFn: api.trafficReport });
+  const { data: deliveryData } = useQuery({ queryKey: ["deliveries"], queryFn: () => api.deliveries(0, 50) });
   const notifications = notifData?.notifications ?? [];
   const groups = groupData?.groups ?? [];
+  const deliveries = deliveryData?.deliveries ?? [];
 
   const [offlineForm, setOfflineForm] = useState<{ webhook_id: number; offline_after: number; enabled: boolean } | null>(null);
   const [trafficForm, setTrafficForm] = useState<{ webhook_id: number; hour: number; enabled: boolean } | null>(null);
@@ -38,6 +52,11 @@ export default function Notifications() {
     mutationFn: api.deleteNotificationGroup,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notification-groups"] }),
   });
+  const retryDelivery = useMutation({
+    mutationFn: api.retryDelivery,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["deliveries"] }),
+    onError: (e) => setMsg(tErr(e)),
+  });
 
   const webhookSelect = (id: number, set: (v: number) => void) => (
     <select value={id} onChange={(e) => set(Number(e.target.value))} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm">
@@ -49,6 +68,7 @@ export default function Notifications() {
   );
 
   const channelRef = (id: number) => (id ? t("notifications.chanId", { id }) : t("notifications.notSet"));
+  const channelName = (id: number) => notifications.find((n) => n.id === id)?.name ?? channelRef(id);
 
   return (
     <div className="space-y-8">
@@ -170,6 +190,65 @@ export default function Notifications() {
           ))}
           {groups.length === 0 && <li className="py-3 text-center text-sm text-muted">{t("notifications.noGroups")}</li>}
         </ul>
+      </section>
+
+      {/* 送达记录（持久队列 + 重试） */}
+      <section className="rounded-xl border border-border bg-panel p-4">
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="text-sm font-medium">{t("notifications.deliveryTitle")}</h2>
+          <span className="text-xs text-muted">{t("notifications.deliveryHint")}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-muted">
+                <th className="px-3 py-2.5 font-normal">{t("notifications.deliveryChannel")}</th>
+                <th className="px-3 py-2.5 font-normal">{t("notifications.deliveryTitleCol")}</th>
+                <th className="px-3 py-2.5 font-normal">{t("notifications.deliveryStatus")}</th>
+                <th className="px-3 py-2.5 font-normal">{t("notifications.deliveryAttempts")}</th>
+                <th className="px-3 py-2.5 font-normal">{t("notifications.deliveryNextRetry")}</th>
+                <th className="px-3 py-2.5 font-normal">{t("notifications.deliverySentAt")}</th>
+                <th className="px-3 py-2.5 font-normal">{t("notifications.deliveryError")}</th>
+                <th className="px-3 py-2.5 text-right font-normal">{t("alerts.actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deliveries.map((d: NotificationDelivery) => (
+                <tr key={d.id} className="border-b border-border last:border-0 hover:bg-black/2 dark:hover:bg-white/2">
+                  <td className="max-w-36 truncate px-3 py-2.5">{channelName(d.webhook_id)}</td>
+                  <td className="max-w-56 truncate px-3 py-2.5" title={d.title}>{d.title || "—"}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${deliveryStatusClass[d.status] ?? "bg-muted/20 text-muted"}`}>
+                      {t(deliveryStatusLabel[d.status] ?? "notifications.deliveryStatusPending")}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 tabular text-muted">{d.attempts}/{d.max_attempts}</td>
+                  <td className="px-3 py-2.5 tabular text-xs text-muted">{d.next_retry ? fmtDateTime(d.next_retry) : "—"}</td>
+                  <td className="px-3 py-2.5 tabular text-xs text-muted">{d.sent_at ? fmtDateTime(d.sent_at) : "—"}</td>
+                  <td className="max-w-48 truncate px-3 py-2.5 text-xs text-err" title={d.last_error}>{d.last_error || "—"}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    {d.status === "failed" && (
+                      <button
+                        onClick={() => retryDelivery.mutate(d.id)}
+                        title={t("notifications.deliveryRetryTitle")}
+                        className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <RotateCw className="h-4 w-4" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {deliveries.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-muted">
+                    {t("notifications.noDeliveries")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   );

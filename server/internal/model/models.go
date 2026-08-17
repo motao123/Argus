@@ -30,18 +30,27 @@ type Server struct {
 	TrafficTimezone   string `gorm:"size:64;default:'UTC'" json:"traffic_timezone"`
 	TrafficAccounting string `gorm:"size:8;default:'sum'" json:"traffic_accounting"` // sum/in/out/max
 	// 标签与展示（借鉴 komari 标签 + nezha 排序/隐藏）
-	Tags      string    `gorm:"size:512;default:''" json:"tags"` // 逗号分隔
-	SortOrder int       `gorm:"default:0" json:"sort_order"`
-	Hidden    bool      `gorm:"default:false" json:"hidden"` // guest 不可见
+	Tags      string `gorm:"size:512;default:''" json:"tags"` // 逗号分隔
+	SortOrder int    `gorm:"default:0" json:"sort_order"`
+	Hidden    bool   `gorm:"default:false" json:"hidden"` // guest 不可见
+	// SloTarget 月度可用性目标（百分比，如 99.9）；0 = 不启用 SLO。
+	SloTarget float64   `gorm:"default:99.9" json:"slo_target"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// 用户角色
+// 用户角色。readonly 为只读角色：可查看公开视图与自有服务器状态，
+// 但禁止一切写操作（执行/文件/任务/告警/配置等）。
 const (
-	RoleAdmin = "admin"
-	RoleUser  = "user"
+	RoleAdmin    = "admin"
+	RoleUser     = "user"
+	RoleReadonly = "readonly"
 )
+
+// IsValidRole 校验角色是否合法（历史数据默认 user 兼容）。
+func IsValidRole(role string) bool {
+	return role == RoleAdmin || role == RoleUser || role == RoleReadonly
+}
 
 // User 用户账号（多用户：admin 全部权限，user 仅自己名下服务器）。
 type User struct {
@@ -96,21 +105,26 @@ type NotificationGroup struct {
 
 // Alert 报警规则。
 type Alert struct {
-	ID            int64     `gorm:"primaryKey" json:"id"`
-	OwnerID       int64     `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有（兼容旧数据）
-	Name          string    `gorm:"size:64;not null" json:"name"`
-	Metric        string    `gorm:"size:32;not null" json:"metric"` // cpu/mem/disk/net_in_speed/net_out_speed/load1/offline
-	Min           *float64  `json:"min"`                            // 下限（nil 不检查）
-	Max           *float64  `json:"max"`                            // 上限（nil 不检查）
-	Duration      int       `json:"duration"`                       // 持续秒数
-	Notify        bool      `gorm:"default:true" json:"notify"`
-	WebhookID     int64     `json:"webhook_id"`                            // 单渠道（兼容）
-	GroupID       int64     `json:"group_id"`                              // 通知分组（0=无）
-	TriggerCronID int64     `json:"trigger_cron_id"`                       // 触发时执行的任务（0=无）
-	ServerIDs     string    `gorm:"size:512;default:''" json:"server_ids"` // 逗号分隔；空 = 全部（仅 admin）
-	TriggerRatio  *int      `json:"trigger_ratio"`                         // 采样达标比例（1-100，如 70=70% 采样超限才触发；nil=全部采样）
-	Enabled       bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            int64    `gorm:"primaryKey" json:"id"`
+	OwnerID       int64    `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有（兼容旧数据）
+	Name          string   `gorm:"size:64;not null" json:"name"`
+	Metric        string   `gorm:"size:32;not null" json:"metric"` // cpu/mem/disk/net_in_speed/net_out_speed/load1/offline
+	Min           *float64 `json:"min"`                            // 下限（nil 不检查）
+	Max           *float64 `json:"max"`                            // 上限（nil 不检查）
+	Duration      int      `json:"duration"`                       // 持续秒数
+	Notify        bool     `gorm:"default:true" json:"notify"`
+	WebhookID     int64    `json:"webhook_id"`                            // 单渠道（兼容）
+	GroupID       int64    `json:"group_id"`                              // 通知分组（0=无）
+	TriggerCronID int64    `json:"trigger_cron_id"`                       // 触发时执行的任务（0=无）
+	ServerIDs     string   `gorm:"size:512;default:''" json:"server_ids"` // 逗号分隔；空 = 全部（仅 admin）
+	TriggerRatio  *int     `json:"trigger_ratio"`                         // 采样达标比例（1-100，如 70=70% 采样超限才触发；nil=全部采样）
+	Enabled       bool     `gorm:"default:true" json:"enabled"`
+	// 确认：AckedAt/AckedBy 非空表示规则当前告警已被确认，确认期间不再发送触发通知；恢复时自动清除。
+	AckedAt     *time.Time `json:"acked_at"`
+	AckedBy     string     `gorm:"size:32;default:''" json:"acked_by"`
+	SilenceFrom *time.Time `json:"silence_from"` // 静默开始（nil = 从现在起）
+	SilenceTo   *time.Time `json:"silence_to"`   // 静默结束；静默期间不发送通知
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 // Notification 通知渠道（借鉴 komari 多渠道设计 + nezha 模板）。
@@ -126,6 +140,32 @@ type Notification struct {
 	Body      string    `gorm:"size:2048;default:'{}'" json:"body"`    // 支持 {{title}} {{content}} 模板
 	ChatID    string    `gorm:"size:64;default:''" json:"chat_id"`     // telegram/email 目标
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// 通知送达状态。
+const (
+	DeliveryPending = "pending"
+	DeliverySent    = "sent"
+	DeliveryFailed  = "failed"
+)
+
+// NotificationDelivery 通知送达记录（持久队列状态机）。
+// 每次通知（报警/离线/报告/测试/服务事件等）落一条记录，由 notifier.Queue 负责
+// 指数退避重试：Status pending → sent / failed；Attempts 达到 MaxAttempts 仍失败则标记 failed。
+type NotificationDelivery struct {
+	ID          int64      `gorm:"primaryKey" json:"id"`
+	WebhookID   int64      `gorm:"index;not null" json:"webhook_id"` // 通知渠道 ID
+	OwnerID     int64      `gorm:"index;default:0" json:"owner_id"`  // 触发方（报警规则 owner；0 = 系统/管理员流程）
+	Title       string     `gorm:"size:256;default:''" json:"title"`
+	Content     string     `gorm:"size:4096;default:''" json:"content"`
+	Status      string     `gorm:"size:16;index;not null;default:'pending'" json:"status"` // pending/sent/failed
+	Attempts    int        `gorm:"default:0" json:"attempts"`
+	MaxAttempts int        `gorm:"default:5" json:"max_attempts"`
+	NextRetry   *time.Time `gorm:"index" json:"next_retry"` // 下次重试时间；failed/sent 后为 nil
+	LastError   string     `gorm:"size:1024;default:''" json:"last_error"`
+	SentAt      *time.Time `json:"sent_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // Cron 定时任务。
@@ -463,4 +503,82 @@ type ServerGroup struct {
 	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
 	Name      string    `gorm:"size:64;not null" json:"name"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// 事故严重级别与状态（状态页事故时间线）。
+const (
+	IncidentSeverityMinor    = "minor"
+	IncidentSeverityMajor    = "major"
+	IncidentSeverityCritical = "critical"
+
+	IncidentStatusOngoing  = "ongoing"
+	IncidentStatusResolved = "resolved"
+)
+
+// Incident 状态页事故记录（公开时间线展示；管理端按 owner 隔离）。
+type Incident struct {
+	ID        int64      `gorm:"primaryKey" json:"id"`
+	OwnerID   int64      `gorm:"index;default:0" json:"owner_id"` // 0 = admin 所有
+	Title     string     `gorm:"size:128;not null" json:"title"`
+	Severity  string     `gorm:"size:16;default:'minor'" json:"severity"` // minor/major/critical
+	Status    string     `gorm:"size:16;default:'ongoing'" json:"status"` // ongoing/resolved
+	ServerIDs string     `gorm:"size:512;default:''" json:"server_ids"`   // 逗号分隔；空 = 全部
+	Notes     string     `gorm:"size:4096;default:''" json:"notes"`
+	StartAt   time.Time  `json:"start_at"`
+	EndAt     *time.Time `json:"end_at"` // nil = 尚未结束
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// MaintenanceWindow 维护窗口。Recurring = 每周按 StartAt 的星期/时刻重复，
+// 窗口时长为 StartAt→EndAt 间隔（跨午夜/跨周末支持，须小于 7 天）。
+// ServerIDs 为空表示覆盖全部服务器。
+type MaintenanceWindow struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
+	Title     string    `gorm:"size:128;not null" json:"title"`
+	ServerIDs string    `gorm:"size:512;default:''" json:"server_ids"` // 逗号分隔；空 = 全部
+	StartAt   time.Time `json:"start_at"`
+	EndAt     time.Time `json:"end_at"`
+	Recurring bool      `gorm:"default:false" json:"recurring"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BackupSchedule 定时加密备份计划（里程碑9：加密备份与恢复演练）。
+// 执行流程：VACUUM INTO 一致性快照 → AES-256-GCM 加密 → 目标上传（HTTP PUT）或写入本地目录。
+// 加密密钥由 KeyProvider（环境变量/密钥文件/JWT 密钥兜底）经 HKDF-SHA256 派生，
+// 库中仅保存来源标签 KeySource、随机盐 KeySalt 与派生密钥指纹 KeyID，不落盘明文。
+type BackupSchedule struct {
+	ID      int64  `gorm:"primaryKey" json:"id"`
+	Name    string `gorm:"size:64;not null" json:"name"`
+	Enabled bool   `gorm:"default:false" json:"enabled"`
+	Cron    string `gorm:"size:64;not null" json:"cron"`     // cron 表达式（5 段）
+	Target  string `gorm:"size:1024;not null" json:"target"` // http(s) PUT URL 或本地绝对目录
+	// KeepCount 保留份数：本地目标删除超出份数的旧文件；远程目标仅裁剪历史记录（对象删除由服务端策略管理）。
+	KeepCount int    `gorm:"default:7" json:"keep_count"`
+	KeySource string `gorm:"size:128;default:''" json:"key_source"` // 密钥来源标签（env:/file:/jwt:），非密钥本身
+	KeySalt   string `gorm:"size:64;default:''" json:"-"`           // 每计划随机盐（hex），用于 HKDF
+	KeyID     string `gorm:"size:16;default:''" json:"key_id"`      // 派生密钥指纹（hex，前 8 字节）
+	// 最近一次执行状态
+	LastRunAt  *time.Time `json:"last_run_at"`
+	LastStatus string     `gorm:"size:16;default:''" json:"last_status"` // success / failed / running
+	LastError  string     `gorm:"size:1024;default:''" json:"last_error"`
+	LastSize   int64      `json:"last_size"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+// BackupRun 一次备份执行记录（审计与保留清理依据）。
+type BackupRun struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	ScheduleID int64     `gorm:"index;not null" json:"schedule_id"`
+	Trigger    string    `gorm:"size:16;default:'cron'" json:"trigger"` // cron / manual
+	Status     string    `gorm:"size:16;not null" json:"status"`        // success / failed
+	Target     string    `gorm:"size:1024;default:''" json:"target"`
+	Size       int64     `json:"size"`
+	SHA256     string    `gorm:"size:64;default:''" json:"sha256"` // 密文 SHA-256
+	Error      string    `gorm:"size:1024;default:''" json:"error"`
+	DurationMS int64     `json:"duration_ms"`
+	CreatedAt  time.Time `json:"created_at"`
 }

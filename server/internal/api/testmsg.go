@@ -6,10 +6,10 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/motao123/Argus/server/internal/model"
-	"github.com/motao123/Argus/server/internal/notifier"
 )
 
 // testSendMessage 测试通知渠道（借鉴 komari admin:testSendMessage）。
+// 走持久队列：返回的 delivery_id 可在送达记录页查看/重试。
 func (s *Server) testSendMessage(c *gin.Context) {
 	p := principalFromContext(c)
 	if !p.IsAdmin {
@@ -38,6 +38,13 @@ func (s *Server) testSendMessage(c *gin.Context) {
 	if content == "" {
 		content = "这是一条测试消息"
 	}
-	go notifier.Send(&n, title, content)
+	if s.Notifier == nil {
+		fail(c, http.StatusServiceUnavailable, "notifier unavailable")
+		return
+	}
+	if err := s.Notifier.Enqueue(&n, title, content, 0); err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	ok(c, gin.H{"ok": true, "sent_to": n.Type})
 }

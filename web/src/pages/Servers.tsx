@@ -18,6 +18,7 @@ interface FormState {
   tags: string;
   sort_order: number;
   hidden: boolean;
+  slo_target: number;
   traffic_quota_bytes: number;
   traffic_cycle_day: number;
   traffic_timezone: string;
@@ -26,6 +27,7 @@ interface FormState {
 
 const emptyForm: FormState = {
   name: "", group: "", note: "", price: 0, cycle_days: 0, expire_at: "", auto_renew: false, tags: "", sort_order: 0, hidden: false,
+  slo_target: 99.9,
   traffic_quota_bytes: 0, traffic_cycle_day: 1, traffic_timezone: "UTC", traffic_accounting: "sum",
 };
 
@@ -199,6 +201,7 @@ export default function Servers() {
             </select>
             <input type="datetime-local" value={form.expire_at} onChange={(e) => setForm({ ...form, expire_at: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input type="number" placeholder={t("servers.sortOrder")} value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            <input type="number" step="0.1" min={0} placeholder={t("servers.sloTarget")} value={form.slo_target} onChange={(e) => setForm({ ...form, slo_target: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <input placeholder={t("servers.tags")} value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.auto_renew} onChange={(e) => setForm({ ...form, auto_renew: e.target.checked })} /> {t("servers.autoRenew")}
@@ -306,7 +309,7 @@ export default function Servers() {
                         setForm({
                           id: s.id, name: s.name, group: s.group, note: s.note, price: s.price, cycle_days: s.cycle_days,
                           expire_at: s.expire_at ? s.expire_at.slice(0, 16) : "", auto_renew: s.auto_renew, tags: s.tags,
-                          sort_order: s.sort_order, hidden: s.hidden,
+                          sort_order: s.sort_order, hidden: s.hidden, slo_target: s.slo_target || 99.9,
                           traffic_quota_bytes: s.traffic_quota_bytes, traffic_cycle_day: s.traffic_cycle_day || 1,
                           traffic_timezone: s.traffic_timezone || "UTC", traffic_accounting: s.traffic_accounting || "sum",
                         })

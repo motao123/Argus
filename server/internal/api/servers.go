@@ -197,6 +197,7 @@ func (s *Server) createServer(c *gin.Context) {
 		Name              string `json:"name"`
 		Group             string `json:"group"`
 		Note              string `json:"note"`
+		SloTarget         string `json:"slo_target"` // 空 = 默认 99.9，0 = 不启用 SLO
 		TrafficQuotaBytes uint64 `json:"traffic_quota_bytes"`
 		TrafficCycleDay   int    `json:"traffic_cycle_day"`
 		TrafficTimezone   string `json:"traffic_timezone"`
@@ -205,6 +206,12 @@ func (s *Server) createServer(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
+	}
+	sloTarget := 99.9
+	if req.SloTarget != "" {
+		if v, err := strconv.ParseFloat(req.SloTarget, 64); err == nil && v >= 0 {
+			sloTarget = v
+		}
 	}
 	if req.TrafficCycleDay == 0 {
 		req.TrafficCycleDay = 1
@@ -219,7 +226,7 @@ func (s *Server) createServer(c *gin.Context) {
 		fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	srv := model.Server{Name: req.Name, Group: req.Group, Note: req.Note, Secret: agent.GenSecret(), OwnerID: principalFromContext(c).UserID,
+	srv := model.Server{Name: req.Name, Group: req.Group, Note: req.Note, Secret: agent.GenSecret(), OwnerID: principalFromContext(c).UserID, SloTarget: sloTarget,
 		TrafficQuotaBytes: req.TrafficQuotaBytes, TrafficCycleDay: req.TrafficCycleDay, TrafficTimezone: req.TrafficTimezone, TrafficAccounting: req.TrafficAccounting}
 	if err := s.DB.Create(&srv).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
@@ -244,6 +251,7 @@ func (s *Server) updateServer(c *gin.Context) {
 		Tags              *string  `json:"tags"`
 		SortOrder         *int     `json:"sort_order"`
 		Hidden            *bool    `json:"hidden"`
+		SloTarget         *float64 `json:"slo_target"`
 		TrafficQuotaBytes *uint64  `json:"traffic_quota_bytes"`
 		TrafficCycleDay   *int     `json:"traffic_cycle_day"`
 		TrafficTimezone   *string  `json:"traffic_timezone"`
@@ -290,6 +298,13 @@ func (s *Server) updateServer(c *gin.Context) {
 	}
 	if req.Hidden != nil {
 		updates["hidden"] = *req.Hidden
+	}
+	if req.SloTarget != nil {
+		if *req.SloTarget < 0 {
+			fail(c, http.StatusBadRequest, "slo_target must be >= 0")
+			return
+		}
+		updates["slo_target"] = *req.SloTarget
 	}
 	day, timezone, accounting := srv.TrafficCycleDay, srv.TrafficTimezone, srv.TrafficAccounting
 	if day == 0 {

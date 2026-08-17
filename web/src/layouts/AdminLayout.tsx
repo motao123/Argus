@@ -1,44 +1,52 @@
-import { Activity, Bell, CalendarClock, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Palette, Radar, Settings as SettingsIcon, ShieldCheck, Sun, BellRing, ScrollText, Users, Wrench, X, Zap } from "lucide-react";
+import { Activity, Bell, BellRing, CalendarClock, DatabaseBackup, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Palette, Radar, ScrollText, Settings as SettingsIcon, ShieldCheck, Sun, TriangleAlert, Users, Wrench, X, Zap } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
-import { setToken } from "../lib/api";
+import { api, setToken } from "../lib/api";
 import { useI18n, type TKey } from "../lib/i18n";
 import { useTheme } from "../lib/theme";
 import CommandPalette from "../components/CommandPalette";
 
-const nav: { to: string; key: TKey; icon: typeof LayoutDashboard }[] = [
+// roles 缺省 = 全部角色；与后端权限矩阵保持一致（前后端菜单收敛）。
+const nav: { to: string; key: TKey; icon: typeof LayoutDashboard; roles?: string[] }[] = [
   { to: "/admin/overview", key: "nav.overview", icon: LayoutDashboard },
   { to: "/admin/servers", key: "nav.servers", icon: MonitorSmartphone },
   { to: "/admin/services", key: "nav.services", icon: Radar },
-  { to: "/admin/alerts", key: "nav.alerts", icon: Bell },
-  { to: "/admin/crons", key: "nav.crons", icon: CalendarClock },
-  { to: "/admin/files", key: "nav.files", icon: FolderOpen },
-  { to: "/admin/access", key: "nav.access", icon: KeyRound },
+  { to: "/admin/alerts", key: "nav.alerts", icon: Bell, roles: ["admin", "user"] },
+  { to: "/admin/incidents", key: "nav.statusPage", icon: TriangleAlert, roles: ["admin", "user"] },
+  { to: "/admin/crons", key: "nav.crons", icon: CalendarClock, roles: ["admin", "user"] },
+  { to: "/admin/files", key: "nav.files", icon: FolderOpen, roles: ["admin", "user"] },
+  { to: "/admin/access", key: "nav.access", icon: KeyRound, roles: ["admin"] },
   { to: "/admin/sessions", key: "nav.sessions", icon: Users },
-  { to: "/admin/network", key: "nav.network", icon: NetworkIcon },
+  { to: "/admin/network", key: "nav.network", icon: NetworkIcon, roles: ["admin", "user"] },
   { to: "/admin/security", key: "nav.security", icon: ShieldCheck },
-  { to: "/admin/notifications", key: "nav.notifications", icon: BellRing },
-  { to: "/admin/plugins", key: "nav.plugins", icon: Zap },
-  { to: "/admin/themes", key: "nav.themes", icon: Palette },
-  { to: "/admin/lifecycle", key: "nav.lifecycle", icon: Wrench },
-  { to: "/admin/audit", key: "nav.audit", icon: ScrollText },
-  { to: "/admin/maintenance", key: "nav.maintenance", icon: Wrench },
-  { to: "/admin/settings", key: "nav.settings", icon: SettingsIcon },
+  { to: "/admin/notifications", key: "nav.notifications", icon: BellRing, roles: ["admin"] },
+  { to: "/admin/plugins", key: "nav.plugins", icon: Zap, roles: ["admin"] },
+  { to: "/admin/themes", key: "nav.themes", icon: Palette, roles: ["admin"] },
+  { to: "/admin/lifecycle", key: "nav.lifecycle", icon: Wrench, roles: ["admin"] },
+  { to: "/admin/audit", key: "nav.audit", icon: ScrollText, roles: ["admin"] },
+  { to: "/admin/maintenance", key: "nav.maintenance", icon: Wrench, roles: ["admin"] },
+  { to: "/admin/backups", key: "nav.backups", icon: DatabaseBackup, roles: ["admin"] },
+  { to: "/admin/settings", key: "nav.settings", icon: SettingsIcon, roles: ["admin"] },
 ];
 
 function SidebarContent({ theme, onToggleTheme, onToggleLang, onNavigate }: { theme: "light" | "dark"; onToggleTheme: () => void; onToggleLang: () => void; onNavigate?: () => void }) {
   const { online, total } = useServers();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.me });
+  const role = me?.role ?? "user";
+  const visible = nav.filter((n) => !n.roles || n.roles.includes(role));
   return (
     <>
       <div className="flex items-center gap-2 px-5 py-4 text-lg font-bold">
         <Activity className="h-5 w-5 text-accent" />
         Argus
       </div>
+      {role === "readonly" && <div className="mx-3 mb-2 rounded-lg bg-warn/15 px-3 py-1.5 text-xs text-warn">{t("common.readonlyMode")}</div>}
       <nav className="flex-1 space-y-1 overflow-y-auto px-3">
-        {nav.map(({ to, key, icon: Icon }) => (
+        {visible.map(({ to, key, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}

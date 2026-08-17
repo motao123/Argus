@@ -76,6 +76,58 @@ const server = http.createServer((req, res) => {
     sendData(res, { crons: [] });
     return;
   }
+  // 状态页（里程碑9）：事故时间线 / 维护窗口 / 月度 SLA
+  if (req.method === "GET" && path === "/api/v1/incidents") {
+    sendData(res, {
+      incidents: [
+        {
+          id: 1, owner_id: 0, title: "示例事故：核心交换机维护", severity: "major", status: "ongoing",
+          server_ids: "1,2,3", notes: "模拟事故演示", start_at: new Date(Date.now() - 2 * 3600e3).toISOString(),
+          end_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        },
+        {
+          id: 2, owner_id: 0, title: "示例事故：数据库迁移（已解决）", severity: "minor", status: "resolved",
+          server_ids: "", notes: "", start_at: new Date(Date.now() - 3 * 86400e3).toISOString(),
+          end_at: new Date(Date.now() - 3 * 86400e3 + 2 * 3600e3).toISOString(),
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        },
+      ],
+    });
+    return;
+  }
+  if (req.method === "GET" && path === "/api/v1/maintenance-windows") {
+    sendData(res, {
+      windows: [
+        {
+          id: 1, owner_id: 0, title: "每周例行维护", server_ids: "1,2",
+          start_at: new Date(Date.now() - 3600e3).toISOString(), end_at: new Date(Date.now() + 2 * 3600e3).toISOString(),
+          recurring: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        },
+      ],
+    });
+    return;
+  }
+  const slaMatch = path.match(/^\/api\/v1\/servers\/(\d+)\/sla$/);
+  if (req.method === "GET" && slaMatch) {
+    const months = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const availability = i === 0 ? null : Number((99.95 + i * 0.01).toFixed(2));
+      months.push({
+        month,
+        uptime_minutes: 43000,
+        eligible_minutes: 43200,
+        maintenance_minutes: i % 2 === 0 ? 120 : 0,
+        availability,
+        slo_target: 99.9,
+        slo_met: i === 0 ? null : (99.95 + i * 0.01) >= 99.9,
+      });
+    }
+    sendData(res, { server_id: Number(slaMatch[1]), slo_target: 99.9, months });
+    return;
+  }
 
   const metricsMatch = path.match(/^\/api\/v1\/servers\/(\d+)\/metrics$/);
   if (req.method === "GET" && metricsMatch) {

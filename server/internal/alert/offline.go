@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/motao123/Argus/server/internal/maintenance"
 	"github.com/motao123/Argus/server/internal/model"
-	"github.com/motao123/Argus/server/internal/notifier"
 	"github.com/motao123/Argus/server/internal/store"
 	"gorm.io/gorm"
 )
@@ -16,6 +16,8 @@ import (
 type OfflineSentinel struct {
 	db    *gorm.DB
 	store *store.Hub
+	// Notify 发送通知（main 注入 notifier.Queue.Enqueue；ownerID 0 = 系统流程）。
+	Notify func(n *model.Notification, title, content string, ownerID int64)
 
 	mu    sync.Mutex
 	state map[int64]offlineState // serverID → 状态
@@ -64,7 +66,13 @@ func (s *OfflineSentinel) check() {
 
 	snap := s.store.Snapshot()
 	now := time.Now()
+	// 维护窗口内的服务器不判离线（避免维护期误报）；窗口结束恢复原判定，
+	// 维护前已离线并通知过的服务器在维护结束后正常补发恢复通知。
+	inMaint, coversAll, _ := maintenance.ActiveServerIDs(s.db, now)
 	for id, st := range snap {
+		if coversAll || inMaint[id] {
+			continue
+		}
 		key := id
 		s.mu.Lock()
 		state, seen := s.state[key]
@@ -93,7 +101,7 @@ func (s *OfflineSentinel) check() {
 				if st.Server != nil {
 					name = st.Server.Name
 				}
-				go notifier.Send(&n, "[Argus] 服务器离线 "+name, name+" 已离线超过 "+cfg.OfflineAfterStr())
+				s.sendNotify(&n, "[Argus] 服务器离线 "+name, name+" 已离线超过 "+cfg.OfflineAfterStr())
 			}
 		} else if seen && state.notified {
 			// 恢复
@@ -104,7 +112,14 @@ func (s *OfflineSentinel) check() {
 			if st.Server != nil {
 				name = st.Server.Name
 			}
-			go notifier.Send(&n, "[Argus] 服务器恢复 "+name, name+" 已重新上线")
+			s.sendNotify(&n, "[Argus] 服务器恢复 "+name, name+" 已重新上线")
 		}
+	}
+}
+
+// sendNotify 发送离线/上线通知（ownerID 0 = 系统流程）。
+func (s *OfflineSentinel) sendNotify(n *model.Notification, title, content string) {
+	if s.Notify != nil {
+		s.Notify(n, title, content, 0)
 	}
 }

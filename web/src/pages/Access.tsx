@@ -18,6 +18,12 @@ const allScopes: { key: string; label: TKey }[] = [
   { key: "argus:notification:write", label: "access.scopeNotifWrite" },
 ];
 
+const roleBadgeClass: Record<string, string> = {
+  admin: "bg-accent/15 text-accent",
+  readonly: "bg-warn/15 text-warn",
+  user: "bg-muted/20 text-muted",
+};
+
 export default function Access() {
   const { t, fmtDateTime } = useI18n();
   const qc = useQueryClient();
@@ -30,6 +36,9 @@ export default function Access() {
   const [created, setCreated] = useState<string>("");
   const [userForm, setUserForm] = useState<{ username: string; password: string; role: string } | null>(null);
   const [createdUser, setCreatedUser] = useState<string>("");
+
+  const roleLabel = (role: string) =>
+    role === "admin" ? t("access.roleAdmin") : role === "readonly" ? t("access.roleReadonly") : t("access.roleUser");
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["tokens"] });
@@ -248,6 +257,7 @@ export default function Access() {
               className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
             >
               <option value="user">{t("access.roleUser")}</option>
+              <option value="readonly">{t("access.roleReadonly")}</option>
               <option value="admin">{t("access.roleAdmin")}</option>
             </select>
             <button
@@ -258,6 +268,7 @@ export default function Access() {
               {t("common.create")}
             </button>
           </div>
+          <p className="mt-2 text-xs text-muted">{t("access.roleReadonlyHelp")}</p>
         </div>
       )}
 
@@ -278,8 +289,8 @@ export default function Access() {
                 <td className="px-4 py-2.5 tabular text-muted">#{u.id}</td>
                 <td className="px-4 py-2.5 font-medium">{u.username}</td>
                 <td className="px-4 py-2.5">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${u.role === "admin" ? "bg-accent/15 text-accent" : "bg-muted/20 text-muted"}`}>
-                    {u.role === "admin" ? t("access.roleAdmin") : t("access.roleUser")}
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${roleBadgeClass[u.role] ?? "bg-muted/20 text-muted"}`}>
+                    {roleLabel(u.role)}
                   </span>
                 </td>
                 <td className="px-4 py-2.5 text-xs text-muted">{fmtDateTime(u.created_at)}</td>

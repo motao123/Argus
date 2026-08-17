@@ -60,6 +60,7 @@ export interface Server {
   sort_order: number;
   hidden: boolean;
   owner_id: number;
+  slo_target?: number;
   traffic_quota_bytes: number;
   traffic_cycle_day: number;
   traffic_timezone: string;
@@ -137,6 +138,10 @@ export interface Alert {
   trigger_cron_id: number;
   trigger_ratio: number | null;
   enabled: boolean;
+  acked_at: string | null;
+  acked_by: string;
+  silence_from: string | null;
+  silence_to: string | null;
 }
 
 export interface Notification {
@@ -148,6 +153,21 @@ export interface Notification {
   headers: string;
   body: string;
   chat_id: string;
+}
+
+export interface NotificationDelivery {
+  id: number;
+  webhook_id: number;
+  owner_id: number;
+  title: string;
+  content: string;
+  status: "pending" | "sent" | "failed";
+  attempts: number;
+  max_attempts: number;
+  next_retry: string | null;
+  last_error: string;
+  sent_at: string | null;
+  created_at: string;
 }
 
 export type NotificationUpdate = Partial<Notification> & {
@@ -369,6 +389,85 @@ export interface MetricPoint {
   disk_write_iops: number;
 }
 
+// ---- 状态页：事故 / 维护窗口 / SLA ----
+
+export interface Incident {
+  id: number;
+  owner_id: number;
+  title: string;
+  severity: "minor" | "major" | "critical";
+  status: "ongoing" | "resolved";
+  server_ids: string;
+  notes: string;
+  start_at: string;
+  end_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaintenanceWindow {
+  id: number;
+  owner_id: number;
+  title: string;
+  server_ids: string;
+  start_at: string;
+  end_at: string;
+  recurring: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SlaMonth {
+  month: string;
+  uptime_minutes: number;
+  eligible_minutes: number;
+  maintenance_minutes: number;
+  availability: number | null;
+  slo_target: number;
+  slo_met: boolean | null;
+}
+
+// ---- 定时加密备份（里程碑9）----
+
+export interface BackupSchedule {
+  id: number;
+  name: string;
+  enabled: boolean;
+  cron: string;
+  target: string; // http(s) PUT URL 或本地绝对目录
+  keep_count: number;
+  key_source: string; // 密钥来源标签（env:/file:/jwt:），不含密钥
+  key_id: string; // 派生密钥指纹
+  last_run_at: string | null;
+  last_status: "" | "running" | "success" | "failed";
+  last_error: string;
+  last_size: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackupRun {
+  id: number;
+  schedule_id: number;
+  trigger: "cron" | "manual";
+  status: "success" | "failed";
+  target: string;
+  size: number;
+  sha256: string;
+  error: string;
+  duration_ms: number;
+  created_at: string;
+}
+
+export interface DrillResult {
+  ok: boolean;
+  key_id: string;
+  source: string;
+  db_size: number;
+  integrity: string;
+  restore_note: string;
+}
+
 export interface Me {
   username: string;
   role: string;
@@ -547,6 +646,20 @@ export const api = {
     });
   },
 
+  backupSchedules: () => request<{ schedules: BackupSchedule[] }>("/api/v1/admin/backup-schedules"),
+  createBackupSchedule: (s: { name: string; cron: string; target: string; enabled?: boolean; keep_count?: number }) =>
+    request<BackupSchedule>("/api/v1/admin/backup-schedules", { method: "POST", body: JSON.stringify(s) }),
+  updateBackupSchedule: (id: number, s: Partial<BackupSchedule>) =>
+    request<BackupSchedule>(`/api/v1/admin/backup-schedules/${id}`, { method: "PUT", body: JSON.stringify(s) }),
+  deleteBackupSchedule: (id: number) => request(`/api/v1/admin/backup-schedules/${id}`, { method: "DELETE" }),
+  runBackupSchedule: (id: number) => request<{ ok: boolean; schedule_id: number }>(`/api/v1/admin/backup-schedules/${id}/run`, { method: "POST" }),
+  backupRuns: (id: number) => request<{ runs: BackupRun[] }>(`/api/v1/admin/backup-schedules/${id}/runs`),
+  backupDrill: (id: number, file?: File) => {
+    const form = new FormData();
+    if (file) form.append("file", file);
+    return request<DrillResult>(`/api/v1/admin/backup-schedules/${id}/drill`, { method: "POST", body: form });
+  },
+
   servers: () => request<{ servers: Server[] }>("/api/v1/servers"),
   createServer: (s: { name: string; group: string; note: string; traffic_quota_bytes?: number; traffic_cycle_day?: number; traffic_timezone?: string; traffic_accounting?: string }) =>
     request<{ server: Server; secret: string }>("/api/v1/servers", { method: "POST", body: JSON.stringify(s) }),
@@ -599,6 +712,14 @@ export const api = {
       ? request<Alert>(`/api/v1/alerts/${a.id}`, { method: "PUT", body: JSON.stringify(a) })
       : request<Alert>("/api/v1/alerts", { method: "POST", body: JSON.stringify(a) }),
   deleteAlert: (id: number) => request(`/api/v1/alerts/${id}`, { method: "DELETE" }),
+  ackAlert: (id: number) => request<{ ok: boolean; acked_at: string; acked_by: string }>(`/api/v1/alerts/${id}/ack`, { method: "POST" }),
+  unackAlert: (id: number) => request<{ ok: boolean }>(`/api/v1/alerts/${id}/ack`, { method: "DELETE" }),
+  silenceAlert: (id: number, until: string) =>
+    request<{ ok: boolean; silence_from: string; silence_to: string }>(`/api/v1/alerts/${id}/silence`, {
+      method: "POST",
+      body: JSON.stringify({ until }),
+    }),
+  unsilenceAlert: (id: number) => request<{ ok: boolean }>(`/api/v1/alerts/${id}/silence`, { method: "DELETE" }),
 
   notifications: () => request<{ notifications: Notification[] }>("/api/v1/notifications"),
   saveNotification: (n: NotificationUpdate) =>
@@ -606,6 +727,11 @@ export const api = {
       ? request<Notification>(`/api/v1/notifications/${n.id}`, { method: "PUT", body: JSON.stringify(notificationUpdatePayload(n)) })
       : request<Notification>("/api/v1/notifications", { method: "POST", body: JSON.stringify(n) }),
   deleteNotification: (id: number) => request(`/api/v1/notifications/${id}`, { method: "DELETE" }),
+  deliveries: (offset = 0, limit = 50) =>
+    request<{ deliveries: NotificationDelivery[]; pagination?: { total: number } }>(
+      `/api/v1/notifications/deliveries?offset=${offset}&limit=${limit}`
+    ),
+  retryDelivery: (id: number) => request<{ ok: boolean }>(`/api/v1/notifications/deliveries/${id}/retry`, { method: "POST" }),
   testMessage: (webhook_id: number, title?: string, content?: string) =>
     request<{ ok: boolean; sent_to: string }>("/api/v1/test-message", { method: "POST", body: JSON.stringify({ webhook_id, title, content }) }),
   notificationGroups: () => request<{ groups: NotificationGroup[] }>("/api/v1/notification-groups"),
@@ -701,6 +827,24 @@ export const api = {
   runCron: (id: number) => request<{ run_id: number }>(`/api/v1/crons/${id}/run`, { method: "POST" }),
   cronRuns: (id: number) => request<{ runs: TaskRun[] }>(`/api/v1/crons/${id}/runs?limit=20`),
   cronRun: (cronId: number, runId: number) => request<TaskRun>(`/api/v1/crons/${cronId}/runs/${runId}`),
+
+  incidents: () => request<{ incidents: Incident[] }>("/api/v1/incidents"),
+  saveIncident: (i: Partial<Incident> & { id?: number; start_at?: string; end_at?: string }) =>
+    i.id
+      ? request<Incident>(`/api/v1/incidents/${i.id}`, { method: "PUT", body: JSON.stringify(i) })
+      : request<Incident>("/api/v1/incidents", { method: "POST", body: JSON.stringify(i) }),
+  resolveIncident: (id: number) => request<Incident>(`/api/v1/incidents/${id}/resolve`, { method: "POST" }),
+  deleteIncident: (id: number) => request(`/api/v1/incidents/${id}`, { method: "DELETE" }),
+
+  maintenanceWindows: () => request<{ windows: MaintenanceWindow[] }>("/api/v1/maintenance-windows"),
+  saveMaintenanceWindow: (w: Partial<MaintenanceWindow> & { id?: number }) =>
+    w.id
+      ? request<MaintenanceWindow>(`/api/v1/maintenance-windows/${w.id}`, { method: "PUT", body: JSON.stringify(w) })
+      : request<MaintenanceWindow>("/api/v1/maintenance-windows", { method: "POST", body: JSON.stringify(w) }),
+  deleteMaintenanceWindow: (id: number) => request(`/api/v1/maintenance-windows/${id}`, { method: "DELETE" }),
+
+  serverSla: (id: number, months = 6) =>
+    request<{ server_id: number; slo_target: number; months: SlaMonth[] }>(`/api/v1/servers/${id}/sla?months=${months}`),
 };
 
 export function wsUrl(path: string): string {

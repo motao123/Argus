@@ -63,7 +63,8 @@ func (s *Server) createUser(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "username required, password >= 6 chars")
 		return
 	}
-	if req.Role != model.RoleAdmin && req.Role != model.RoleUser {
+	// 合法角色：admin / user / readonly（历史数据默认 user 兼容）
+	if !model.IsValidRole(req.Role) {
 		req.Role = model.RoleUser
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -153,7 +154,7 @@ func (s *Server) updateUser(c *gin.Context) {
 			fail(c, http.StatusForbidden, "admin only")
 			return
 		}
-		if *req.Role != model.RoleAdmin && *req.Role != model.RoleUser {
+		if !model.IsValidRole(*req.Role) {
 			fail(c, http.StatusBadRequest, "invalid role")
 			return
 		}

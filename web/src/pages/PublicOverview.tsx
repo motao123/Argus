@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Search, Server as ServerIcon, Wifi, WifiOff, ArrowUpDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import ServerCard from "../components/ServerCard";
+import { StatusBoard } from "../components/StatusBoard";
 import WorldMap from "../components/WorldMap";
 import { useServers } from "../context/servers";
 import { api } from "../lib/api";
@@ -173,6 +174,9 @@ export default function PublicOverview() {
 
       {/* 服务监控状态条（公开） */}
       <ServiceStatusStrip />
+
+      {/* 状态板：当前维护横幅 + 事故时间线（公开） */}
+      <StatusBoard />
 
       {/* 工具条 */}
       <div className="mb-4 flex flex-wrap items-center gap-2">

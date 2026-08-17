@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { useState } from "react";
+import { SlaCard } from "../components/SlaCard";
 import { api, getToken, type MetricPoint, type TrafficPoint } from "../lib/api";
 import { useServers } from "../context/servers";
 import { fmtBytes, fmtSpeed } from "../lib/format";
@@ -250,6 +251,9 @@ export default function ServerDetail() {
       </div>
 
       <CycleTraffic serverId={serverId} />
+
+      {/* 月度 SLA/SLO（排除维护窗口） */}
+      <SlaCard serverId={serverId} />
 
       {/* 历史图表 */}
       <div className="mb-3 flex gap-2">

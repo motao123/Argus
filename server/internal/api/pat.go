@@ -60,6 +60,9 @@ type principal struct {
 	UserID   int64
 	Username string
 	IsAdmin  bool
+	// IsReadonly 只读角色（readonly）：仅可查看公开视图与自有服务器状态，
+	// 禁止一切写操作（执行/文件/任务/告警/配置等）。
+	IsReadonly bool
 
 	// PAT 信息（使用 PAT 时有效）
 	TokenScopes  map[string]bool
@@ -177,6 +180,11 @@ func (s *Server) authWS(c *gin.Context) {
 		c.Abort()
 		return
 	}
+	if p.IsReadonly {
+		fail(c, http.StatusForbidden, "readonly role cannot open a terminal", "auth.readonly_denied")
+		c.Abort()
+		return
+	}
 	c.Set("principal", p)
 	c.Next()
 }
@@ -191,6 +199,32 @@ func requireScope(scope string) gin.HandlerFunc {
 			return
 		}
 		c.Next()
+	}
+}
+
+// readonlyGate 只读角色权限门（挂载到 authed 组）：
+// readonly 仅放行账号自助与状态查看白名单，其余一律 403。
+// 白名单按 gin 路由模式（method + FullPath）匹配，写接口天然被拒。
+// 注：/auth/me、2FA 自助与公开读接口（servers/services 等）注册在 authed 组外，天然放行。
+func (s *Server) readonlyGate() gin.HandlerFunc {
+	allowed := map[string]bool{
+		"PUT /api/v1/users/:id": true, // 仅自助改密（角色变更仍要求 admin）
+		"GET /api/v1/sessions":  true,
+		"GET /api/v1/clipboard": true,
+		"GET /api/v1/tokens":    true,
+	}
+	return func(c *gin.Context) {
+		p := principalFromContext(c)
+		if p == nil || !p.IsReadonly {
+			c.Next()
+			return
+		}
+		if allowed[c.Request.Method+" "+c.FullPath()] {
+			c.Next()
+			return
+		}
+		fail(c, http.StatusForbidden, "readonly role: read-only access only", "auth.readonly_denied")
+		c.Abort()
 	}
 }
 
@@ -289,7 +323,7 @@ func (s *Server) identify(raw string) (*principal, error) {
 	if err := s.DB.First(&user, cl.UserID).Error; err != nil {
 		return nil, errInvalidToken
 	}
-	return &principal{UserID: user.ID, Username: user.Username, IsAdmin: user.Role == model.RoleAdmin}, nil
+	return &principal{UserID: user.ID, Username: user.Username, IsAdmin: user.Role == model.RoleAdmin, IsReadonly: user.Role == model.RoleReadonly}, nil
 }
 
 // IdentifyPATToken 供 MCP 端点校验 PAT，返回完整授权上下文。
@@ -299,10 +333,11 @@ func (s *Server) IdentifyPATToken(raw string) (*mcp.Principal, bool) {
 		return nil, false
 	}
 	mp := &mcp.Principal{
-		UserID:    p.UserID,
-		IsAdmin:   p.IsAdmin,
-		Scopes:    p.TokenScopes,
-		ServerIDs: p.TokenServers,
+		UserID:     p.UserID,
+		IsAdmin:    p.IsAdmin,
+		IsReadonly: p.IsReadonly,
+		Scopes:     p.TokenScopes,
+		ServerIDs:  p.TokenServers,
 	}
 	return mp, true
 }
@@ -324,6 +359,7 @@ func (s *Server) identifyPAT(raw string) (*principal, error) {
 		UserID:      tok.UserID,
 		Username:    user.Username,
 		IsAdmin:     user.Role == model.RoleAdmin,
+		IsReadonly:  user.Role == model.RoleReadonly,
 		IsPAT:       true,
 		TokenID:     tok.ID,
 		TokenScopes: make(map[string]bool),

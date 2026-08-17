@@ -20,6 +20,7 @@ import (
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/alert"
 	"github.com/motao123/Argus/server/internal/api"
+	"github.com/motao123/Argus/server/internal/backup"
 	"github.com/motao123/Argus/server/internal/config"
 	"github.com/motao123/Argus/server/internal/db"
 	"github.com/motao123/Argus/server/internal/geoip"
@@ -88,6 +89,11 @@ func main() {
 	// 3. Agent 连接中心
 	agents := agent.NewHub(gdb, st, batcher)
 
+	// 3.1 通知持久队列（送达记录 + 指数退避重试）
+	notifQueue := notifier.NewQueue(gdb)
+	go notifQueue.Run()
+	defer notifQueue.Stop()
+
 	// 预加载 DB 服务器到内存 Hub（前台 WS 快照依赖内存态，
 	// 否则重启后未连接 agent 的服务器会从前台消失）
 	var allServers []model.Server
@@ -123,8 +129,7 @@ func main() {
 		if err := gdb.First(&n, id).Error; err != nil {
 			return fmt.Errorf("notification %d not found", id)
 		}
-		notifier.Send(&n, title, content)
-		return nil
+		return notifQueue.Enqueue(&n, title, content, 0)
 	}
 	// 服务器上线/离线 → 插件事件 hook
 	st.OnOnline = func(serverID int64) {
@@ -142,6 +147,11 @@ func main() {
 	sched.Start()
 	defer sched.Stop()
 
+	// 5.1 定时加密备份（VACUUM INTO → AES-GCM → PUT/本地；密钥材料来自环境变量/密钥文件/JWT 兜底）
+	backupMgr := backup.NewManager(gdb, cfg.DBPath, backup.DefaultKeyProvider(cfg.DBPath))
+	backupMgr.Start()
+	defer backupMgr.Stop()
+
 	engine := alert.NewEngine(gdb, st)
 	engine.Trigger = func(cron *model.Cron, serverID int64, kind string) {
 		// 只对目标服务器执行，统一进入持久化任务历史。
@@ -150,6 +160,10 @@ func main() {
 			trigger = scheduler.TriggerAlertRecovery
 		}
 		_, _ = sched.Enqueue(cron, trigger, &serverID)
+	}
+	// 报警通知 → 持久队列（ownerID 为规则 owner，供送达记录隔离）
+	engine.Notify = func(n *model.Notification, title, content string, ownerID int64) {
+		_ = notifQueue.Enqueue(n, title, content, ownerID)
 	}
 	// 报警触发/恢复 → 插件 onAlert 事件 hook
 	engine.AlertHook = func(a *model.Alert, st store.State, value float64, kind string) {
@@ -188,6 +202,9 @@ func main() {
 
 	// 离线/上线通知哨兵（借鉴 komari notifier/offline）
 	offlineSentinel := alert.NewOfflineSentinel(gdb, st)
+	offlineSentinel.Notify = func(n *model.Notification, title, content string, ownerID int64) {
+		_ = notifQueue.Enqueue(n, title, content, ownerID)
+	}
 	go offlineSentinel.Run()
 	defer offlineSentinel.Stop()
 
@@ -217,7 +234,7 @@ func main() {
 		}
 		for i := range targets {
 			n := targets[i]
-			go notifier.Send(&n, title, content)
+			_ = notifQueue.Enqueue(&n, title, content, svc.OwnerID)
 		}
 	}
 	svcSentinel.TriggerCb = func(svc *model.Service, up bool) {
@@ -283,6 +300,8 @@ func main() {
 		Plugins:   plugins,
 		Themes:    themes,
 		NAT:       natProxy,
+		Notifier:  notifQueue,
+		Backups:   backupMgr,
 	}
 	srv.ReloadOAuthConfigs()
 	if err := srv.InitializeUpgradeJobs(); err != nil {
