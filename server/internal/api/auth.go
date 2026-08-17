@@ -1,7 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/notifyctx"
 )
 
 // 登录限流：单 IP 5 次失败锁定 5 分钟。
@@ -106,7 +109,38 @@ func (s *Server) login(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "issue token")
 		return
 	}
+	s.notifyLogin(&user, ip, c.GetHeader("User-Agent"))
 	ok(c, gin.H{"token": token, "username": user.Username})
+}
+
+// notifyLogin 登录成功通知（借鉴 komari Login 事件；需配置 login_notify_webhook_id）。
+func (s *Server) notifyLogin(user *model.User, ip, userAgent string) {
+	if s.Notifier == nil {
+		return
+	}
+	idStr := s.GetSetting(SettingLoginNotifyWebhook, "0")
+	webhookID, _ := strconv.ParseInt(idStr, 10, 64)
+	if webhookID <= 0 {
+		return
+	}
+	var n model.Notification
+	if err := s.DB.First(&n, webhookID).Error; err != nil {
+		return
+	}
+	title := fmt.Sprintf("[Argus] 新登录 %s", user.Username)
+	content := fmt.Sprintf("用户 %s 于 %s 登录成功\nIP: %s\nUser-Agent: %s", user.Username, time.Now().Format(time.RFC3339), ip, userAgent)
+	ctx := &notifyctx.Ctx{
+		Event:   "login",
+		Title:   title,
+		Content: content,
+		Time:    notifyctx.FormatTime(time.Now()),
+		Extras: map[string]string{
+			"user":     user.Username,
+			"login_ip": ip,
+			"ua":       userAgent,
+		},
+	}
+	_ = s.Notifier.EnqueueCtx(&n, title, content, user.ID, ctx.Flat())
 }
 
 // me 当前登录用户信息（含 2FA 状态）。

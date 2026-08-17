@@ -603,6 +603,9 @@ func applyConfigError(rpcErr *protocol.RPCError) (status int, msg, apiCode strin
 
 // serverExec 立即在指定服务器执行命令（管理台调试用）。
 func (s *Server) serverExec(c *gin.Context) {
+	if !s.enforceSensitive2FA(c) {
+		return
+	}
 	id := mustID(c)
 	if _, ok := s.authorizeServer(c, id, ScopeServerExec); !ok {
 		fail(c, http.StatusForbidden, "server access denied")

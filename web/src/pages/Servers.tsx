@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckSquare, Copy, Download, Globe, KeyRound, Layers, Pencil, Plus, Search, Send, Settings2, Square, TerminalSquare, Trash2 } from "lucide-react";
-import { api, DEFAULT_CAPABILITIES, parseCommaList, type BatchServerResult, type CapabilitiesConfig, type Server } from "../lib/api";
+import { api, ApiError, DEFAULT_CAPABILITIES, parseCommaList, type BatchServerResult, type CapabilitiesConfig, type Server } from "../lib/api";
 import { fmtBytes } from "../lib/format";
 import { useI18n, type TKey } from "../lib/i18n";
 
@@ -125,6 +125,8 @@ export default function Servers() {
   const [execResult, setExecResult] = useState<string>("");
   const [execTarget, setExecTarget] = useState<Server | null>(null);
   const [execCmd, setExecCmd] = useState("");
+  const [exec2FA, setExec2FA] = useState("");
+  const [exec2FAPrompt, setExec2FAPrompt] = useState(false);
   const [installTarget, setInstallTarget] = useState<Server | null>(null);
   const [installCmd, setInstallCmd] = useState("");
   const [installCopied, setInstallCopied] = useState(false);
@@ -230,9 +232,17 @@ export default function Servers() {
     onError: (e) => setError(t("servers.cfgFailed", { error: tErr(e) })),
   });
   const runExec = useMutation({
-    mutationFn: () => api.exec(execTarget!.id, execCmd),
+    mutationFn: () => api.exec(execTarget!.id, execCmd, 30, exec2FA),
     onSuccess: (r) => setExecResult(`exit=${r.code}\n${r.output || r.error || ""}`),
-    onError: (e) => setExecResult((e as Error).message),
+    onError: (e) => {
+      // 2FA 敏感操作未提供验证码：提示输入 TOTP 码后重试
+      if (e instanceof ApiError && (e.status === 428 || e.code === "auth.2fa_required")) {
+        setExec2FAPrompt(true);
+        setExecResult(t("servers.exec2FARequired"));
+        return;
+      }
+      setExecResult((e as Error).message);
+    },
   });
   const runBatchCfg = useMutation({
     mutationFn: (f: BatchConfigForm) =>
@@ -551,6 +561,17 @@ export default function Servers() {
           <div className="w-full max-w-lg rounded-xl border border-border bg-panel p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 text-sm font-medium">{t("servers.execHeading", { name: execTarget.name })}</h3>
             <input value={execCmd} onChange={(e) => setExecCmd(e.target.value)} className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            {exec2FAPrompt && (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  value={exec2FA}
+                  onChange={(e) => setExec2FA(e.target.value)}
+                  placeholder={t("servers.twoFACodePlaceholder")}
+                  className="w-40 rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+                />
+                <span className="text-xs text-muted">{t("servers.twoFACodeHint")}</span>
+              </div>
+            )}
             <button onClick={() => runExec.mutate()} className="mt-2 rounded-lg bg-accent px-4 py-1.5 text-sm text-white">{t("servers.exec")}</button>
             {execResult && <pre className="mt-3 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-3 text-xs">{execResult}</pre>}
           </div>

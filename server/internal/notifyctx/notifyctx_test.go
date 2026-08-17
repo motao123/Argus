@@ -84,6 +84,33 @@ func TestFromState(t *testing.T) {
 	(&Ctx{}).FromState(nil)
 }
 
+func TestMaskIPSetting(t *testing.T) {
+	defer SetMaskIP(false)
+	h := store.NewHub()
+	h.Upsert(&model.Server{ID: 10, Name: "srv-b"})
+	h.SetReport(10, protocol.HostInfo{Hostname: "srv-b", IP: "10.0.0.2", IPv4: "10.0.0.2", IPv6: "2001:db8::2", Platform: "debian"}, &protocol.ReportParams{})
+	st := h.Get(10)
+
+	SetMaskIP(true)
+	ctx := (&Ctx{}).FromState(st)
+	f := ctx.Flat()
+	for _, k := range []string{"server.ip", "server.ipv4", "server.ipv6"} {
+		if f[k] != "xxx.xxx.xxx.xxx" {
+			t.Errorf("masked Flat[%s] = %q, want xxx.xxx.xxx.xxx", k, f[k])
+		}
+	}
+	// 其他 server.* 字段不受打码影响
+	if f["server.name"] != "srv-b" || f["server.platform"] != "debian" {
+		t.Errorf("non-IP fields affected by mask: %v", f)
+	}
+
+	SetMaskIP(false)
+	ctx = (&Ctx{}).FromState(st)
+	if ctx.Flat()["server.ip"] != "10.0.0.2" {
+		t.Errorf("mask off: server.ip = %q, want 10.0.0.2", ctx.Flat()["server.ip"])
+	}
+}
+
 // TestEncodeDecodeRoundTrip 送达记录持久化的 JSON 往返。
 func TestEncodeDecodeRoundTrip(t *testing.T) {
 	ctx := &Ctx{Event: "triggered", ServerName: "n", ServerID: 3, Extras: map[string]string{"detail": "x"}}

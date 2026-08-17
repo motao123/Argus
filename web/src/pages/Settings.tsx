@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { useI18n, type TKey } from "../lib/i18n";
 
 // 全局设置：站点、终端外观与后台数据保留策略。
-const fieldMeta: { key: string; label: TKey; type: "text" | "number" | "select" | "textarea"; defaultValue?: string; min?: number; max?: number; section?: TKey; note?: TKey; help?: TKey; options?: { v: string; label: TKey }[] }[] = [
+const fieldMeta: { key: string; label: TKey; type: "text" | "number" | "select" | "textarea" | "webhook"; defaultValue?: string; min?: number; max?: number; section?: TKey; note?: TKey; help?: TKey; options?: { v: string; label: TKey }[] }[] = [
   { key: "site_name", label: "settings.siteName", type: "text" },
   { key: "site_desc", label: "settings.siteDesc", type: "text" },
   { key: "favicon", label: "settings.favicon", type: "text" },
@@ -28,12 +28,19 @@ const fieldMeta: { key: string; label: TKey; type: "text" | "number" | "select" 
   { key: "upgrade_latest_version", label: "settings.upgradeVersion", type: "text", section: "settings.upgradeSection", note: "settings.upgradeNote" },
   { key: "upgrade_latest_url", label: "settings.upgradeUrl", type: "text", section: "settings.upgradeSection" },
   { key: "upgrade_latest_sha256", label: "settings.upgradeSha256", type: "text", section: "settings.upgradeSection" },
+  // 通知与分享（P3：IP 打码 / 登录通知 / 临时分享密钥）
+  { key: "mask_ip", label: "settings.maskIp", type: "select", help: "settings.maskIpHelp", options: [{ v: "0", label: "settings.off" }, { v: "1", label: "settings.on" }] },
+  { key: "login_notify_webhook_id", label: "settings.loginNotify", type: "webhook", defaultValue: "0", help: "settings.loginNotifyHelp" },
+  { key: "temp_share_key", label: "settings.tempShareKey", type: "text", help: "settings.tempShareKeyHelp" },
+  { key: "temp_share_expires_at", label: "settings.tempShareExpires", type: "text", help: "settings.tempShareExpiresHelp" },
 ];
 
 export default function Settings() {
   const { t } = useI18n();
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const { data: notifData } = useQuery({ queryKey: ["notifications"], queryFn: api.notifications });
+  const notifications = notifData?.notifications ?? [];
   const current = data?.settings ?? {};
   const [form, setForm] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
@@ -89,6 +96,19 @@ export default function Settings() {
                   {f.options?.map((o) => (
                     <option key={o.v} value={o.v}>
                       {t(o.label)}
+                    </option>
+                  ))}
+                </select>
+              ) : f.type === "webhook" ? (
+                <select
+                  value={form[f.key] ?? "0"}
+                  onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+                >
+                  <option value="0">{t("settings.noChannel")}</option>
+                  {notifications.map((n) => (
+                    <option key={n.id} value={String(n.id)}>
+                      {n.name}
                     </option>
                   ))}
                 </select>

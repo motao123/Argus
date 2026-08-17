@@ -132,3 +132,36 @@ func verifyTwoFA(user *model.User, code string) bool {
 	}
 	return totp.Validate(code, user.TwoFASecret)
 }
+
+// sensitiveTwoFARequired 判断当前请求是否需要敏感操作二次验证：
+// JWT 用户启用 2FA 时要求 X-2FA-Code 头（PAT 豁免，避免脚本/自动化受阻）。
+func (s *Server) sensitiveTwoFARequired(c *gin.Context, p *principal) bool {
+	if p == nil || p.IsPAT || p.IsReadonly {
+		return false
+	}
+	var user model.User
+	if err := s.DB.First(&user, p.UserID).Error; err != nil {
+		return false
+	}
+	return user.TwoFAEnabled && user.TwoFASecret != ""
+}
+
+// enforceSensitive2FA 在敏感操作入口校验 X-2FA-Code 头；
+// 启用 2FA 的 JWT 用户未提供/校验失败时返回 428（前端提示输入验证码）。
+// 返回 false 表示已写入响应，调用方应直接 return。
+func (s *Server) enforceSensitive2FA(c *gin.Context) bool {
+	p := principalFromContext(c)
+	if !s.sensitiveTwoFARequired(c, p) {
+		return true
+	}
+	var user model.User
+	if err := s.DB.First(&user, p.UserID).Error; err != nil {
+		return true
+	}
+	if verifyTwoFA(&user, c.GetHeader("X-2FA-Code")) {
+		return true
+	}
+	fail(c, http.StatusPreconditionRequired, "2fa code required", "auth.2fa_required")
+	c.Abort()
+	return false
+}

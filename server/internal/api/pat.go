@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -141,9 +142,41 @@ func (s *Server) optionalAuthMiddleware() gin.HandlerFunc {
 				return
 			}
 		}
+		// 临时分享密钥：私有站点模式下允许携带 ?temp_key= 的访客访问公开端点
+		if s.validTempShareKey(c.Query("temp_key")) {
+			c.Set("principal", &principal{Username: "guest", IsReadonly: true})
+			s.onlineTouch(c, "guest", "temp_key")
+			c.Next()
+			return
+		}
 		s.onlineTouch(c, "", "guest")
 		c.Next()
 	}
+}
+
+// validTempShareKey 校验临时分享密钥是否有效（存储 SHA-256；未过期或未设过期时间）。
+func (s *Server) validTempShareKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	stored := s.GetSetting(SettingTempShareKey, "")
+	if stored == "" {
+		return false
+	}
+	sum := sha256.Sum256([]byte(key))
+	hashed := hex.EncodeToString(sum[:])
+	if subtle.ConstantTimeCompare([]byte(hashed), []byte(stored)) != 1 {
+		return false
+	}
+	expires := s.GetSetting(SettingTempShareExpiresAt, "")
+	if expires == "" {
+		return true
+	}
+	t, err := time.Parse(time.RFC3339, expires)
+	if err != nil {
+		return false
+	}
+	return time.Now().Before(t)
 }
 
 // requireAuth 写操作必须登录（游客 401）。

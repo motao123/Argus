@@ -56,6 +56,8 @@ func New(s *Server) *gin.Engine {
 	// 先初始化 WAF 封禁管理器（载入持久化封禁）与在线跟踪器，再挂中间件
 	s.wafMgr()
 	s.onlineMgr()
+	// 根据站点设置刷新通知相关全局开关（IP 打码等）
+	s.refreshNotifySettings()
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery(), s.wafMiddleware())
 

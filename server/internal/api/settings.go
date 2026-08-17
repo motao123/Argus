@@ -1,12 +1,15 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/notifyctx"
 	"github.com/motao123/Argus/server/internal/retention"
 )
 
@@ -22,6 +25,11 @@ const (
 	SettingCustomJS         = "custom_js"          // 注入两站 </body> 前的 JS
 	SettingCustomFooter     = "custom_footer"      // 前台页脚自定义 HTML
 	SettingExpireNotifyDays = "expire_notify_days" // 到期提前提醒天数（默认 3，范围 1-30）
+	// 通知/分享
+	SettingMaskIP              = "mask_ip"                // 1 = 通知中隐藏服务器 IP（借鉴 nezha EnablePlainIPInNotification）
+	SettingLoginNotifyWebhook  = "login_notify_webhook_id" // 登录成功通知渠道（0 = 不通知）
+	SettingTempShareKey        = "temp_share_key"          // 临时分享密钥（SHA-256；私有站点模式下可凭 ?temp_key= 访问公开接口）
+	SettingTempShareExpiresAt  = "temp_share_expires_at"   // 临时分享密钥过期时间（RFC3339；空 = 永久）
 )
 
 // GetSetting 读设置（默认值兜底）。
@@ -72,9 +80,14 @@ func (s *Server) getSettings(c *gin.Context) {
 	s.DB.Find(&settings)
 	m := retention.SettingDefaults()
 	for _, st := range settings {
+		// 临时分享密钥不回显（存储为哈希，回读空串；留空保存 = 保持不变）
+		if st.Key == SettingTempShareKey {
+			continue
+		}
 		m[st.Key] = st.Value
 	}
 	m[SettingExpireNotifyDays] = s.GetSetting(SettingExpireNotifyDays, "3")
+	m[SettingTempShareKey] = ""
 	ok(c, gin.H{"settings": m})
 }
 
@@ -102,6 +115,16 @@ func (s *Server) saveSettings(c *gin.Context) {
 			return
 		}
 	}
+	// 临时分享密钥：保存前哈希（存储 SHA-256，不落明文；校验时同样哈希比对）。
+	// 空串 = 保持不变（不回显，避免误清空；设置新密钥需输入非空值）。
+	if raw, ok := req.Settings[SettingTempShareKey]; ok {
+		if raw == "" {
+			delete(req.Settings, SettingTempShareKey)
+		} else {
+			sum := sha256.Sum256([]byte(raw))
+			req.Settings[SettingTempShareKey] = hex.EncodeToString(sum[:])
+		}
+	}
 	for k, v := range req.Settings {
 		var st model.Setting
 		err := s.DB.Where("key = ?", k).First(&st).Error
@@ -111,6 +134,12 @@ func (s *Server) saveSettings(c *gin.Context) {
 			_ = s.DB.Create(&model.Setting{Key: k, Value: v}).Error
 		}
 	}
+	s.refreshNotifySettings()
 	s.auditLog(c, "settings.update", "")
 	ok(c, gin.H{"ok": true})
+}
+
+// refreshNotifySettings 根据站点设置刷新通知相关全局开关（IP 打码）。
+func (s *Server) refreshNotifySettings() {
+	notifyctx.SetMaskIP(s.GetSetting(SettingMaskIP, "0") == "1")
 }

@@ -877,9 +877,10 @@ export const api = {
   deleteGroup: (id: number) => request(`/api/v1/groups/${id}`, { method: "DELETE" }),
   applyServerConfig: (id: number, cfg: ApplyServerConfig) =>
     request<{ ok: boolean }>(`/api/v1/servers/${id}/config`, { method: "POST", body: JSON.stringify(cfg) }),
-  exec: (id: number, command: string, timeout = 30) =>
+  exec: (id: number, command: string, timeout = 30, twoFACode = "") =>
     request<{ output: string; code: number; error?: string }>(`/api/v1/servers/${id}/exec`, {
       method: "POST",
+      headers: twoFACode ? { "X-2FA-Code": twoFACode } : {},
       body: JSON.stringify({ command, timeout }),
     }),
   metrics: (id: number, period: "1h" | "24h" | "7d") =>

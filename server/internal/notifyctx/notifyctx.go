@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/motao123/Argus/server/internal/store"
@@ -22,6 +23,35 @@ import (
 
 // TimeFormat 事件时间默认格式（服务器本地时区）。
 const TimeFormat = "2006-01-02 15:04:05"
+
+// maskIPEnabled 通知中是否隐藏服务器 IP（借鉴 nezha EnablePlainIPInNotification）。
+// 默认关闭；由启动/设置保存时调用 SetMaskIP 配置，全局生效（所有发送点走 FromState）。
+var maskIPEnabled bool
+
+// SetMaskIP 配置通知 IP 打码开关（线程安全）。
+func SetMaskIP(enabled bool) {
+	maskIPMutex.Lock()
+	maskIPEnabled = enabled
+	maskIPMutex.Unlock()
+}
+
+// MaskIPEnabled 查询当前打码开关。
+func MaskIPEnabled() bool {
+	maskIPMutex.Lock()
+	defer maskIPMutex.Unlock()
+	return maskIPEnabled
+}
+
+var maskIPMutex sync.RWMutex
+
+// maskIP 把 IP 打码为固定掩码（IPv4/IPv6 统一），避免通知内容泄露主机地址；
+// 空串（无上报 IP）原样返回，不生成误导性的打码值。
+func maskIP(ip string) string {
+	if ip == "" {
+		return ""
+	}
+	return "xxx.xxx.xxx.xxx"
+}
 
 // Ctx 统一通知上下文。字段缺省（空串/零值）时对应占位符渲染为空字符串。
 type Ctx struct {
@@ -57,6 +87,7 @@ type Ctx struct {
 }
 
 // FromState 从服务器运行时状态填充 server.* 变量（st 可为 nil/无 Server）。
+// 若已开启 IP 打码，server.ip/ipv4/ipv6 统一替换为打码值。
 func (c *Ctx) FromState(st *store.State) *Ctx {
 	if st == nil || st.Server == nil {
 		return c
@@ -68,6 +99,11 @@ func (c *Ctx) FromState(st *store.State) *Ctx {
 	c.ServerIPv4 = st.Host.IPv4
 	c.ServerIPv6 = st.Host.IPv6
 	c.ServerPlatform = st.Host.Platform
+	if MaskIPEnabled() {
+		c.ServerIP = maskIP(c.ServerIP)
+		c.ServerIPv4 = maskIP(c.ServerIPv4)
+		c.ServerIPv6 = maskIP(c.ServerIPv6)
+	}
 	return c
 }
 

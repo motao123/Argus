@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/motao123/Argus/protocol"
+	"github.com/motao123/Argus/server/internal/model"
 )
 
 var upgrader = websocket.Upgrader{
@@ -154,6 +155,20 @@ var (
 
 // terminalWS 浏览器终端 WebSocket：建立时通知 Agent 开会话，双向转发字节。
 func (s *Server) terminalWS(c *gin.Context) {
+	// 敏感操作 2FA：支持 X-2FA-Code 头或 ?twofa= 查询参数（浏览器 WS 无法加自定义头）
+	p := principalFromContext(c)
+	if s.sensitiveTwoFARequired(c, p) {
+		var user model.User
+		code := c.GetHeader("X-2FA-Code")
+		if code == "" {
+			code = c.Query("twofa")
+		}
+		if err := s.DB.First(&user, p.UserID).Error; err != nil || !verifyTwoFA(&user, code) {
+			fail(c, http.StatusPreconditionRequired, "2fa code required", "auth.2fa_required")
+			c.Abort()
+			return
+		}
+	}
 	serverID := mustIDParam(c, "serverId")
 	if _, ok := s.authorizeServer(c, serverID, ScopeServerExec); !ok {
 		fail(c, http.StatusForbidden, "server access denied")

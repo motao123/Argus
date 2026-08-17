@@ -14,9 +14,23 @@ export default function TerminalPage() {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState("");
   const [compatMode, setCompatMode] = useState(false);
+  // 敏感操作 2FA：已启用 2FA 的用户需要先输入 TOTP 码再连接
+  const [needs2FA, setNeeds2FA] = useState(false);
+  const [twofa, setTwofa] = useState("");
+  const [started, setStarted] = useState(false);
 
   useEffect(() => {
-    if (!ref.current || !getToken()) return;
+    // 探测当前用户是否启用 2FA（决定是否显示验证码输入）
+    fetch("/api/v1/auth/me", { headers: { Authorization: `Bearer ${getToken()}` } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data?.two_fa_enabled) setNeeds2FA(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!started || !ref.current || !getToken()) return;
 
     let fontSize = 13;
     let termTheme = "dark";
@@ -46,7 +60,8 @@ export default function TerminalPage() {
     term.open(ref.current);
     fit.fit();
 
-    const ws = new WebSocket(wsUrl(`/api/v1/terminal/${id}`));
+    const sep = id?.includes("?") ? "&" : "?";
+    const ws = new WebSocket(wsUrl(`/api/v1/terminal/${id}${sep}twofa=${encodeURIComponent(twofa)}`));
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
@@ -68,8 +83,6 @@ export default function TerminalPage() {
     const onData = (data: string) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
     };
-    // 注意：不要把 resize 信息作为终端输入发送 —— Agent 侧没有窗口尺寸协议，
-    // JSON 会被 shell 当成命令吞掉。尺寸变化只做本地 fit。
     const sendResize = () => {
       fit.fit();
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
@@ -85,7 +98,10 @@ export default function TerminalPage() {
       ws.close();
       term.dispose();
     };
-  }, [id, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, t, started, twofa]);
+
+  const connect = () => setStarted(true);
 
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col">
@@ -102,7 +118,28 @@ export default function TerminalPage() {
           {error ? t("terminal.failed") : compatMode ? t("terminal.compat") : connected ? t("terminal.connected") : t("terminal.connecting")}
         </span>
       </div>
-      <div ref={ref} className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border" />
+      {needs2FA && !started ? (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-panel p-5">
+            <p className="mb-3 text-sm font-medium">{t("terminal.twoFARequired")}</p>
+            <input
+              value={twofa}
+              onChange={(e) => setTwofa(e.target.value)}
+              placeholder={t("terminal.twoFACodePlaceholder")}
+              className="mb-3 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+            />
+            <button
+              onClick={connect}
+              disabled={!twofa}
+              className="w-full rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90 disabled:opacity-40"
+            >
+              {t("terminal.connect")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div ref={ref} className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border" />
+      )}
     </div>
   );
 }
