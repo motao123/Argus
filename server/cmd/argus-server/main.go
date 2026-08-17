@@ -377,6 +377,17 @@ func main() {
 		_, _ = c.Writer.Write(installScript)
 	})
 
+	// Windows 一键安装脚本（PowerShell）：无认证即可下载，脚本本身不含敏感信息。
+	router.GET("/install.ps1", func(c *gin.Context) {
+		if len(installPS1) == 0 {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Header("Content-Type", "application/x-powershell; charset=utf-8")
+		c.Header("Cache-Control", "no-cache")
+		_, _ = c.Writer.Write(installPS1)
+	})
+
 	// 6. 静态资源（内嵌前端，构建时注入；目录不存在则跳过）
 	// pprof 性能剖析（借鉴 komari，受 admin 路由保护）
 	router.GET("/debug/pprof/*pprof", srv.AuthMiddlewareForPProf(), srv.PProfHandler)

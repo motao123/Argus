@@ -12,6 +12,9 @@ var webdistFS embed.FS
 //go:embed install.sh
 var installScript []byte
 
+//go:embed install.ps1
+var installPS1 []byte
+
 // embeddedFS 前端产物文件系统；webdist 目录不存在时返回 nil。
 var embeddedFS = loadEmbedded()
 

@@ -119,13 +119,21 @@ cd web && pnpm install && pnpm dev:mock
 ### 发布构建（多平台二进制 + SHA-256）
 
 ```bash
-make release          # 先构建前端并内嵌，再产出 dist/release/<commit>/ 下全部二进制
+make release          # 先构建前端并内嵌，再产出 dist/release/<version>/ 下全部二进制
 bash scripts/release-build.sh   # 仅构建（需已存在 webdist）
 ```
 
-- Agent：linux/amd64、linux/arm64、windows/amd64、darwin/amd64、darwin/arm64（纯 Go）。
-- Server：linux/amd64（cgo SQLite 原生构建）；linux/arm64 需要 `aarch64-linux-gnu-gcc`；windows/darwin 需要对应 C 交叉工具链（缺省跳过并告警）。
-- 每个二进制配套 SHA-256：`checksums.txt`（`sha256sum -c` 可校验）+ `manifest.json`。
+- Agent（纯 Go，`CGO_ENABLED=0`，无需任何 C 工具链）：
+  - linux：386 / amd64 / arm / arm64 / riscv64 / s390x / loong64 / mips / mipsle
+  - windows：386 / amd64 / arm64（产物带 `.exe`）
+  - darwin：amd64 / arm64
+  - freebsd：386 / amd64 / arm / arm64
+  - 产物命名 `argus-agent-<os>-<arch>`（windows 加 `.exe`）。
+- Server（cgo SQLite）：linux/amd64 原生构建；linux/arm64 需要
+  `aarch64-linux-gnu-gcc`（或 `ARGUS_CC_AARCH64`），缺少时跳过并告警；其余平台
+  明确跳过并告警（可用 `ARGUS_FORCE_CGO=1` 尝试交叉构建 windows/darwin，产物需自行验证）。
+- 每个二进制配套 SHA-256：`checksums.txt`（`sha256sum -c` 可校验）+
+  `manifest.json`（含逐平台构建结果 `results`：ok / skipped / failed，以及产物 `artifacts`）。
 - 脚本与 GitHub Actions（`release.yml`，手动触发）都**不创建 tag / release、不推送远端**。
 
 ## 前台 / 后台

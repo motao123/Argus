@@ -4,7 +4,7 @@
 # 用法（由后台「安装命令」生成）：
 #   curl -fsSL http://<server>/install.sh | sh -s -- -s ws://<server>/ws/agent -k <secret>
 #
-# 可选参数：
+# 可选参数（与旧版保持兼容）：
 #   -s <url>       Server WebSocket 地址（必填，如 ws://127.0.0.1:8080/ws/agent）
 #   -k <secret>    注册密钥（服务器密钥或用户 Agent 密钥，必填）
 #   -u <base>      二进制下载根 URL（默认 GitHub Releases latest）
@@ -12,7 +12,15 @@
 #   -c <dir>       Agent 配置目录（默认 /etc/argus-agent）
 #   -p <prefix>    安装前缀（默认 /usr/local，二进制在 $prefix/bin）
 #
-# 特性：架构/系统自动识别、SHA-256 校验、systemd/OpenRC 服务、幂等重装。
+# 平台支持：linux/darwin/freebsd，架构与 release 实际产物严格对齐——
+#   linux: 386 amd64 arm arm64 riscv64 s390x loong64 mips mipsle
+#   darwin: amd64 arm64
+#   freebsd: 386 amd64 arm arm64
+# Windows 请使用 install.ps1（PowerShell 一键安装脚本）。
+#
+# 特性：架构/系统自动识别、强制 SHA-256 校验（checksums.txt 下载失败或其中
+#       找不到当前文件条目时立即中止，绝不跳过校验）、systemd/OpenRC 服务、
+#       幂等重装。
 set -eu
 
 SERVER_URL=""
@@ -42,32 +50,67 @@ done
 [ -n "$SERVER_URL" ] || usage
 [ -n "$SECRET" ] || usage
 
-# ---- 系统与架构识别 ----
+# ---- 系统与架构识别（与 release 实际产物严格对齐）----
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 MACH="$(uname -m)"
 case "$OS" in
+    *mingw*|*msys*|*cygwin*)
+        echo "检测到 Windows 环境：请改用 PowerShell 一键安装脚本 install.ps1。" >&2
+        echo "  下载: curl.exe -fsSL http://<server>/install.ps1 -o install.ps1" >&2
+        echo "  执行: powershell -ExecutionPolicy Bypass -File install.ps1 -ServerUrl $SERVER_URL -Secret <secret>" >&2
+        exit 1 ;;
     linux|darwin|freebsd) ;;
-    *) echo "不支持的平台: $OS（请手动安装或使用 Windows 的 install.ps1）" >&2; exit 1 ;;
+    *) echo "不支持的平台: $OS（仅支持 linux/darwin/freebsd；Windows 请使用 install.ps1）" >&2; exit 1 ;;
 esac
 case "$MACH" in
-    x86_64|amd64)  ARCH="amd64" ;;
-    aarch64|arm64) ARCH="arm64" ;;
-    armv7l|armv6l|armhf) ARCH="arm" ;;
-    i686|i386)     ARCH="386" ;;
-    riscv64)       ARCH="riscv64" ;;
-    s390x)         ARCH="s390x" ;;
-    mips)          ARCH="mips" ;;
-    mipsle)        ARCH="mipsle" ;;
-    *) echo "未知架构: $MACH" >&2; exit 1 ;;
+    x86_64|amd64)      ARCH="amd64" ;;
+    aarch64|arm64)     ARCH="arm64" ;;
+    i686|i386|x86)     ARCH="386" ;;
+    armv7l|armv6l|armv5tel|armhf) ARCH="arm" ;;
+    riscv64)           ARCH="riscv64" ;;
+    s390x)             ARCH="s390x" ;;
+    loongarch64)       ARCH="loong64" ;;
+    mips)              ARCH="mips" ;;
+    mipsel|mipsle)     ARCH="mipsle" ;;
+    *)
+        echo "不支持的架构: $MACH（支持的架构见脚本头部说明）" >&2
+        exit 1 ;;
 esac
-
-# ---- 下载与校验 ----
-FILE="argus-agent-$OS-$ARCH"
-if command -v curl >/dev/null 2>&1; then
-    FETCH="curl -fsSL"
-else
-    FETCH="wget -qO-"
+# 各 OS 实际发布组合校验（避免下载不存在的产物）：darwin 仅 amd64/arm64。
+if [ "$OS" = "darwin" ] && [ "$ARCH" != "amd64" ] && [ "$ARCH" != "arm64" ]; then
+    echo "macOS 仅发布 amd64/arm64（当前 $MACH）" >&2
+    exit 1
 fi
+
+# ---- 下载与校验工具 ----
+download() {
+    # $1=url  $2=输出文件；失败返回非零
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1" -o "$2"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$2" "$1"
+    else
+        echo "需要 curl 或 wget" >&2
+        return 1
+    fi
+}
+
+sha256_of() {
+    # $1=文件 -> 输出十六进制 SHA-256
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v sha256 >/dev/null 2>&1; then
+        sha256 -q "$1"
+    else
+        echo "缺少 SHA-256 校验工具（sha256sum/shasum/sha256）" >&2
+        exit 1
+    fi
+}
+
+# ---- 下载与强制校验 ----
+FILE="argus-agent-$OS-$ARCH"
 BIN_DIR="$PREFIX/bin"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -77,28 +120,29 @@ BASE_URL="${BASE_URL%/}"
 if [ "$VERSION" != "latest" ]; then
     BASE_URL="$(echo "$BASE_URL" | sed "s#/latest/download#/download/$VERSION#")"
 fi
-$FETCH "$BASE_URL/$FILE" -o "$TMP_DIR/$FILE" 2>/dev/null || { echo "下载失败: $BASE_URL/$FILE" >&2; exit 1; }
-$FETCH "$BASE_URL/checksums.txt" -o "$TMP_DIR/checksums.txt" 2>/dev/null || true
+download "$BASE_URL/$FILE" "$TMP_DIR/$FILE" || { echo "下载失败: $BASE_URL/$FILE" >&2; exit 1; }
 
-if [ -f "$TMP_DIR/checksums.txt" ]; then
-    EXPECTED="$(awk -v n="$FILE" '$2==n {print $1}' "$TMP_DIR/checksums.txt")"
-    if [ -n "$EXPECTED" ]; then
-        ACTUAL="$(sha256sum "$TMP_DIR/$FILE" | awk '{print $1}')"
-        if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "SHA-256 校验失败（期望 $EXPECTED，实际 $ACTUAL），已中止" >&2
-            exit 1
-        fi
-        echo "==> SHA-256 校验通过"
-    else
-        echo "==> 警告: checksums.txt 中未找到 $FILE，跳过校验"
-    fi
+# 供应链强化：checksums.txt 必须可下载且包含当前文件条目，否则中止安装。
+download "$BASE_URL/checksums.txt" "$TMP_DIR/checksums.txt" || {
+    echo "下载 checksums.txt 失败: $BASE_URL/checksums.txt（供应链强化：拒绝无校验安装）" >&2
+    exit 1
+}
+EXPECTED="$(awk -v n="$FILE" '$2==n {print $1}' "$TMP_DIR/checksums.txt")"
+if [ -z "$EXPECTED" ]; then
+    echo "checksums.txt 中未找到 $FILE 条目（供应链强化：拒绝无校验安装）" >&2
+    exit 1
 fi
+ACTUAL="$(sha256_of "$TMP_DIR/$FILE")"
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+    echo "SHA-256 校验失败（期望 $EXPECTED，实际 $ACTUAL），已中止" >&2
+    exit 1
+fi
+echo "==> SHA-256 校验通过"
 
 # ---- 安装 ----
 echo "==> 安装到 $BIN_DIR"
 mkdir -p "$BIN_DIR" "$CONF_DIR"
 install -m 0755 "$TMP_DIR/$FILE" "$BIN_DIR/argus-agent"
-chmod 0644 /dev/null 2>/dev/null || true
 
 # 服务单元（systemd 优先，其次 OpenRC）
 UNIT_DIR="/etc/systemd/system"

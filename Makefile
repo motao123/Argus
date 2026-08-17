@@ -2,6 +2,7 @@
 
 GO ?= go
 PNPM ?= pnpm
+VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 .PHONY: all web server agent build run mock release clean
 
@@ -34,8 +35,9 @@ mock:
 	cd web && $(PNPM) dev:mock
 
 ## 发布构建：多平台二进制 + SHA-256（不创建 tag/release、不推送）
+## 用法：make release [VERSION=x.y.z]（默认取当前 commit 短哈希）
 release: web
-	bash scripts/release-build.sh
+	ARGUS_RELEASE_VERSION="$(VERSION)" bash scripts/release-build.sh
 
 clean:
 	rm -f server/argus-server agent/argus-agent

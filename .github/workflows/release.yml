@@ -2,6 +2,13 @@ name: Release Build
 
 # 手动触发：产出 Server/Agent 多平台二进制 + SHA-256 校验文件并上传为
 # workflow artifact。刻意不创建 git tag、不发布 GitHub Release、不推送远端。
+#
+# 平台矩阵由 scripts/release-build.sh 统一驱动，此处仅负责准备构建环境：
+#   - Agent（纯 Go，CGO_ENABLED=0，无需任何 C 工具链）：
+#     linux(386/amd64/arm/arm64/riscv64/s390x/loong64/mips/mipsle)、
+#     windows(386/amd64/arm64)、darwin(amd64/arm64)、freebsd(386/amd64/arm/arm64)。
+#   - Server（cgo SQLite）：linux/amd64 原生 + linux/arm64（需 aarch64 交叉编译器）；
+#     其余平台由脚本明确跳过并告警（逐平台记录于 manifest.json 的 results）。
 on:
   workflow_dispatch:
 
@@ -24,7 +31,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # Server 的 SQLite 需要 cgo；安装 aarch64 交叉编译器以产出 linux/arm64。
+      # Server 的 SQLite 依赖 cgo；安装 aarch64 交叉编译器以产出 server linux/arm64。
+      # Agent 为纯 Go，交叉编译全部目标平台无需任何 C 工具链。
       - name: Install cross C toolchain (server linux/arm64)
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
 
@@ -38,6 +46,16 @@ jobs:
 
       - name: Run release build script
         run: bash scripts/release-build.sh
+
+      # 校验所有版本目录下产物的 SHA-256。
+      - name: Verify checksums
+        run: |
+          cd dist/release
+          find . -mindepth 2 -maxdepth 2 -name checksums.txt -print0 \
+            | while IFS= read -r -d '' f; do
+                echo "== $f =="
+                ( cd "$(dirname "$f")" && sha256sum -c checksums.txt )
+              done
 
       - uses: actions/upload-artifact@v4
         with:
