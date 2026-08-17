@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Check, Copy, Download, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api, type ApiToken, type User } from "../lib/api";
 import { useI18n, type TKey } from "../lib/i18n";
 const allScopes: { key: string; label: TKey }[] = [
@@ -65,6 +65,8 @@ export default function Access() {
   });
   const delUser = useMutation({ mutationFn: api.deleteUser, onSuccess: invalidate });
   const [viewedSecret, setViewedSecret] = useState<{ username: string; secret: string } | null>(null);
+  const [installCmd, setInstallCmd] = useState("");
+  const [installCopied, setInstallCopied] = useState(false);
   const viewSecret = useMutation({
     mutationFn: (u: User) => api.userSecret(u.id).then((r) => ({ username: u.username, secret: r.agent_secret })),
     onSuccess: setViewedSecret,
@@ -74,6 +76,30 @@ export default function Access() {
     <div>
       <h1 className="mb-1 text-xl font-semibold">{t("access.title")}</h1>
       <p className="mb-5 text-sm text-muted">{t("access.subtitle")}</p>
+
+      {/* 一键安装命令（当前用户 Agent 密钥，批量部署新机器） */}
+      {installCmd && (
+        <div className="mb-4 rounded-xl border border-border bg-panel p-4">
+          <h3 className="mb-2 text-sm font-medium">{t("install.title")}</h3>
+          <p className="mb-2 text-xs text-muted">{t("servers.installHelp")}</p>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-bg p-3 text-xs">{installCmd}</pre>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(installCmd).then(() => {
+                  setInstallCopied(true);
+                  setTimeout(() => setInstallCopied(false), 1500);
+                });
+              }}
+              className="flex items-center gap-1 rounded-lg bg-accent px-4 py-1.5 text-sm text-white"
+            >
+              {installCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {installCopied ? t("install.copied") : t("install.copy")}
+            </button>
+            <button onClick={() => setInstallCmd("")} className="rounded-lg border border-border px-4 py-1.5 text-sm">{t("common.close")}</button>
+          </div>
+        </div>
+      )}
 
       {/* PAT */}
       <div className="mb-3 flex items-center justify-between">
@@ -201,13 +227,25 @@ export default function Access() {
       {/* 用户管理（admin） */}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("access.users")}</h2>
-        <button
-          onClick={() => setUserForm({ username: "", password: "", role: "user" })}
-          className="flex items-center gap-2 rounded-lg bg-accent px-3 py-1.5 text-sm text-white hover:opacity-90"
-        >
-          <Plus className="h-4 w-4" />
-          {t("access.createUser")}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              setInstallCopied(false);
+              api.installCommand().then((r) => setInstallCmd(r.command)).catch(() => {});
+            }}
+            className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5"
+          >
+            <Download className="h-4 w-4" />
+            {t("access.installCommand")}
+          </button>
+          <button
+            onClick={() => setUserForm({ username: "", password: "", role: "user" })}
+            className="flex items-center gap-2 rounded-lg bg-accent px-3 py-1.5 text-sm text-white hover:opacity-90"
+          >
+            <Plus className="h-4 w-4" />
+            {t("access.createUser")}
+          </button>
+        </div>
       </div>
 
       {createdUser && (

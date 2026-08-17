@@ -366,6 +366,17 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	// 一键安装脚本（哪吒风格）：无认证即可下载，脚本本身不含敏感信息。
+	router.GET("/install.sh", func(c *gin.Context) {
+		if len(installScript) == 0 {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Header("Content-Type", "text/x-shellscript; charset=utf-8")
+		c.Header("Cache-Control", "no-cache")
+		_, _ = c.Writer.Write(installScript)
+	})
+
 	// 6. 静态资源（内嵌前端，构建时注入；目录不存在则跳过）
 	// pprof 性能剖析（借鉴 komari，受 admin 路由保护）
 	router.GET("/debug/pprof/*pprof", srv.AuthMiddlewareForPProf(), srv.PProfHandler)

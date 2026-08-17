@@ -103,6 +103,10 @@ func New(s *Server) *gin.Engine {
 			authed.PUT("/servers/:id", requireScope(ScopeServerWrite), s.updateServer)
 			authed.DELETE("/servers/:id", requireScope(ScopeServerDelete), s.deleteServer)
 			authed.POST("/servers/:id/exec", requireScope(ScopeServerExec), s.serverExec)
+			authed.GET("/servers/:id/install-command", requireScope(ScopeServerRead), s.serverInstallCommand)
+
+			// 一键安装命令（用户 Agent 密钥模式）
+			authed.GET("/install/command", s.installCommand)
 
 			// 报警
 			authed.GET("/alerts", requireScope(ScopeAlertRead), s.listAlerts)

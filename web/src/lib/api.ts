@@ -791,6 +791,11 @@ export const api = {
     request<{ user: User; agent_secret: string }>("/api/v1/users", { method: "POST", body: JSON.stringify(u) }),
   deleteUser: (id: number) => request(`/api/v1/users/${id}`, { method: "DELETE" }),
 
+  // 一键安装命令（哪吒风格）
+  installCommand: () => request<{ command: string; script_url: string; ws_url: string }>("/api/v1/install/command"),
+  serverInstallCommand: (id: number) =>
+    request<{ command: string; script_url: string; ws_url: string; server_id: number }>(`/api/v1/servers/${id}/install-command`),
+
   settings: () => request<{ settings: Record<string, string> }>("/api/v1/settings"),
   saveSettings: (settings: Record<string, string>) =>
     request(`/api/v1/settings`, { method: "POST", body: JSON.stringify({ settings }) }),

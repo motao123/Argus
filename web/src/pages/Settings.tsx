@@ -15,6 +15,7 @@ const fieldMeta: { key: string; label: TKey; type: "text" | "number" | "select" 
   { key: "custom_css", label: "settings.customCss", type: "textarea", help: "settings.customCssHelp" },
   { key: "custom_js", label: "settings.customJs", type: "textarea", help: "settings.customJsHelp" },
   { key: "custom_footer", label: "settings.customFooter", type: "textarea", help: "settings.customFooterHelp" },
+  { key: "install_base_url", label: "settings.installBaseUrl", type: "text", help: "settings.installBaseUrlHelp" },
   { key: "retention_metric_1m_days", label: "settings.retention1m", type: "number", defaultValue: "1", min: 1, max: 30, section: "settings.retentionSection" },
   { key: "retention_metric_5m_days", label: "settings.retention5m", type: "number", defaultValue: "7", min: 1, max: 365, section: "settings.retentionSection" },
   { key: "retention_metric_1h_days", label: "settings.retention1h", type: "number", defaultValue: "30", min: 1, max: 3650, section: "settings.retentionSection" },

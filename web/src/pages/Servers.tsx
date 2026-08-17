@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckSquare, Copy, KeyRound, Layers, Pencil, Plus, Search, Send, Square, TerminalSquare, Trash2 } from "lucide-react";
+import { CheckSquare, Copy, Download, KeyRound, Layers, Pencil, Plus, Search, Send, Square, TerminalSquare, Trash2 } from "lucide-react";
 import { api, type Server } from "../lib/api";
 import { fmtBytes } from "../lib/format";
 import { useI18n } from "../lib/i18n";
@@ -43,6 +43,9 @@ export default function Servers() {
   const [execResult, setExecResult] = useState<string>("");
   const [execTarget, setExecTarget] = useState<Server | null>(null);
   const [execCmd, setExecCmd] = useState("");
+  const [installTarget, setInstallTarget] = useState<Server | null>(null);
+  const [installCmd, setInstallCmd] = useState("");
+  const [installCopied, setInstallCopied] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showGroups, setShowGroups] = useState(false);
@@ -295,6 +298,18 @@ export default function Servers() {
                     </button>
                     <button
                       onClick={() => {
+                        setInstallTarget(s);
+                        setInstallCmd("");
+                        setInstallCopied(false);
+                        api.serverInstallCommand(s.id).then((r) => setInstallCmd(r.command)).catch(() => setInstallCmd(""));
+                      }}
+                      title={t("servers.installTitle")}
+                      className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <Download className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => {
                         setExecTarget(s);
                         setExecCmd("uptime");
                         setExecResult("");
@@ -347,6 +362,33 @@ export default function Servers() {
             <input value={execCmd} onChange={(e) => setExecCmd(e.target.value)} className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
             <button onClick={() => runExec.mutate()} className="mt-2 rounded-lg bg-accent px-4 py-1.5 text-sm text-white">{t("servers.exec")}</button>
             {execResult && <pre className="mt-3 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-3 text-xs">{execResult}</pre>}
+          </div>
+        </div>
+      )}
+
+      {/* 一键安装命令 */}
+      {installTarget && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setInstallTarget(null)}>
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-panel p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-3 text-sm font-medium">{t("servers.installHeading", { name: installTarget.name })}</h3>
+            <p className="mb-2 text-xs text-muted">{t("servers.installHelp")}</p>
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-bg p-3 text-xs">{installCmd || t("common.loading")}</pre>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(installCmd).then(() => {
+                    setInstallCopied(true);
+                    setTimeout(() => setInstallCopied(false), 1500);
+                  });
+                }}
+                disabled={!installCmd}
+                className="flex items-center gap-1 rounded-lg bg-accent px-4 py-1.5 text-sm text-white disabled:opacity-40"
+              >
+                {installCopied ? <CheckSquare className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {installCopied ? t("install.copied") : t("install.copy")}
+              </button>
+              <button onClick={() => setInstallTarget(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm">{t("common.close")}</button>
+            </div>
           </div>
         </div>
       )}

@@ -76,7 +76,24 @@ docker build -f deploy/Dockerfile -t argus:local .
 
 Agent 必须连接 `/ws/agent`，例如 `wss://your-domain/ws/agent`。
 
-### 方式二：本地构建
+### 方式二：一键安装命令（哪吒风格）
+
+后台「服务器」页每行点击下载图标（或「访问控制 → 我的安装命令」），会生成一条命令：
+
+```bash
+curl -fsSL http://your-domain/install.sh | sh -s -- -s ws://your-domain/ws/agent -k <密钥>
+```
+
+SSH 登录目标服务器（Linux/macOS/FreeBSD，需 root）后执行即可：脚本自动识别系统与架构、
+从发布源下载 Agent 二进制、校验 SHA-256、安装为 systemd/OpenRC 服务并注册上线，幂等可重装。
+
+- 服务器模式：使用该服务器专属密钥（补装/重连同一节点）。
+- 用户模式：使用你的 Agent 注册密钥，一条命令可批量部署任意新机器（自动创建服务器）。
+- 二进制下载源默认 GitHub Releases latest（`argus-agent-<os>-<arch>` + `checksums.txt`）；
+  可用 `-u <base>` 参数或 `ARGUS_AGENT_BASE_URL` 环境变量覆盖。
+- HTTPS 反代场景请在「设置 → 安装命令基础 URL」填写公网地址，命令会自动推导为 `wss://`。
+
+### 方式三：本地构建
 
 ```bash
 # 1. 构建前端
@@ -93,7 +110,7 @@ cd ../agent && go build -o argus-agent ./cmd/argus-agent
 ./argus-agent -s ws://server-ip:8080/ws/agent -k <server密钥>
 ```
 
-### 方式三：前端演示（无需后端）
+### 方式四：前端演示（无需后端）
 
 ```bash
 cd web && pnpm install && pnpm dev:mock
