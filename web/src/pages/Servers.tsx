@@ -1,10 +1,23 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckSquare, Copy, Download, KeyRound, Layers, Pencil, Plus, Search, Send, Square, TerminalSquare, Trash2 } from "lucide-react";
 import { api, type Server } from "../lib/api";
 import { fmtBytes } from "../lib/format";
 import { useI18n } from "../lib/i18n";
+
+// 表单字段：带标签与单位/示例说明，避免只依赖 placeholder。
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-muted">{label}</span>
+      {children}
+      {hint && <span className="text-[11px] text-muted/70">{hint}</span>}
+    </label>
+  );
+}
+
+const inputCls = "rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent";
 
 interface FormState {
   id?: number;
@@ -196,21 +209,51 @@ export default function Servers() {
         <div className="mb-5 rounded-xl border border-border bg-panel p-4">
           <h2 className="mb-3 text-sm font-medium">{form.id ? t("servers.editServer") : t("servers.addServer")}</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <input placeholder={t("servers.name")} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input placeholder={t("servers.group")} value={form.group} onChange={(e) => setForm({ ...form, group: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input placeholder={t("servers.note")} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input type="number" placeholder={t("servers.price")} value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input type="number" placeholder={t("servers.cycleDays")} value={form.cycle_days} onChange={(e) => setForm({ ...form, cycle_days: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input type="number" placeholder={t("servers.trafficQuota")} min={0} value={form.traffic_quota_bytes} onChange={(e) => setForm({ ...form, traffic_quota_bytes: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input type="number" placeholder={t("servers.trafficCycleDay")} min={1} max={28} value={form.traffic_cycle_day} onChange={(e) => setForm({ ...form, traffic_cycle_day: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input placeholder={t("servers.trafficTimezone")} value={form.traffic_timezone} onChange={(e) => setForm({ ...form, traffic_timezone: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <select value={form.traffic_accounting} onChange={(e) => setForm({ ...form, traffic_accounting: e.target.value as FormState["traffic_accounting"] })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm">
-              <option value="sum">{t("servers.accountingSum")}</option><option value="in">{t("servers.accountingIn")}</option><option value="out">{t("servers.accountingOut")}</option><option value="max">{t("servers.accountingMax")}</option>
-            </select>
-            <input type="datetime-local" value={form.expire_at} onChange={(e) => setForm({ ...form, expire_at: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input type="number" placeholder={t("servers.sortOrder")} value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input type="number" step="0.1" min={0} placeholder={t("servers.sloTarget")} value={form.slo_target} onChange={(e) => setForm({ ...form, slo_target: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
-            <input placeholder={t("servers.tags")} value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+            <Field label={t("servers.name")}>
+              <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </Field>
+            <Field label={t("servers.group")}>
+              <input className={inputCls} value={form.group} onChange={(e) => setForm({ ...form, group: e.target.value })} />
+            </Field>
+            <Field label={t("servers.note")}>
+              <input className={inputCls} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+            </Field>
+
+            <Field label={t("servers.price")}>
+              <input type="number" min={0} className={inputCls} value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} />
+            </Field>
+            <Field label={t("servers.cycleDays")}>
+              <input type="number" min={0} className={inputCls} value={form.cycle_days} onChange={(e) => setForm({ ...form, cycle_days: Number(e.target.value) })} />
+            </Field>
+            <Field label={t("servers.expireLabel")}>
+              <input type="datetime-local" className={inputCls} value={form.expire_at} onChange={(e) => setForm({ ...form, expire_at: e.target.value })} />
+            </Field>
+
+            <Field label={t("servers.trafficQuota")} hint={t("servers.trafficQuotaHint")}>
+              <input type="number" min={0} className={inputCls} value={form.traffic_quota_bytes} onChange={(e) => setForm({ ...form, traffic_quota_bytes: Number(e.target.value) })} />
+            </Field>
+            <Field label={t("servers.trafficCycleDay")}>
+              <input type="number" min={1} max={28} className={inputCls} value={form.traffic_cycle_day} onChange={(e) => setForm({ ...form, traffic_cycle_day: Number(e.target.value) })} />
+            </Field>
+            <Field label={t("servers.trafficTimezone")}>
+              <input className={inputCls} value={form.traffic_timezone} onChange={(e) => setForm({ ...form, traffic_timezone: e.target.value })} />
+            </Field>
+
+            <Field label={t("servers.trafficAccounting")}>
+              <select value={form.traffic_accounting} onChange={(e) => setForm({ ...form, traffic_accounting: e.target.value as FormState["traffic_accounting"] })} className={inputCls}>
+                <option value="sum">{t("servers.accountingSum")}</option><option value="in">{t("servers.accountingIn")}</option><option value="out">{t("servers.accountingOut")}</option><option value="max">{t("servers.accountingMax")}</option>
+              </select>
+            </Field>
+            <Field label={t("servers.sortOrder")}>
+              <input type="number" className={inputCls} value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} />
+            </Field>
+            <Field label={t("servers.sloTarget")} hint={t("servers.sloTargetHint")}>
+              <input type="number" step="0.1" min={0} className={inputCls} value={form.slo_target} onChange={(e) => setForm({ ...form, slo_target: Number(e.target.value) })} />
+            </Field>
+
+            <Field label={t("servers.tags")}>
+              <input className={inputCls} value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
+            </Field>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.auto_renew} onChange={(e) => setForm({ ...form, auto_renew: e.target.checked })} /> {t("servers.autoRenew")}
             </label>
