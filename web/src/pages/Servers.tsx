@@ -38,7 +38,6 @@ export default function Servers() {
   const { data: serverData } = useQuery({ queryKey: ["servers-list"], queryFn: api.servers, refetchInterval: 15000 });
   const servers = serverData?.servers ?? [];
   const [form, setForm] = useState<FormState | null>(null);
-  const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [execResult, setExecResult] = useState<string>("");
   const [execTarget, setExecTarget] = useState<Server | null>(null);
@@ -46,12 +45,12 @@ export default function Servers() {
   const [installTarget, setInstallTarget] = useState<Server | null>(null);
   const [installCmd, setInstallCmd] = useState("");
   const [installCopied, setInstallCopied] = useState(false);
+  const [cfg, setCfg] = useState({ server_url: "", interval: 2, secret: "" });
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showGroups, setShowGroups] = useState(false);
   const [newGroup, setNewGroup] = useState("");
   const [cfgTarget, setCfgTarget] = useState<Server | null>(null);
-  const [cfg, setCfg] = useState({ server_url: "", interval: 2, secret: "" });
 
   const { data: groupsData } = useQuery({ queryKey: ["groups"], queryFn: api.groups, enabled: showGroups });
   const groups = groupsData?.groups ?? [];
@@ -62,7 +61,7 @@ export default function Servers() {
   };
 
   const save = useMutation({
-    mutationFn: async (f: FormState): Promise<{ secret?: string }> => {
+    mutationFn: async (f: FormState): Promise<{ secret?: string; server?: Server }> => {
       if (f.id) {
         await api.updateServer(f.id, f);
         return {};
@@ -70,7 +69,14 @@ export default function Servers() {
       return api.createServer(f);
     },
     onSuccess: (res) => {
-      if (!form?.id) setSecret(res.secret ?? t("servers.secretFallback"));
+      // 哪吒风格：创建服务器后立即弹出该服务器的一键安装命令
+      if (!form?.id && res.server) {
+        const srv = res.server;
+        setInstallTarget(srv);
+        setInstallCmd("");
+        setInstallCopied(false);
+        api.serverInstallCommand(srv.id).then((r) => setInstallCmd(r.command)).catch(() => {});
+      }
       setForm(null);
       invalidate();
     },
@@ -153,7 +159,6 @@ export default function Servers() {
           <button
             onClick={() => {
               setForm(emptyForm);
-              setSecret(null);
             }}
             className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white"
           >
@@ -213,15 +218,6 @@ export default function Servers() {
               <input type="checkbox" checked={form.hidden} onChange={(e) => setForm({ ...form, hidden: e.target.checked })} /> {t("servers.hiddenFromGuests")}
             </label>
           </div>
-          {secret && (
-            <div className="mt-3 flex items-center gap-2 rounded-lg bg-ok/10 p-3 text-sm">
-              <KeyRound className="h-4 w-4 text-ok" />
-              <span className="flex-1 break-all">{secret}</span>
-              <button onClick={() => navigator.clipboard?.writeText(secret)} className="flex items-center gap-1 text-muted hover:text-fg">
-                <Copy className="h-3.5 w-3.5" /> {t("common.copy")}
-              </button>
-            </div>
-          )}
           <div className="mt-3 flex gap-2">
             <button onClick={() => save.mutate(form)} className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white">{t("common.save")}</button>
             <button onClick={() => setForm(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted">{t("common.cancel")}</button>
