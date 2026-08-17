@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/motao123/Argus/agent/internal/collector"
+	"github.com/motao123/Argus/agent/internal/rtt"
 	"github.com/motao123/Argus/agent/internal/task"
 	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/protocol/rpc"
@@ -119,6 +120,8 @@ func run(ctx context.Context, serverURL, secret string, interval time.Duration, 
 	handler.SetPeer(peer)
 	// 心跳：Agent 主动 Ping 防止单向 NAT 映射老化；读超时内无任何帧即判定连接死亡
 	peer.StartHeartbeat(rpc.DefaultPingInterval)
+	// 往返延迟测量：复用心跳 Ping→Pong 测量点，随下次上报附带 latency_ms
+	latency := rtt.New(peer)
 
 	// 必须先启动读循环：应答与任务下发都靠它（未调用的函数会被链接器剪除）
 	go peer.ReadLoop()
@@ -176,6 +179,7 @@ func run(ctx context.Context, serverURL, secret string, interval time.Duration, 
 				r.Host = h
 				lastHost = h
 			}
+			r.LatencyMs = latency.LatencyMs()
 			_ = peer.Notify(protocol.MethodReport, r)
 		})
 	}()

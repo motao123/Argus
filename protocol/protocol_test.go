@@ -93,3 +93,50 @@ func TestParseCapabilities(t *testing.T) {
 		t.Fatal("ParseCapabilities list: want error, got nil")
 	}
 }
+
+func TestParseStatuses(t *testing.T) {
+	// 空串/纯空白 → nil（区间判定模式）
+	for _, raw := range []string{"", "  ", "\t"} {
+		got, err := ParseStatuses(raw)
+		if err != nil {
+			t.Fatalf("ParseStatuses(%q) error: %v", raw, err)
+		}
+		if got != nil {
+			t.Fatalf("ParseStatuses(%q) = %v, want nil", raw, got)
+		}
+	}
+
+	// 合法：trim、去重保序
+	got, err := ParseStatuses(" 200, 404, 200, 301 ")
+	if err != nil {
+		t.Fatalf("ParseStatuses valid: %v", err)
+	}
+	want := []int{200, 404, 301}
+	if len(got) != len(want) {
+		t.Fatalf("ParseStatuses = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ParseStatuses = %v, want %v", got, want)
+		}
+	}
+
+	// 非法：非数字 / 超出 100-599 / 空项
+	for _, raw := range []string{"200,abc", "99", "600", "200,,301", "200,", ",200"} {
+		if _, err := ParseStatuses(raw); err == nil {
+			t.Errorf("ParseStatuses(%q): want error, got nil", raw)
+		}
+	}
+
+	// FormatStatuses 是 ParseStatuses 的逆操作（规范化后往返一致）
+	parsed, err := ParseStatuses(" 200, 301 ,200 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := FormatStatuses(parsed); got != "200,301" {
+		t.Fatalf("FormatStatuses = %q, want %q", got, "200,301")
+	}
+	if got := FormatStatuses(nil); got != "" {
+		t.Fatalf("FormatStatuses(nil) = %q, want empty", got)
+	}
+}

@@ -106,6 +106,7 @@ func (s *Server) dashboardWS(c *gin.Context) {
 				v.ProcessAvailability = st.Last.ProcessAvailability
 				v.TemperatureAvailability = st.Last.TemperatureAvailability
 				v.Uptime = st.Last.Uptime
+				v.LatencyMs = st.LatencyMs
 				v.Online = st.Online
 				v.LastSeen = st.LastSeen
 				if st.Host.Hostname != "" {

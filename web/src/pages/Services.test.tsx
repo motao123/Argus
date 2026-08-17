@@ -40,6 +40,7 @@ const mockService = {
   timeout: 10,
   expected_status_min: 200,
   expected_status_max: 399,
+  expected_statuses: "",
   ping_count: 4,
   cert_warn: true,
   request_headers: '[{"key":"Authorization","value":"Bearer t"}]',
@@ -152,6 +153,37 @@ describe("Services page", () => {
     fireEvent.change(screen.getByDisplayValue("GET"), { target: { value: "PUT" } });
     expect((screen.getByDisplayValue("PUT") as HTMLSelectElement).value).toBe("PUT");
     expect((screen.getByPlaceholderText("仅 POST/PUT/PATCH 时发送") as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("submits the expected statuses list (blank = range mode)", async () => {
+    renderPage();
+    await screen.findByText("api");
+    fireEvent.click(screen.getByText("新建服务"));
+
+    const listInput = screen.getByTitle("期望状态码（逗号分隔，留空=区间）") as HTMLInputElement;
+    expect(listInput.value).toBe("");
+    fireEvent.change(listInput, { target: { value: "200, 301, 404" } });
+    fireEvent.change(screen.getByPlaceholderText("名称"), { target: { value: "multi-status" } });
+    fireEvent.change(screen.getByPlaceholderText("目标（URL / host:port / host）"), { target: { value: "https://example.com" } });
+
+    fireEvent.click(screen.getByText("保存"));
+    await waitFor(() => {
+      expect(api.saveService).toHaveBeenCalledWith(expect.objectContaining({
+        expected_statuses: "200, 301, 404",
+        expected_status_min: 200,
+        expected_status_max: 399,
+      }));
+    });
+  });
+
+  it("pre-fills the expected statuses list when editing", async () => {
+    vi.mocked(api.services).mockResolvedValue({
+      services: [{ ...mockService, expected_statuses: "301,404" }],
+    } as never);
+    renderPage();
+    await screen.findByText("api");
+    fireEvent.click(screen.getByTitle("编辑"));
+    expect((screen.getByTitle("期望状态码（逗号分隔，留空=区间）") as HTMLInputElement).value).toBe("301,404");
   });
 });
 

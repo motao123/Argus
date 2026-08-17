@@ -111,3 +111,43 @@ func TestParseCapabilitiesWireFormat(t *testing.T) {
 		t.Fatalf("mount_include = %v, want nil", req.MountInclude)
 	}
 }
+
+// TestListServersIncludesLatency 验证 REST 输出携带 latency_ms：
+// 已上报延迟的服务器输出毫秒值，未上报（旧 Agent）输出 0。
+func TestListServersIncludesLatency(t *testing.T) {
+	e := newAuthzEnv(t)
+	e.srv.Store.Upsert(&e.aliceS)
+	e.srv.Store.Upsert(&e.bobS)
+	e.srv.Store.SetReport(e.aliceS.ID, protocol.HostInfo{}, &protocol.ReportParams{LatencyMs: 23, Timestamp: 1000, CPU: 1})
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	authed := r.Group("", e.srv.authMiddleware())
+	authed.GET("/servers", requireScope(ScopeServerRead), e.srv.listServers)
+	req := httptest.NewRequest(http.MethodGet, "/servers", nil)
+	req.Header.Set("Authorization", "Bearer "+e.token(t, e.admin))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /servers = %d, body %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Data struct {
+			Servers []serverView `json:"servers"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[int64]serverView{}
+	for _, s := range out.Data.Servers {
+		byID[s.ID] = s
+	}
+	if v, ok := byID[e.aliceS.ID]; !ok || v.LatencyMs != 23 {
+		t.Fatalf("aliceS latency_ms = %d (present=%v), want 23", v.LatencyMs, ok)
+	}
+	if v, ok := byID[e.bobS.ID]; !ok || v.LatencyMs != 0 {
+		t.Fatalf("bobS (未上报) latency_ms = %d (present=%v), want 0", v.LatencyMs, ok)
+	}
+}

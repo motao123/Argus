@@ -132,10 +132,12 @@ func (s *Sentinel) probe(svc *model.Service, peer *rpc.Peer) {
 	if timeout <= 0 {
 		timeout = 10
 	}
+	// 状态码列表（空 = 按区间判定）；写路径已校验，非法时静默忽略保持旧行为。
+	statuses, _ := protocol.ParseStatuses(svc.ExpectedStatuses)
 	resp, err := peer.Call(protocol.MethodServiceCheck, protocol.ServiceCheckParams{
 		Type: svc.Type, Target: svc.Target, Timeout: timeout, Method: svc.HTTPMethod,
 		VerifyTLS: svc.VerifyTLS, ExpectedStatusMin: svc.ExpectedStatusMin,
-		ExpectedStatusMax: svc.ExpectedStatusMax, MaxRedirects: svc.MaxRedirects,
+		ExpectedStatusMax: svc.ExpectedStatusMax, Statuses: statuses, MaxRedirects: svc.MaxRedirects,
 		PingCount: svc.PingCount, Headers: parseRequestHeaders(svc.RequestHeaders),
 		Body: svc.RequestBody, AssertContains: svc.AssertContains,
 	}, time.Duration(timeout+5)*time.Second)

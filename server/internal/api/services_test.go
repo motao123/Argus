@@ -134,6 +134,109 @@ func TestCreateServiceLegacyDefaults(t *testing.T) {
 	if svc.HTTPMethod != "GET" || svc.RequestHeaders != "" || svc.RequestBody != "" || svc.AssertContains != "" {
 		t.Fatalf("legacy defaults = %+v", svc)
 	}
+	if svc.ExpectedStatuses != "" {
+		t.Fatalf("legacy expected_statuses = %q, want empty", svc.ExpectedStatuses)
+	}
+}
+
+// ---- P2：期望状态码集合（逗号分隔列表，优先于区间）----
+
+// TestCreateServiceExpectedStatuses 合法的状态码列表被规范化存储（trim/去重保序）；
+// 与区间同时设置时列表优先，不报错（语义由 agent 判定保证）。
+func TestCreateServiceExpectedStatuses(t *testing.T) {
+	e := newAuthzEnv(t)
+	token := e.token(t, e.alice)
+	w := svcDo(e, t, http.MethodPost, "/services", token,
+		`{"server_id":`+itoa(e.aliceS.ID)+`,"name":"list-svc","type":"http","target":"http://x",
+		  "expected_statuses":" 200, 404, 200, 301 ","expected_status_min":200,"expected_status_max":399}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", w.Code, w.Body.String())
+	}
+	var svc model.Service
+	if err := e.srv.DB.First(&svc, "name = ?", "list-svc").Error; err != nil {
+		t.Fatal(err)
+	}
+	if svc.ExpectedStatuses != "200,404,301" {
+		t.Fatalf("stored expected_statuses = %q, want %q", svc.ExpectedStatuses, "200,404,301")
+	}
+	// 列表与区间共存（列表优先），min/max 仍保留
+	if svc.ExpectedStatusMin != 200 || svc.ExpectedStatusMax != 399 {
+		t.Fatalf("stored range = %d-%d, want 200-399", svc.ExpectedStatusMin, svc.ExpectedStatusMax)
+	}
+
+	// 空串 = 区间判定模式
+	w = svcDo(e, t, http.MethodPost, "/services", token,
+		`{"server_id":`+itoa(e.aliceS.ID)+`,"name":"range-svc","type":"http","target":"http://x","expected_statuses":""}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create empty list = %d %s", w.Code, w.Body.String())
+	}
+	var rangeSvc model.Service
+	if err := e.srv.DB.First(&rangeSvc, "name = ?", "range-svc").Error; err != nil {
+		t.Fatal(err)
+	}
+	if rangeSvc.ExpectedStatuses != "" {
+		t.Fatalf("empty list stored = %q, want empty", rangeSvc.ExpectedStatuses)
+	}
+}
+
+// TestCreateServiceExpectedStatusesInvalid 非法列表（非数字/越界/空项）返回 400。
+func TestCreateServiceExpectedStatusesInvalid(t *testing.T) {
+	e := newAuthzEnv(t)
+	token := e.token(t, e.alice)
+	base := `{"server_id":` + itoa(e.aliceS.ID) + `,"name":"m","type":"http","target":"http://x","expected_statuses":"`
+	for _, tc := range []struct {
+		value string
+	}{
+		{"200,abc"}, {"99"}, {"600"}, {"200,,301"}, {"200,"}, {",200"},
+	} {
+		w := svcDo(e, t, http.MethodPost, "/services", token, base+tc.value+`"}`)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "expected_statuses") {
+			t.Errorf("list %q: want 400 containing expected_statuses, got %d %s", tc.value, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestUpdateServiceExpectedStatuses 更新可设置列表、清空列表回到区间，非法值被拒绝。
+func TestUpdateServiceExpectedStatuses(t *testing.T) {
+	e := newAuthzEnv(t)
+	token := e.token(t, e.alice)
+
+	w := svcDo(e, t, http.MethodPut, "/services/"+itoa(e.svc.ID), token,
+		`{"expected_statuses":"301, 404, 301"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update set list = %d %s", w.Code, w.Body.String())
+	}
+	var svc model.Service
+	if err := e.srv.DB.First(&svc, e.svc.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if svc.ExpectedStatuses != "301,404" {
+		t.Fatalf("updated expected_statuses = %q, want %q", svc.ExpectedStatuses, "301,404")
+	}
+
+	// 清空列表 → 回到区间判定
+	w = svcDo(e, t, http.MethodPut, "/services/"+itoa(e.svc.ID), token, `{"expected_statuses":""}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update clear list = %d %s", w.Code, w.Body.String())
+	}
+	if err := e.srv.DB.First(&svc, e.svc.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if svc.ExpectedStatuses != "" {
+		t.Fatalf("cleared expected_statuses = %q, want empty", svc.ExpectedStatuses)
+	}
+
+	// 非法值拒绝，且不落库
+	w = svcDo(e, t, http.MethodPut, "/services/"+itoa(e.svc.ID), token, `{"expected_statuses":"200,700"}`)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "expected_statuses") {
+		t.Fatalf("update invalid list = %d %s", w.Code, w.Body.String())
+	}
+	if err := e.srv.DB.First(&svc, e.svc.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if svc.ExpectedStatuses != "" {
+		t.Fatalf("invalid update leaked = %q, want still empty", svc.ExpectedStatuses)
+	}
 }
 
 // ---- P1：延迟分位数（滑动窗口）----

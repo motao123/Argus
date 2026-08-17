@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -50,6 +51,21 @@ type Peer struct {
 	closed        chan struct{}
 	readTimeout   time.Duration // 读循环静默判定窗口（<=0 禁用）
 	heartbeatOnce sync.Once
+
+	// RTT 测量：pingLoop 每次发送 Ping 时记录发送时刻（UnixNano，0 = 未发送），
+	// 收到 Pong 时若在窗口内则视为对最近一次 Ping 的应答，计算往返延迟。
+	lastPingNano atomic.Int64
+	hookMu       sync.RWMutex
+	pongHook     func(rtt time.Duration) // 可选：每次测得的往返延迟回调（可为 nil）
+}
+
+// SetPongHook 注册 Pong 回调：每次收到响应本端 Ping 的 Pong 控制帧时，
+// 以毫秒级精度调用 hook(rtt)。用于 Agent 侧测量 ↔ Server 的往返延迟；
+// 传 nil 可取消。与 StartHeartbeat 配合使用（无心跳则收不到 Pong）。
+func (p *Peer) SetPongHook(hook func(rtt time.Duration)) {
+	p.hookMu.Lock()
+	p.pongHook = hook
+	p.hookMu.Unlock()
 }
 
 // New 创建 Peer，并安装控制帧处理器：
@@ -78,9 +94,26 @@ func newPeer(conn *websocket.Conn, handler Handler, readTimeout time.Duration) *
 	})
 	conn.SetPongHandler(func(string) error {
 		p.armReadDeadline()
+		p.firePongHook()
 		return nil
 	})
 	return p
+}
+
+// firePongHook 计算最近一次 Ping 的往返延迟并回调（仅当 hook 已注册且
+// Pong 在合理窗口内到达——超过 2 个心跳间隔视为陈旧 Pong，忽略）。
+func (p *Peer) firePongHook() {
+	p.hookMu.RLock()
+	hook := p.pongHook
+	p.hookMu.RUnlock()
+	if hook == nil {
+		return
+	}
+	if sent := p.lastPingNano.Load(); sent > 0 {
+		if rtt := time.Since(time.Unix(0, sent)); rtt > 0 && rtt <= 2*DefaultPingInterval {
+			hook(rtt)
+		}
+	}
 }
 
 // StartHeartbeat 周期发送 Ping 控制帧（interval<=0 时用 DefaultPingInterval），
@@ -105,6 +138,8 @@ func (p *Peer) pingLoop(interval time.Duration) {
 		case <-p.closed:
 			return
 		case <-t.C:
+			// 记录发送时刻：对端回 Pong 时据此计算往返延迟
+			p.lastPingNano.Store(time.Now().UnixNano())
 			if err := p.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
 				_ = p.conn.Close()
 				return

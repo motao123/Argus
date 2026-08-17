@@ -95,6 +95,7 @@ export interface Server {
   process_availability: Availability;
   temperature_availability: Availability;
   uptime: number;
+  latency_ms: number;
   online: boolean;
   last_seen: string;
   price: number;
@@ -328,6 +329,7 @@ export interface ServiceItem {
   timeout: number;
   expected_status_min: number;
   expected_status_max: number;
+  expected_statuses: string;
   ping_count: number;
   cert_warn: boolean;
   request_headers: string;
@@ -481,6 +483,20 @@ export interface CompareSeries {
   server_id: number;
   server_name: string;
   points: MetricPoint[];
+}
+
+// ---- 管理端资源排行（GET /api/v1/admin/top，实时快照取数、无历史聚合）----
+
+/** 资源排行指标：cpu/mem/disk 为百分比，net_in/net_out 为 B/s，latency 为毫秒。 */
+export type TopMetric = "cpu" | "mem" | "disk" | "net_in" | "net_out" | "latency";
+
+/** 资源排行单行：value 为排序值；used/total 仅 mem/disk 返回（用量占比展示用）。 */
+export interface TopServerEntry {
+  server_id: number;
+  server_name: string;
+  value: number;
+  used?: number;
+  total?: number;
 }
 
 // ---- 状态页：事故 / 维护窗口 / SLA ----
@@ -832,6 +848,11 @@ export const api = {
     request<{ period: string; points: MetricPoint[] }>(`/api/v1/servers/${id}/metrics?period=${period}`),
   metricsCompare: (ids: number[], period: "1h" | "24h" | "7d") =>
     request<{ period: string; series: CompareSeries[] }>(`/api/v1/metrics/compare?ids=${ids.join(",")}&period=${period}`),
+  // 管理端资源排行（admin 全量 / owner 自有；仅在线服务器实时快照）
+  top: (metric: TopMetric, limit = 10) =>
+    request<{ metric: TopMetric; limit: number; servers: TopServerEntry[] }>(
+      `/api/v1/admin/top?metric=${metric}&limit=${limit}`,
+    ),
 
   alerts: () => request<{ alerts: Alert[] }>("/api/v1/alerts"),
   saveAlert: (a: Partial<Alert> & { id?: number }) =>

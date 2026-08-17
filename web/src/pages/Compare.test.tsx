@@ -55,6 +55,7 @@ const baseServer = {
   process_availability: { available: false },
   temperature_availability: { available: false },
   uptime: 0,
+  latency_ms: 0,
   online: true,
   last_seen: "",
   price: 0,

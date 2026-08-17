@@ -79,6 +79,7 @@ export default function ServerCard({ server }: { server: Server }) {
 
       <div className="mt-3 flex items-center justify-between border-t border-border pt-2 text-xs text-muted">
         <span>{t("serverCard.load", { load: server.load1.toFixed(2) })}</span>
+        <span>{t("serverCard.latency", { ms: server.latency_ms > 0 ? `${server.latency_ms}ms` : "—" })}</span>
         <span>{fmtDuration(server.uptime)}</span>
       </div>
     </Link>

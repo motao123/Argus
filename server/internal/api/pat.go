@@ -219,6 +219,8 @@ func (s *Server) readonlyGate() gin.HandlerFunc {
 		"GET /api/v1/tokens":    true,
 		// 多节点指标对比（只读状态查看，与单机 metrics 口径一致，逐 id owner/admin 校验）
 		"GET /api/v1/metrics/compare": true,
+		// 资源排行（只读状态查看，owner 仅见自有服务器的实时快照排行）
+		"GET /api/v1/admin/top": true,
 	}
 	return func(c *gin.Context) {
 		p := principalFromContext(c)

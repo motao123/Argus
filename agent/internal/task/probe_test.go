@@ -62,6 +62,57 @@ func TestProbeHTTPExpectedStatusAndRedirectLimit(t *testing.T) {
 	}
 }
 
+func TestProbeHTTPExpectedStatusesList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ok":
+			w.WriteHeader(http.StatusOK)
+		case "/moved":
+			w.WriteHeader(http.StatusMovedPermanently)
+		case "/notfound":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	// 列表命中：200 ∈ [200,301,404]
+	hit := probeService(protocol.ServiceCheckParams{Type: "http", Target: server.URL + "/ok", Timeout: 2,
+		Statuses: []int{200, 301, 404}})
+	if !hit.Up || hit.StatusCode != 200 {
+		t.Fatalf("list hit probe = %+v", hit)
+	}
+
+	// 列表不命中：200 ∉ [301,404]，且错误信息指向列表
+	miss := probeService(protocol.ServiceCheckParams{Type: "http", Target: server.URL + "/ok", Timeout: 2,
+		Statuses: []int{301, 404}})
+	if miss.Up || !strings.Contains(miss.Error, "not in expected statuses") {
+		t.Fatalf("list miss probe = %+v", miss)
+	}
+
+	// 列表优先于区间：404 在列表内但超出区间 200-399 → up
+	listWinsUp := probeService(protocol.ServiceCheckParams{Type: "http", Target: server.URL + "/notfound", Timeout: 2,
+		ExpectedStatusMin: 200, ExpectedStatusMax: 399, Statuses: []int{404}})
+	if !listWinsUp.Up || listWinsUp.StatusCode != 404 {
+		t.Fatalf("list-over-range up probe = %+v", listWinsUp)
+	}
+
+	// 列表优先于区间：200 在区间内但不在列表 → down
+	listWinsDown := probeService(protocol.ServiceCheckParams{Type: "http", Target: server.URL + "/ok", Timeout: 2,
+		ExpectedStatusMin: 200, ExpectedStatusMax: 399, Statuses: []int{404}})
+	if listWinsDown.Up {
+		t.Fatalf("list-over-range down probe = %+v", listWinsDown)
+	}
+
+	// 列表与关键字断言组合：状态码命中列表但断言缺失 → down
+	assertMiss := probeService(protocol.ServiceCheckParams{Type: "http", Target: server.URL + "/ok", Timeout: 2,
+		Statuses: []int{200, 301, 404}, AssertContains: "never-present"})
+	if assertMiss.Up {
+		t.Fatalf("list hit with assert miss = %+v", assertMiss)
+	}
+}
+
 func TestProbeTCPListenerLatency(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

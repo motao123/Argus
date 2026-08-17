@@ -136,3 +136,16 @@ describe("Alerts page — custom notification template", () => {
     expect(body.value).toBe('{"title":{{title}},"content":{{content}}}');
   });
 });
+
+describe("Alerts page — latency metric", () => {
+  it("new-rule metric dropdown includes network latency option", async () => {
+    renderPage();
+    await screen.findByText("CPU 过高");
+    fireEvent.click(screen.getByText("新建规则"));
+
+    const select = screen.getByDisplayValue("CPU 使用率 (%)") as HTMLSelectElement;
+    const labels = Array.from(select.options).map((o) => o.textContent);
+    expect(labels).toContain("网络延迟 (ms)");
+    expect(select.options[select.selectedIndex].value).toBe("cpu");
+  });
+});

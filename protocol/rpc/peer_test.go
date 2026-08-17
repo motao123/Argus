@@ -232,3 +232,33 @@ func TestConcurrentCallsAndClose(t *testing.T) {
 		t.Fatal("call on closed peer should fail")
 	}
 }
+
+// TestPongHookMeasuresRTT 验证往返延迟测量：client 注册 hook 并启动心跳，
+// 对端（server）收到 Ping 控制帧自动回 Pong，hook 应收到 >0 的往返延迟
+// （复用心跳 Ping 测量点，与 Agent 侧 RTT 上报同一条路径）。
+func TestPongHookMeasuresRTT(t *testing.T) {
+	client, server := peerPair(t, nil)
+	_ = server // server 的 PingHandler 由 newPeer 安装：收到 Ping 自动回 Pong
+
+	rtts := make(chan time.Duration, 4)
+	client.SetPongHook(func(rtt time.Duration) { rtts <- rtt })
+	client.StartHeartbeat(10 * time.Millisecond)
+
+	select {
+	case rtt := <-rtts:
+		if rtt <= 0 {
+			t.Fatalf("rtt = %v, want > 0", rtt)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for pong RTT callback")
+	}
+
+	// 取消 hook：连接继续心跳保活，但不再有回调
+	client.SetPongHook(nil)
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case rtt := <-rtts:
+		t.Fatalf("unexpected callback after SetPongHook(nil): rtt=%v", rtt)
+	default:
+	}
+}

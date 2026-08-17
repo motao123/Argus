@@ -231,6 +231,7 @@ export default function ServerDetail() {
           { label: t("serverDetail.mem"), value: `${fmtBytes(server.mem_used)} / ${fmtBytes(server.mem_total)}` },
           { label: t("serverDetail.disk"), value: `${fmtBytes(server.disk_used)} / ${fmtBytes(server.disk_total)}` },
           { label: t("serverDetail.load"), value: server.load1.toFixed(2) },
+          { label: t("serverDetail.latency"), value: server.latency_ms > 0 ? `${server.latency_ms}ms` : "—" },
           { label: t("serverDetail.netIn"), value: fmtSpeed(server.net_in_speed) },
           { label: t("serverDetail.netOut"), value: fmtSpeed(server.net_out_speed) },
           { label: t("serverDetail.temperature"), value: temp },

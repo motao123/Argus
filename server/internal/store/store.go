@@ -15,11 +15,13 @@ import (
 
 // State 单台服务器的运行时状态（内存态）。
 type State struct {
-	Server   *model.Server
-	Host     protocol.HostInfo
-	Last     protocol.ReportParams
-	Online   bool
-	LastSeen time.Time
+	Server *model.Server
+	Host   protocol.HostInfo
+	Last   protocol.ReportParams
+	// LatencyMs 服务器最近一次上报的 Agent↔Server 往返延迟（毫秒）；0 = 无测量。
+	LatencyMs int
+	Online    bool
+	LastSeen  time.Time
 }
 
 // Hub 服务器运行时状态中心。
@@ -77,6 +79,7 @@ func (h *Hub) SetReport(id int64, host protocol.HostInfo, r *protocol.ReportPara
 		st.Host = host
 	}
 	st.Last = *r
+	st.LatencyMs = r.LatencyMs
 	st.Online = true
 	st.LastSeen = time.Now()
 

@@ -153,6 +153,7 @@ func (s *Server) createService(c *gin.Context) {
 		Timeout               int    `json:"timeout"`
 		ExpectedStatusMin     int    `json:"expected_status_min"`
 		ExpectedStatusMax     int    `json:"expected_status_max"`
+		ExpectedStatuses      string `json:"expected_statuses"` // 逗号分隔状态码列表；空 = 按区间判定（列表优先）
 		MaxRedirects          int    `json:"max_redirects"`
 		PingCount             int    `json:"ping_count"`
 		RequestHeaders        string `json:"request_headers"` // JSON: [{"key","value"}]
@@ -213,6 +214,11 @@ func (s *Server) createService(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "invalid expected status range")
 		return
 	}
+	expectedStatuses, err := normalizeExpectedStatuses(req.ExpectedStatuses)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.MaxRedirects <= 0 {
 		req.MaxRedirects = 3
 	}
@@ -248,6 +254,7 @@ func (s *Server) createService(c *gin.Context) {
 		Timeout:               req.Timeout,
 		ExpectedStatusMin:     req.ExpectedStatusMin,
 		ExpectedStatusMax:     req.ExpectedStatusMax,
+		ExpectedStatuses:      expectedStatuses,
 		PingCount:             req.PingCount,
 		RequestHeaders:        headers,
 		RequestBody:           req.RequestBody,
@@ -285,6 +292,7 @@ func (s *Server) updateService(c *gin.Context) {
 		VerifyTLS             *bool   `json:"verify_tls"`
 		ExpectedStatusMin     *int    `json:"expected_status_min"`
 		ExpectedStatusMax     *int    `json:"expected_status_max"`
+		ExpectedStatuses      *string `json:"expected_statuses"` // 逗号分隔状态码列表；空串 = 清空列表回到区间判定
 		MaxRedirects          *int    `json:"max_redirects"`
 		PingCount             *int    `json:"ping_count"`
 		RequestHeaders        *string `json:"request_headers"`
@@ -397,6 +405,15 @@ func (s *Server) updateService(c *gin.Context) {
 	if minStatus < 100 || maxStatus > 599 || minStatus > maxStatus {
 		fail(c, http.StatusBadRequest, "invalid expected status range")
 		return
+	}
+	// 期望状态码列表（空串 = 清空列表回到区间判定；设置后列表优先于区间）。
+	if req.ExpectedStatuses != nil {
+		expectedStatuses, err := normalizeExpectedStatuses(*req.ExpectedStatuses)
+		if err != nil {
+			fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["expected_statuses"] = expectedStatuses
 	}
 	if req.MaxRedirects != nil && (*req.MaxRedirects < 0 || *req.MaxRedirects > 10) {
 		fail(c, http.StatusBadRequest, "max_redirects must be 0-10")
@@ -628,6 +645,17 @@ func normalizeRequestHeaders(raw string) (string, error) {
 		return "", fmt.Errorf("invalid request_headers")
 	}
 	return string(b), nil
+}
+
+// normalizeExpectedStatuses 校验并规范化期望状态码列表（逗号分隔）：
+// 空串/纯空白返回 ""（区间判定）；合法则返回去重保序的规范形式（如 "200,301,404"）；
+// 非法（空项/非数字/超出 100-599）返回错误。
+func normalizeExpectedStatuses(raw string) (string, error) {
+	statuses, err := protocol.ParseStatuses(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid expected_statuses: %v", err)
+	}
+	return protocol.FormatStatuses(statuses), nil
 }
 
 // validateHTTPBody 校验方法与请求体的搭配：仅 POST/PUT/PATCH 允许携带 body。

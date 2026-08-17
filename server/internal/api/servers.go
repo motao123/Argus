@@ -81,10 +81,12 @@ type serverView struct {
 	SocketAvailability      protocol.Availability `json:"socket_availability"`
 	ProcessAvailability     protocol.Availability `json:"process_availability"`
 	TemperatureAvailability protocol.Availability `json:"temperature_availability"`
-	Uptime                  uint64                `json:"uptime"`
-	Online                  bool                  `json:"online"`
-	LastSeen                time.Time             `json:"last_seen"`
-	TrafficUsage            *trafficquota.Usage   `json:"traffic_usage,omitempty"`
+	// LatencyMs Agent↔Server 往返延迟（毫秒）；0 = 无测量（旧 Agent / 未上报）。
+	LatencyMs    int                 `json:"latency_ms"`
+	Uptime       uint64              `json:"uptime"`
+	Online       bool                `json:"online"`
+	LastSeen     time.Time           `json:"last_seen"`
+	TrafficUsage *trafficquota.Usage `json:"traffic_usage,omitempty"`
 }
 
 type hostView struct {
@@ -167,6 +169,7 @@ func (s *Server) listServers(c *gin.Context) {
 			v.ProcessAvailability = st.Last.ProcessAvailability
 			v.TemperatureAvailability = st.Last.TemperatureAvailability
 			v.Uptime = st.Last.Uptime
+			v.LatencyMs = st.LatencyMs
 			v.Online = st.Online
 			v.LastSeen = st.LastSeen
 			if st.Host.Hostname != "" {

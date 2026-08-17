@@ -125,9 +125,13 @@ func probeHTTP(ctx context.Context, p protocol.ServiceCheckParams) *protocol.Ser
 	if maxStatus == 0 {
 		maxStatus = 399
 	}
-	result.Up = resp.StatusCode >= minStatus && resp.StatusCode <= maxStatus
+	result.Up = expectedStatusOK(resp.StatusCode, p.Statuses, minStatus, maxStatus)
 	if !result.Up {
-		result.Error = fmt.Sprintf("HTTP %d outside expected range %d-%d", resp.StatusCode, minStatus, maxStatus)
+		if len(p.Statuses) > 0 {
+			result.Error = fmt.Sprintf("HTTP %d not in expected statuses %v", resp.StatusCode, p.Statuses)
+		} else {
+			result.Error = fmt.Sprintf("HTTP %d outside expected range %d-%d", resp.StatusCode, minStatus, maxStatus)
+		}
 		return result
 	}
 	// 关键字断言：仅在状态码符合范围后读取响应体（上限内），不命中则判 down。
@@ -145,6 +149,20 @@ func probeHTTP(ctx context.Context, p protocol.ServiceCheckParams) *protocol.Ser
 		}
 	}
 	return result
+}
+
+// expectedStatusOK 判定状态码是否符合期望：Statuses 列表非空时按列表命中判定
+// （列表优先于区间）；否则按 [minStatus, maxStatus] 区间判定。
+func expectedStatusOK(code int, statuses []int, minStatus, maxStatus int) bool {
+	if len(statuses) > 0 {
+		for _, s := range statuses {
+			if code == s {
+				return true
+			}
+		}
+		return false
+	}
+	return code >= minStatus && code <= maxStatus
 }
 
 // applyRequestHeaders 应用自定义请求头。

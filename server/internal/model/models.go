@@ -310,9 +310,12 @@ type Service struct {
 	Timeout           int    `gorm:"default:10" json:"timeout"`
 	ExpectedStatusMin int    `gorm:"default:200" json:"expected_status_min"`
 	ExpectedStatusMax int    `gorm:"default:399" json:"expected_status_max"`
-	MaxRedirects      int    `gorm:"default:3" json:"max_redirects"`
-	PingCount         int    `gorm:"default:4" json:"ping_count"`
-	CertWarn          bool   `gorm:"default:true" json:"cert_warn"`
+	// ExpectedStatuses 期望状态码列表（逗号分隔，如 "200,301,404"）；空 = 使用
+	// ExpectedStatusMin/Max 区间判定。两者同时设置时列表优先（agent 判定逻辑保证）。
+	ExpectedStatuses string `gorm:"size:256;default:''" json:"expected_statuses"`
+	MaxRedirects     int    `gorm:"default:3" json:"max_redirects"`
+	PingCount        int    `gorm:"default:4" json:"ping_count"`
+	CertWarn         bool   `gorm:"default:true" json:"cert_warn"`
 	// 自定义请求（HTTP 专用，缺省为空 = 旧行为）。
 	RequestHeaders string `gorm:"type:text;default:''" json:"request_headers"` // JSON: [{"key","value"}]
 	RequestBody    string `gorm:"type:text;default:''" json:"request_body"`    // 仅 POST/PUT/PATCH 发送

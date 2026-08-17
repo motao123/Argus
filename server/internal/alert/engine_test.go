@@ -47,6 +47,18 @@ func TestMetricValue(t *testing.T) {
 	if v, ok := e.metricValue(&model.Alert{Metric: "disk"}, *st); !ok || v != 20 {
 		t.Errorf("disk = %v,%v", v, ok)
 	}
+	// 延迟：有测量 → 毫秒值
+	h.SetReport(1, protocol.HostInfo{}, &protocol.ReportParams{LatencyMs: 88, Timestamp: 106})
+	st = h.Get(1)
+	if v, ok := e.metricValue(&model.Alert{Metric: "latency"}, *st); !ok || v != 88 {
+		t.Errorf("latency = %v,%v, want 88,true", v, ok)
+	}
+	// 延迟：无测量（旧 Agent 上报 0）→ 不参与判定
+	h.SetReport(1, protocol.HostInfo{}, &protocol.ReportParams{Timestamp: 108})
+	st = h.Get(1)
+	if v, ok := e.metricValue(&model.Alert{Metric: "latency"}, *st); ok {
+		t.Errorf("latency 无测量 = %v,%v, want 0,false", v, ok)
+	}
 	// 离线
 	h.MarkOffline(1)
 	st = h.Get(1)

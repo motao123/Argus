@@ -116,6 +116,9 @@ func New(s *Server) *gin.Engine {
 			// 多节点指标对比（admin/owner 逐 id 校验，最多 10 台）
 			authed.GET("/metrics/compare", s.compareMetrics)
 
+			// 资源排行 TOP N（admin 全量 / owner 自有，实时快照取数；PAT 需 server:read scope）
+			authed.GET("/admin/top", requireScope(ScopeServerRead), s.serverTop)
+
 			// 一键安装命令（用户 Agent 密钥模式）
 			authed.GET("/install/command", s.installCommand)
 

@@ -253,6 +253,12 @@ func (e *Engine) metricValue(a *model.Alert, st store.State) (float64, bool) {
 		return st.Last.NetOutSpeed, true
 	case "load1":
 		return st.Last.Load1, true
+	case "latency":
+		// 延迟以毫秒为单位；0 = 无测量（旧 Agent 未上报），不参与判定
+		if st.LatencyMs <= 0 {
+			return 0, false
+		}
+		return float64(st.LatencyMs), true
 	case "traffic_in_cycle":
 		used, _, ok := e.cycleTraffic(st.Server)
 		return float64(used), ok

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -261,7 +262,9 @@ type ReportParams struct {
 	DiskIOAvailability      Availability `json:"disk_io_availability,omitempty"`
 	TemperatureAvailability Availability `json:"temperature_availability,omitempty"`
 	GPU                     GPUReport    `json:"gpu,omitempty"`
-	Timestamp               int64        `json:"ts"`
+	// LatencyMs 最近一次 Ping→Pong 往返延迟（毫秒）；0 = 尚无测量（兼容旧 Agent）。
+	LatencyMs int   `json:"latency_ms,omitempty"`
+	Timestamp int64 `json:"ts"`
 }
 
 // RegisterParams 注册参数。Secret 为空表示首次注册，由服务端生成。
@@ -354,11 +357,48 @@ type ServiceCheckParams struct {
 	VerifyTLS         *bool      `json:"verify_tls,omitempty"`
 	ExpectedStatusMin int        `json:"expected_status_min,omitempty"`
 	ExpectedStatusMax int        `json:"expected_status_max,omitempty"`
+	Statuses          []int      `json:"statuses,omitempty"` // 期望状态码列表；非空时优先于 ExpectedStatusMin/Max
 	MaxRedirects      int        `json:"max_redirects,omitempty"`
 	PingCount         int        `json:"ping_count,omitempty"`
 	Headers           []KeyValue `json:"headers,omitempty"`         // 自定义请求头（Host 经特殊处理）
 	Body              string     `json:"body,omitempty"`            // 仅 POST/PUT/PATCH 发送
 	AssertContains    string     `json:"assert_contains,omitempty"` // 响应体关键字断言，空 = 不启用
+}
+
+// ParseStatuses 解析逗号分隔的期望状态码列表（如 "200,301,404"），
+// 返回去重保序的 []int；空串/纯空白返回 nil（表示使用状态码区间）。
+// 任意一项为空、非数字或超出 100-599 时返回错误。
+func ParseStatuses(raw string) ([]int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	seen := make(map[int]bool)
+	var out []int
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("empty status code in list")
+		}
+		code, err := strconv.Atoi(part)
+		if err != nil || code < 100 || code > 599 {
+			return nil, fmt.Errorf("invalid status code %q (must be 100-599)", part)
+		}
+		if !seen[code] {
+			seen[code] = true
+			out = append(out, code)
+		}
+	}
+	return out, nil
+}
+
+// FormatStatuses 将状态码列表序列化为逗号分隔字符串（ParseStatuses 的逆操作）。
+func FormatStatuses(statuses []int) string {
+	parts := make([]string, len(statuses))
+	for i, s := range statuses {
+		parts[i] = strconv.Itoa(s)
+	}
+	return strings.Join(parts, ",")
 }
 
 // ServiceCheckResult 服务探测结果（agent → server）。新增字段可被旧 server 安全忽略。

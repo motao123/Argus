@@ -149,7 +149,7 @@ export default function Services() {
         <button
           onClick={() => {
             setHeaderLines("");
-            setForm({ server_id: servers[0]?.id ?? 0, name: "", type: "http", target: "", interval: 60, enabled: true, hidden: false, notify: false, http_method: "GET", verify_tls: true, timeout: 10, expected_status_min: 200, expected_status_max: 399, ping_count: 4, cert_warn: true });
+            setForm({ server_id: servers[0]?.id ?? 0, name: "", type: "http", target: "", interval: 60, enabled: true, hidden: false, notify: false, http_method: "GET", verify_tls: true, timeout: 10, expected_status_min: 200, expected_status_max: 399, expected_statuses: "", ping_count: 4, cert_warn: true });
           }}
           className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90"
         >
@@ -211,6 +211,7 @@ export default function Services() {
               <label className="flex items-center gap-2"><input type="checkbox" checked={form.verify_tls !== false} onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })} />{t("services.verifyTls")}</label>
               <input type="number" title={t("services.expectedMin")} value={form.expected_status_min ?? 200} onChange={(e) => setForm({ ...form, expected_status_min: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
               <input type="number" title={t("services.expectedMax")} value={form.expected_status_max ?? 399} onChange={(e) => setForm({ ...form, expected_status_max: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
+              <input type="text" title={t("services.expectedStatuses")} placeholder={t("services.expectedStatusesPlaceholder")} value={form.expected_statuses ?? ""} onChange={(e) => setForm({ ...form, expected_statuses: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2" />
               <label className="flex items-center gap-2"><input type="checkbox" checked={form.cert_warn ?? true} onChange={(e) => setForm({ ...form, cert_warn: e.target.checked })} />{t("services.certWarn")}</label>
             </>}
             {form.type === "ping" && <input type="number" title={t("services.pingCount")} value={form.ping_count ?? 4} onChange={(e) => setForm({ ...form, ping_count: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />}

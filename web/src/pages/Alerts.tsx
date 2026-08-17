@@ -11,6 +11,7 @@ const metrics: { key: string; label: TKey }[] = [
   { key: "net_in_speed", label: "alerts.metricNetIn" },
   { key: "net_out_speed", label: "alerts.metricNetOut" },
   { key: "load1", label: "alerts.metricLoad" },
+  { key: "latency", label: "alerts.metricLatency" },
   { key: "temperature", label: "alerts.metricTemp" },
   { key: "gpu", label: "alerts.metricGpu" },
   { key: "traffic_in_cycle", label: "alerts.metricTrafficIn" },
