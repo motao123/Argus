@@ -62,8 +62,8 @@ func newOfflineSentinelEnv(t *testing.T) *offlineSentinelEnv {
 // sentinel 构造注入 Notify 回调的哨兵。
 func (e *offlineSentinelEnv) sentinel() *OfflineSentinel {
 	s := NewOfflineSentinel(e.db, e.st)
-	s.Notify = func(n *model.Notification, title, content string, ownerID int64) {
-		_ = e.queue.Enqueue(n, title, content, ownerID)
+	s.Notify = func(n *model.Notification, title, content string, ownerID int64, vars map[string]string) {
+		_ = e.queue.EnqueueCtx(n, title, content, ownerID, vars)
 	}
 	return s
 }

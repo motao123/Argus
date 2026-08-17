@@ -87,7 +87,8 @@ const isPresetType = (type: string) => type in presetFields;
 
 const emptyAlert = {
   name: "", metric: "cpu", min: null as number | null, max: null as number | null, duration: 30,
-  notify: true, webhook_id: 0, group_id: 0, trigger_cron_id: 0, trigger_ratio: null as number | null, enabled: true,
+  notify: true, webhook_id: 0, group_id: 0, trigger_cron_id: 0, trigger_ratio: null as number | null,
+  template: "", enabled: true,
 };
 
 // 静默时长选项（小时）
@@ -120,7 +121,7 @@ export default function Alerts() {
     setNForm(
       n
         ? { ...n }
-        : { name: "", type: "webhook", url: "", method: "POST", headers: "{}", body: '{"title":"{{title}}","content":"{{content}}"}', chat_id: "", extra: "" },
+        : { name: "", type: "webhook", url: "", method: "POST", headers: "{}", body: '{"title":{{title}},"content":{{content}}}', chat_id: "", extra: "" },
     );
   };
 
@@ -344,6 +345,16 @@ export default function Alerts() {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="mt-3">
+            <label className="mb-1 block text-sm text-muted">{t("alerts.template")}</label>
+            <textarea
+              placeholder={t("alerts.templatePlaceholder")}
+              value={form.template}
+              onChange={(e) => setForm({ ...form, template: e.target.value })}
+              className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
+              rows={3}
+            />
           </div>
           <div className="mt-3 flex gap-2">
             <button

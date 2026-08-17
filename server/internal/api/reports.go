@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/notifyctx"
 	"github.com/motao123/Argus/server/internal/traffic"
 )
 
@@ -116,7 +117,13 @@ func (s *Server) RunScheduledReports(now time.Time) {
 	if err != nil {
 		return
 	}
-	s.sendViaQueue(&n, title, content)
+	ctx := &notifyctx.Ctx{
+		Event:   "report",
+		Title:   title,
+		Content: content,
+		Time:    notifyctx.FormatTime(now),
+	}
+	s.sendViaQueue(&n, title, content, ctx.Flat())
 }
 
 // trafficReportDue 判定 now 是否命中计划：daily=hour；weekly=weekday+hour；monthly=day+hour。
@@ -232,7 +239,13 @@ func (s *Server) RunExpireCheck() {
 	if len(lines) == 0 {
 		return
 	}
-	s.sendViaQueue(&n, "[Argus] 服务器到期提醒", joinLines(lines))
+	ctx := &notifyctx.Ctx{
+		Event:   "expire_check",
+		Title:   "[Argus] 服务器到期提醒",
+		Content: joinLines(lines),
+		Time:    notifyctx.FormatTime(time.Now()),
+	}
+	s.sendViaQueue(&n, ctx.Title, ctx.Content, ctx.Flat())
 }
 
 // expireNotifyDays 读「到期提前提醒天数」设置（默认 3，范围 1-30；越界/非法回退默认）。
@@ -246,11 +259,11 @@ func (s *Server) expireNotifyDays() int {
 }
 
 // sendViaQueue 通过持久队列发送（未接线时仅记录日志，不阻塞每日任务）。
-func (s *Server) sendViaQueue(n *model.Notification, title, content string) {
+func (s *Server) sendViaQueue(n *model.Notification, title, content string, vars map[string]string) {
 	if s.Notifier == nil {
 		return
 	}
-	_ = s.Notifier.Enqueue(n, title, content, 0)
+	_ = s.Notifier.EnqueueCtx(n, title, content, 0, vars)
 }
 
 func remainingStr(t *time.Time) string {

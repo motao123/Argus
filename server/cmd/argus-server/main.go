@@ -29,6 +29,7 @@ import (
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/nat"
 	"github.com/motao123/Argus/server/internal/notifier"
+	"github.com/motao123/Argus/server/internal/notifyctx"
 	"github.com/motao123/Argus/server/internal/oauth"
 	"github.com/motao123/Argus/server/internal/plugin"
 	"github.com/motao123/Argus/server/internal/retention"
@@ -162,8 +163,8 @@ func main() {
 		_, _ = sched.Enqueue(cron, trigger, &serverID)
 	}
 	// 报警通知 → 持久队列（ownerID 为规则 owner，供送达记录隔离）
-	engine.Notify = func(n *model.Notification, title, content string, ownerID int64) {
-		_ = notifQueue.Enqueue(n, title, content, ownerID)
+	engine.Notify = func(n *model.Notification, title, content string, ownerID int64, vars map[string]string) {
+		_ = notifQueue.EnqueueCtx(n, title, content, ownerID, vars)
 	}
 	// 报警触发/恢复 → 插件 onAlert 事件 hook
 	engine.AlertHook = func(a *model.Alert, st store.State, value float64, kind string) {
@@ -202,8 +203,8 @@ func main() {
 
 	// 离线/上线通知哨兵（借鉴 komari notifier/offline）
 	offlineSentinel := alert.NewOfflineSentinel(gdb, st)
-	offlineSentinel.Notify = func(n *model.Notification, title, content string, ownerID int64) {
-		_ = notifQueue.Enqueue(n, title, content, ownerID)
+	offlineSentinel.Notify = func(n *model.Notification, title, content string, ownerID int64, vars map[string]string) {
+		_ = notifQueue.EnqueueCtx(n, title, content, ownerID, vars)
 	}
 	go offlineSentinel.Run()
 	defer offlineSentinel.Stop()
@@ -213,6 +214,23 @@ func main() {
 	svcSentinel.NotifyCb = func(svc *model.Service, kind, detail string) {
 		title := fmt.Sprintf("[Argus] 服务事件 %s", svc.Name)
 		content := fmt.Sprintf("%s (%s) %s: %s %s", svc.Name, svc.Type, svc.Target, kind, detail)
+		// 统一通知上下文：事件/服务名（rule）/探测类型（metric）/详情（value）/服务器
+		ctx := &notifyctx.Ctx{
+			Event:  kind,
+			Rule:   svc.Name,
+			Metric: svc.Type,
+			Value:  detail,
+			Time:   notifyctx.FormatTime(time.Now()),
+		}
+		var server model.Server
+		if err := gdb.First(&server, svc.ServerID).Error; err == nil {
+			ctx.ServerName = server.Name
+			ctx.ServerID = server.ID
+			if s := st.Get(svc.ServerID); s != nil {
+				ctx.FromState(s)
+			}
+		}
+		ctx.Title, ctx.Content = title, content
 		targets := make([]model.Notification, 0)
 		if svc.NotificationGroupID > 0 {
 			var group model.NotificationGroup
@@ -232,9 +250,10 @@ func main() {
 				targets = append(targets, n)
 			}
 		}
+		vars := ctx.Flat()
 		for i := range targets {
 			n := targets[i]
-			_ = notifQueue.Enqueue(&n, title, content, svc.OwnerID)
+			_ = notifQueue.EnqueueCtx(&n, title, content, svc.OwnerID, vars)
 		}
 	}
 	svcSentinel.TriggerCb = func(svc *model.Service, up bool) {

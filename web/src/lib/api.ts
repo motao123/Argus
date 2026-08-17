@@ -199,6 +199,8 @@ export interface Alert {
   group_id: number;
   trigger_cron_id: number;
   trigger_ratio: number | null;
+  // 自定义通知模板（可空）：首行为标题、其余为正文；支持 {{event}}/{{server.*}}/{{rule}}/{{metric}}/{{value}}/{{threshold}}/{{time}} 等变量
+  template: string;
   enabled: boolean;
   acked_at: string | null;
   acked_by: string;

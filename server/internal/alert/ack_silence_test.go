@@ -26,7 +26,7 @@ func newSilenceTestEngine(t *testing.T) (*Engine, *int) {
 		t.Fatal(err)
 	}
 	notifyCount := 0
-	e := &Engine{db: db, Notify: func(n *model.Notification, title, content string, ownerID int64) {
+	e := &Engine{db: db, Notify: func(n *model.Notification, title, content string, ownerID int64, vars map[string]string) {
 		notifyCount++
 	}}
 	return e, &notifyCount

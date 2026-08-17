@@ -108,6 +108,8 @@ func run(ctx context.Context, serverURL, secret string, interval time.Duration, 
 	handler.SetCapabilities(caps)
 	peer := rpc.New(conn, handler)
 	handler.SetPeer(peer)
+	// 心跳：Agent 主动 Ping 防止单向 NAT 映射老化；读超时内无任何帧即判定连接死亡
+	peer.StartHeartbeat(rpc.DefaultPingInterval)
 
 	// 必须先启动读循环：应答与任务下发都靠它（未调用的函数会被链接器剪除）
 	go peer.ReadLoop()

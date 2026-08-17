@@ -47,8 +47,8 @@ func TestEngineOfflineMetricSkipsMaintenance(t *testing.T) {
 
 	queue := notifier.NewQueue(gdb)
 	e := NewEngine(gdb, st)
-	e.Notify = func(n *model.Notification, title, content string, ownerID int64) {
-		_ = queue.Enqueue(n, title, content, ownerID)
+	e.Notify = func(n *model.Notification, title, content string, ownerID int64, vars map[string]string) {
+		_ = queue.EnqueueCtx(n, title, content, ownerID, vars)
 	}
 	count := func() int64 {
 		var n int64
@@ -120,8 +120,8 @@ func TestEngineOfflineMetricNoMaintenance(t *testing.T) {
 
 	queue := notifier.NewQueue(gdb)
 	e := NewEngine(gdb, st)
-	e.Notify = func(n *model.Notification, title, content string, ownerID int64) {
-		_ = queue.Enqueue(n, title, content, ownerID)
+	e.Notify = func(n *model.Notification, title, content string, ownerID int64, vars map[string]string) {
+		_ = queue.EnqueueCtx(n, title, content, ownerID, vars)
 	}
 	e.checkOnce()
 	e.checkOnce()

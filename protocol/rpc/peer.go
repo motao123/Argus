@@ -25,26 +25,98 @@ type CallContextHandler interface {
 	HandleContext(ctx context.Context, method string, params json.RawMessage) (any, *protocol.RPCError)
 }
 
+// 心跳参数（Agent ↔ Server 双向保活）。
+const (
+	// DefaultPingInterval 心跳 Ping 发送间隔：服务端每 30s 向 Agent 发 Ping，
+	// Agent 收到后回 Pong；Agent 也以相同间隔主动 Ping，防止单向 NAT 映射老化。
+	DefaultPingInterval = 30 * time.Second
+	// DefaultReadTimeout 读超时：读循环在窗口内未收到任何数据帧或 Pong
+	// （每收到一帧都会刷新）即判定连接死亡，触发统一的断开清理。
+	DefaultReadTimeout = 75 * time.Second
+)
+
 // Peer 维护一条 WebSocket 长连接，双向复用：
 // 发送请求（Call）、发送通知（Notify）、接收请求（Handler）。
+// 心跳使用 WebSocket Ping/Pong 控制帧，与业务数据帧互不干扰：
+// gorilla 在读取数据帧的同一读路径上处理控制帧，Pong 不会作为消息上抛。
 type Peer struct {
 	conn    *websocket.Conn
 	handler Handler
 
-	sendMu  sync.Mutex
-	mu      sync.Mutex
-	pending map[uint64]chan *protocol.Response
-	nextSeq uint64
-	closed  chan struct{}
+	sendMu        sync.Mutex
+	mu            sync.Mutex
+	pending       map[uint64]chan *protocol.Response
+	nextSeq       uint64
+	closed        chan struct{}
+	readTimeout   time.Duration // 读循环静默判定窗口（<=0 禁用）
+	heartbeatOnce sync.Once
 }
 
-// New 创建 Peer。
+// New 创建 Peer，并安装控制帧处理器：
+//   - 收到 Ping → 立即回 Pong（对端据此确认本端存活），同时刷新读超时
+//   - 收到 Pong → 刷新读超时
 func New(conn *websocket.Conn, handler Handler) *Peer {
-	return &Peer{
-		conn:    conn,
-		handler: handler,
-		pending: make(map[uint64]chan *protocol.Response),
-		closed:  make(chan struct{}),
+	return newPeer(conn, handler, DefaultReadTimeout)
+}
+
+// newPeer 供测试注入更短的读超时；readTimeout<=0 表示不设读超时。
+func newPeer(conn *websocket.Conn, handler Handler, readTimeout time.Duration) *Peer {
+	p := &Peer{
+		conn:        conn,
+		handler:     handler,
+		pending:     make(map[uint64]chan *protocol.Response),
+		closed:      make(chan struct{}),
+		readTimeout: readTimeout,
+	}
+	conn.SetPingHandler(func(appData string) error {
+		// 显式回 Pong（gorilla 默认行为相同，这里显式写出并顺带刷新读超时）
+		if err := conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second)); err != nil {
+			return err
+		}
+		p.armReadDeadline()
+		return nil
+	})
+	conn.SetPongHandler(func(string) error {
+		p.armReadDeadline()
+		return nil
+	})
+	return p
+}
+
+// StartHeartbeat 周期发送 Ping 控制帧（interval<=0 时用 DefaultPingInterval），
+// 对端收到后自动回 Pong，配合读超时保证半开连接（NAT 静默断链）
+// 在 DefaultReadTimeout 内被发现。可随时调用（幂等），与 Call/Notify 并发安全。
+func (p *Peer) StartHeartbeat(interval time.Duration) {
+	p.heartbeatOnce.Do(func() {
+		if interval <= 0 {
+			interval = DefaultPingInterval
+		}
+		go p.pingLoop(interval)
+	})
+}
+
+// pingLoop 定时发送 Ping；写失败通常意味着连接已死：
+// 关闭底层连接让读循环退出，走统一的断开清理（关闭 pending、触发 Closed）。
+func (p *Peer) pingLoop(interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-p.closed:
+			return
+		case <-t.C:
+			if err := p.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+				_ = p.conn.Close()
+				return
+			}
+		}
+	}
+}
+
+// armReadDeadline 刷新读超时：任何一帧数据（含 Pong、Ping）到达都会重置。
+func (p *Peer) armReadDeadline() {
+	if p.readTimeout > 0 {
+		_ = p.conn.SetReadDeadline(time.Now().Add(p.readTimeout))
 	}
 }
 
@@ -134,11 +206,17 @@ func (p *Peer) ReadLoop() {
 		}
 		p.mu.Unlock()
 		close(p.closed)
+		// 读超时判定连接死亡时 TCP 可能仍是半开状态，主动关闭底层连接，
+		// 让对端与等待方（Call/外层循环）尽快感知。
+		_ = p.conn.Close()
 	}()
 
 	for {
+		// 每帧刷新读超时：窗口内没有任何数据帧/Pong（静默）即超时退出。
+		p.armReadDeadline()
 		var msg wireMessage
 		if err := p.conn.ReadJSON(&msg); err != nil {
+			// 读超时（心跳静默）或连接关闭：统一走上面的断开清理
 			return
 		}
 		if msg.Method != "" {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/motao123/Argus/server/internal/maintenance"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/notifyctx"
 	"github.com/motao123/Argus/server/internal/store"
 	"gorm.io/gorm"
 )
@@ -16,8 +17,9 @@ import (
 type OfflineSentinel struct {
 	db    *gorm.DB
 	store *store.Hub
-	// Notify 发送通知（main 注入 notifier.Queue.Enqueue；ownerID 0 = 系统流程）。
-	Notify func(n *model.Notification, title, content string, ownerID int64)
+	// Notify 发送通知（main 注入 notifier.Queue.EnqueueCtx；ownerID 0 = 系统流程；
+	// vars 为模板上下文变量表（notifyctx 展开），供渠道 Body 模板渲染）。
+	Notify func(n *model.Notification, title, content string, ownerID int64, vars map[string]string)
 
 	mu    sync.Mutex
 	state map[int64]offlineState // serverID → 状态
@@ -101,7 +103,17 @@ func (s *OfflineSentinel) check() {
 				if st.Server != nil {
 					name = st.Server.Name
 				}
-				s.sendNotify(&n, "[Argus] 服务器离线 "+name, name+" 已离线超过 "+cfg.OfflineAfterStr())
+				ctx := &notifyctx.Ctx{
+					Event:  "offline",
+					Metric: "offline",
+					Value:  cfg.OfflineAfterStr(),
+					Time:   notifyctx.FormatTime(now),
+				}
+				ctx.FromState(&st)
+				title := "[Argus] 服务器离线 " + name
+				content := name + " 已离线超过 " + cfg.OfflineAfterStr()
+				ctx.Title, ctx.Content = title, content
+				s.sendNotify(&n, title, content, ctx)
 			}
 		} else if seen && state.notified {
 			// 恢复
@@ -112,14 +124,22 @@ func (s *OfflineSentinel) check() {
 			if st.Server != nil {
 				name = st.Server.Name
 			}
-			s.sendNotify(&n, "[Argus] 服务器恢复 "+name, name+" 已重新上线")
+			ctx := &notifyctx.Ctx{
+				Event: "online",
+				Time:  notifyctx.FormatTime(now),
+			}
+			ctx.FromState(&st)
+			title := "[Argus] 服务器恢复 " + name
+			content := name + " 已重新上线"
+			ctx.Title, ctx.Content = title, content
+			s.sendNotify(&n, title, content, ctx)
 		}
 	}
 }
 
 // sendNotify 发送离线/上线通知（ownerID 0 = 系统流程）。
-func (s *OfflineSentinel) sendNotify(n *model.Notification, title, content string) {
+func (s *OfflineSentinel) sendNotify(n *model.Notification, title, content string, ctx *notifyctx.Ctx) {
 	if s.Notify != nil {
-		s.Notify(n, title, content, 0)
+		s.Notify(n, title, content, 0, ctx.Flat())
 	}
 }

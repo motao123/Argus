@@ -22,6 +22,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/notifyctx"
 )
 
 // Queue 通知持久队列。
@@ -55,8 +56,16 @@ func NewQueue(db *gorm.DB) *Queue {
 }
 
 // Enqueue 创建一条送达记录并立即尝试发送（失败则进入退避重试）。
-// ownerID 为触发方（报警规则 owner；0 = 系统/管理员流程），用于 owner/admin 隔离。
+// ownerID 为触发方（报警规则 owner；0 = 系统/管理员流程）。
+// 兼容旧调用（无模板上下文，渠道 Body 仅支持 {{title}}/{{content}}）。
 func (q *Queue) Enqueue(n *model.Notification, title, content string, ownerID int64) error {
+	return q.EnqueueCtx(n, title, content, ownerID, nil)
+}
+
+// EnqueueCtx 同 Enqueue，额外携带模板上下文变量表（notifyctx 展开，含
+// {{event}}/{{server.name}} 等），持久化到送达记录，渠道级 Body 模板
+// 渲染时使用（新增变量自动可用；webhook 现有 {{title}}/{{content}} 行为不变）。
+func (q *Queue) EnqueueCtx(n *model.Notification, title, content string, ownerID int64, vars map[string]string) error {
 	if q == nil || q.db == nil {
 		return fmt.Errorf("notifier queue unavailable")
 	}
@@ -68,6 +77,7 @@ func (q *Queue) Enqueue(n *model.Notification, title, content string, ownerID in
 		OwnerID:     ownerID,
 		Title:       title,
 		Content:     content,
+		ContextData: notifyctx.EncodeMap(vars),
 		Status:      model.DeliveryPending,
 		MaxAttempts: q.maxAttempts(),
 	}
@@ -130,7 +140,7 @@ func (q *Queue) sendOne(d *model.NotificationDelivery) {
 		})
 		return
 	}
-	err := send(&n, d.Title, d.Content)
+	err := send(&n, d.Title, d.Content, notifyctx.Decode(d.ContextData))
 	attempts := d.Attempts + 1
 	now := time.Now()
 	if err == nil {
@@ -242,7 +252,9 @@ func truncateErr(err error) string {
 
 // ---- 渠道发送（返回 error 供重试判定）----
 
-func send(n *model.Notification, title, content string) error {
+// send 发送单条通知。vars 为模板上下文变量表（notifyctx 展开，
+// 供 webhook Body 模板与 JS 脚本 ctx 使用；可为 nil）。
+func send(n *model.Notification, title, content string, vars map[string]string) error {
 	switch n.Type {
 	case "bark":
 		return sendBark(n, title, content)
@@ -253,7 +265,7 @@ func send(n *model.Notification, title, content string) error {
 	case "serverchan":
 		return sendServerChan(n, title, content)
 	case "javascript":
-		return sendJS(n, title, content)
+		return sendJS(n, title, content, vars)
 	case "dingtalk":
 		return sendDingTalk(n, title, content)
 	case "wecom":
@@ -267,13 +279,14 @@ func send(n *model.Notification, title, content string) error {
 	case "matrix":
 		return sendMatrix(n, title, content)
 	default: // webhook
-		return sendWebhook(n, title, content)
+		return sendWebhook(n, title, content, vars)
 	}
 }
 
 // sendJS 执行 JS 通知脚本（借鉴 komari javascript 渠道）。
-// 脚本位于 data/scripts/notify-<id>.js，注入 title/content 与 console.log。
-func sendJS(n *model.Notification, title, content string) error {
+// 脚本位于 data/scripts/notify-<id>.js，注入 title/content 与 console.log；
+// 另注入 ctx 对象（模板上下文变量，如 ctx["server.name"]）。
+func sendJS(n *model.Notification, title, content string, vars map[string]string) error {
 	scriptDir := os.Getenv("ARGUS_DATA_DIR")
 	if scriptDir == "" {
 		scriptDir = "./data"
@@ -286,6 +299,9 @@ func sendJS(n *model.Notification, title, content string) error {
 	vm := goja.New()
 	_ = vm.Set("title", title)
 	_ = vm.Set("content", content)
+	if len(vars) > 0 {
+		_ = vm.Set("ctx", vars)
+	}
 	console := vm.NewObject()
 	console.Set("log", func(call goja.FunctionCall) goja.Value {
 		parts := make([]string, 0, len(call.Arguments))
@@ -304,7 +320,11 @@ func sendJS(n *model.Notification, title, content string) error {
 
 // ---- webhook（JSON/Form 模板，借鉴 nezha）----
 
-func sendWebhook(n *model.Notification, title, content string) error {
+// sendWebhook 用模板上下文渲染 Body：{{title}}/{{content}} 保持兼容
+// （取送达记录标题/正文），新增 {{event}}/{{server.name}} 等变量自动可用；
+// 值按 JSON 字符串转义后替换（占位符不带引号书写，如 {"title":{{title}}}），
+// 未提供的变量渲染为空字符串（JSON 中为 ""，保证模板输出合法）。
+func sendWebhook(n *model.Notification, title, content string, vars map[string]string) error {
 	method := n.Method
 	if method == "" {
 		method = "POST"
@@ -314,10 +334,22 @@ func sendWebhook(n *model.Notification, title, content string) error {
 
 	body := n.Body
 	if strings.TrimSpace(body) == "" {
-		body = `{"title":"{{title}}","content":"{{content}}"}`
+		body = `{"title":{{title}},"content":{{content}}}`
 	}
-	body = strings.ReplaceAll(body, "{{title}}", escapeJSON(title))
-	body = strings.ReplaceAll(body, "{{content}}", escapeJSON(content))
+	// 送达记录里的标题/正文为准（可能已被截断）；
+	// 模板中出现的所有占位符都取值（缺失 → 空串），避免输出残缺 JSON。
+	ev := make(map[string]string, len(vars)+2)
+	for k, v := range vars {
+		ev[k] = escapeJSON(v)
+	}
+	ev["title"] = escapeJSON(title)
+	ev["content"] = escapeJSON(content)
+	for _, key := range placeholders(body) {
+		if _, ok := ev[key]; !ok {
+			ev[key] = `""`
+		}
+	}
+	body = notifyctx.Render(body, ev)
 
 	req, err := http.NewRequest(method, n.URL, bytes.NewBufferString(body))
 	if err != nil {
@@ -328,6 +360,29 @@ func sendWebhook(n *model.Notification, title, content string) error {
 		req.Header.Set(k, v)
 	}
 	return doRequest(req)
+}
+
+// placeholders 提取模板中的所有 {{key}} 占位符键（去重、保持出现顺序）。
+func placeholders(tmpl string) []string {
+	var out []string
+	seen := map[string]bool{}
+	rest := tmpl
+	for {
+		i := strings.Index(rest, "{{")
+		if i < 0 {
+			return out
+		}
+		j := strings.Index(rest[i+2:], "}}")
+		if j < 0 {
+			return out
+		}
+		key := rest[i+2 : i+2+j]
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, key)
+		}
+		rest = rest[i+2+j+2:]
+	}
 }
 
 // ---- bark（https://github.com/Finb/Bark）----

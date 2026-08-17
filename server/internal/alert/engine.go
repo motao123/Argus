@@ -15,6 +15,7 @@ import (
 
 	"github.com/motao123/Argus/server/internal/maintenance"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/notifyctx"
 	"github.com/motao123/Argus/server/internal/store"
 	trafficquota "github.com/motao123/Argus/server/internal/traffic"
 )
@@ -27,9 +28,10 @@ type Engine struct {
 	Trigger func(cron *model.Cron, serverID int64, kind string)
 	// AlertHook 报警触发/恢复事件回调（main 注入，如插件 onAlert hook）。
 	AlertHook func(a *model.Alert, st store.State, value float64, kind string)
-	// Notify 发送单条通知到指定渠道（main 注入 notifier.Queue.Enqueue；
-	// ownerID 为报警规则 owner，用于送达记录 owner/admin 隔离）。
-	Notify func(n *model.Notification, title, content string, ownerID int64)
+	// Notify 发送单条通知到指定渠道（main 注入 notifier.Queue.EnqueueCtx；
+	// ownerID 为报警规则 owner，用于送达记录 owner/admin 隔离；
+	// vars 为模板上下文变量表（notifyctx 展开），供渠道 Body 模板渲染）。
+	Notify func(n *model.Notification, title, content string, ownerID int64, vars map[string]string)
 
 	mu    sync.Mutex
 	state map[string]*violation // key: alertID:serverID
@@ -276,10 +278,21 @@ func (e *Engine) notifyTrafficQuota(server *model.Server, usage trafficquota.Usa
 	if err := e.db.First(&n, report.WebhookID).Error; err != nil {
 		return
 	}
+	ctx := &notifyctx.Ctx{
+		Event:     "traffic_quota",
+		Metric:    "traffic_quota",
+		Value:     fmt.Sprintf("%.2f%%", *usage.Percentage),
+		Threshold: fmt.Sprintf("%d%%", threshold),
+		Time:      notifyctx.FormatTime(time.Now()),
+	}
+	if st := e.store.Get(server.ID); st != nil {
+		ctx.FromState(st)
+	}
 	title := fmt.Sprintf("[Argus] %s 流量额度 %d%%", server.Name, threshold)
 	content := fmt.Sprintf("%s 当前周期 %s 至 %s，已计费 %d / %d bytes（%.2f%%）", server.Name, usage.CycleStart.Format(time.RFC3339), usage.CycleEnd.Format(time.RFC3339), usage.AccountedBytes, usage.QuotaBytes, *usage.Percentage)
+	ctx.Title, ctx.Content = title, content
 	if e.Notify != nil {
-		e.Notify(&n, title, content, server.OwnerID)
+		e.Notify(&n, title, content, server.OwnerID, ctx.Flat())
 	}
 }
 
@@ -355,11 +368,26 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 		return
 	}
 	serverName := st.Server.Name
+	// 统一通知上下文：事件/服务器/规则/指标/阈值/时间，默认格式标题正文。
+	ctx := &notifyctx.Ctx{
+		Event:     kind,
+		Rule:      a.Name,
+		Metric:    a.Metric,
+		Value:     fmt.Sprintf("%.2f", value),
+		Threshold: alertThreshold(a, value),
+		Time:      notifyctx.FormatTime(now),
+	}
+	ctx.FromState(&st)
 	title := fmt.Sprintf("[Argus] %s %s", serverName, kind)
 	content := fmt.Sprintf("%s: %s = %.2f", a.Name, a.Metric, value)
 	if kind == "recovered" {
 		content = fmt.Sprintf("%s: %s back to normal", serverName, a.Name)
 	}
+	// 规则自定义模板（可空）：首行为标题、其余为正文；空则用默认格式。
+	if strings.TrimSpace(a.Template) != "" {
+		title, content = renderAlertTemplate(a.Template, ctx, title)
+	}
+	ctx.Title, ctx.Content = title, content
 	// 分组扇出（借鉴 nezha NotificationGroup）或单渠道
 	targets := make([]model.Notification, 0)
 	if a.GroupID > 0 {
@@ -378,15 +406,49 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 			targets = append(targets, n)
 		}
 	}
+	vars := ctx.Flat()
 	for i := range targets {
 		n := targets[i]
 		if e.Notify != nil {
-			e.Notify(&n, title, content, a.OwnerID)
+			e.Notify(&n, title, content, a.OwnerID, vars)
 		} else {
 			log.Printf("alert notify: no queue wired, drop delivery to channel #%d", n.ID)
 		}
 	}
 	log.Printf("alert %s (%s): %s", a.Name, kind, content)
+}
+
+// alertThreshold 触发时对应的阈值文本：低于下限取 min，高于上限取 max；
+// offline 规则无阈值（返回空串）。
+func alertThreshold(a *model.Alert, value float64) string {
+	if a.Metric == "offline" {
+		return ""
+	}
+	if a.Min != nil && value < *a.Min {
+		return fmt.Sprintf("%.2f", *a.Min)
+	}
+	if a.Max != nil && value > *a.Max {
+		return fmt.Sprintf("%.2f", *a.Max)
+	}
+	return ""
+}
+
+// renderAlertTemplate 规则自定义模板渲染：用上下文替换占位符后，
+// 首行为标题、其余为正文；单行模板作为正文（标题保留默认）；
+// 空行/空白标题回退默认标题。
+func renderAlertTemplate(tmpl string, ctx *notifyctx.Ctx, defaultTitle string) (title, content string) {
+	rendered := strings.TrimSpace(ctx.Render(tmpl))
+	if rendered == "" {
+		return defaultTitle, ""
+	}
+	if i := strings.IndexByte(rendered, '\n'); i >= 0 {
+		title = strings.TrimSpace(rendered[:i])
+		if title == "" {
+			title = defaultTitle
+		}
+		return title, strings.TrimSpace(rendered[i+1:])
+	}
+	return defaultTitle, rendered
 }
 
 func alertServerIDs(raw string) map[int64]bool {

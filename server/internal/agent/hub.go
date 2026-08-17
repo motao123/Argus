@@ -92,6 +92,9 @@ func (h *Hub) Serve(conn *websocket.Conn) {
 	h2 := &connHandler{hub: h}
 	peer := rpc.New(conn, h2)
 	h2.peer = peer
+	// 心跳：服务端每 30s 发 Ping，Agent 回 Pong；
+	// 读超时（默认 75s）内无任何数据帧/Pong 即判定连接死亡，走下方断开清理
+	peer.StartHeartbeat(rpc.DefaultPingInterval)
 	peer.ReadLoop()
 
 	if id, ok := h.idOf(peer); ok {

@@ -123,7 +123,10 @@ type Alert struct {
 	TriggerCronID int64    `json:"trigger_cron_id"`                       // 触发时执行的任务（0=无）
 	ServerIDs     string   `gorm:"size:512;default:''" json:"server_ids"` // 逗号分隔；空 = 全部（仅 admin）
 	TriggerRatio  *int     `json:"trigger_ratio"`                         // 采样达标比例（1-100，如 70=70% 采样超限才触发；nil=全部采样）
-	Enabled       bool     `gorm:"default:true" json:"enabled"`
+	// Template 自定义通知模板（可空）：首行为标题、其余为正文；
+	// 支持 {{event}}/{{server.*}}/{{rule}}/{{metric}}/{{value}}/{{threshold}}/{{time}} 等变量；空 = 默认格式。
+	Template string `gorm:"size:2048;default:''" json:"template"`
+	Enabled  bool   `gorm:"default:true" json:"enabled"`
 	// 确认：AckedAt/AckedBy 非空表示规则当前告警已被确认，确认期间不再发送触发通知；恢复时自动清除。
 	AckedAt     *time.Time `json:"acked_at"`
 	AckedBy     string     `gorm:"size:32;default:''" json:"acked_by"`
@@ -161,11 +164,14 @@ const (
 // 每次通知（报警/离线/报告/测试/服务事件等）落一条记录，由 notifier.Queue 负责
 // 指数退避重试：Status pending → sent / failed；Attempts 达到 MaxAttempts 仍失败则标记 failed。
 type NotificationDelivery struct {
-	ID          int64      `gorm:"primaryKey" json:"id"`
-	WebhookID   int64      `gorm:"index;not null" json:"webhook_id"` // 通知渠道 ID
-	OwnerID     int64      `gorm:"index;default:0" json:"owner_id"`  // 触发方（报警规则 owner；0 = 系统/管理员流程）
-	Title       string     `gorm:"size:256;default:''" json:"title"`
-	Content     string     `gorm:"size:4096;default:''" json:"content"`
+	ID        int64  `gorm:"primaryKey" json:"id"`
+	WebhookID int64  `gorm:"index;not null" json:"webhook_id"` // 通知渠道 ID
+	OwnerID   int64  `gorm:"index;default:0" json:"owner_id"`  // 触发方（报警规则 owner；0 = 系统/管理员流程）
+	Title     string `gorm:"size:256;default:''" json:"title"`
+	Content   string `gorm:"size:4096;default:''" json:"content"`
+	// ContextData 渠道级 Body 模板渲染上下文（notifyctx 变量表 JSON；
+	// 含 {{event}}/{{server.name}} 等，重试/补发时保持同一份变量）。
+	ContextData string     `gorm:"type:text;default:''" json:"-"`
 	Status      string     `gorm:"size:16;index;not null;default:'pending'" json:"status"` // pending/sent/failed
 	Attempts    int        `gorm:"default:0" json:"attempts"`
 	MaxAttempts int        `gorm:"default:5" json:"max_attempts"`

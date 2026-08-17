@@ -63,7 +63,7 @@ func TestDingTalkRequestWithSignAndKeyword(t *testing.T) {
 		AtMobiles:   []string{"13800000000", "13900000000"},
 	})
 	n := &model.Notification{Type: "dingtalk", URL: srv.URL, Extra: extra}
-	if err := send(n, "服务器离线", "host1 超过 60s 无心跳"); err != nil {
+	if err := send(n, "服务器离线", "host1 超过 60s 无心跳", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got.Method != http.MethodPost {
@@ -109,7 +109,7 @@ func TestDingTalkRequestWithSignAndKeyword(t *testing.T) {
 func TestDingTalkMissingToken(t *testing.T) {
 	srv, _ := captureServer(t)
 	n := &model.Notification{Type: "dingtalk", URL: srv.URL, Extra: `{}`}
-	if err := send(n, "t", "c"); err == nil || !strings.Contains(err.Error(), "access_token") {
+	if err := send(n, "t", "c", nil); err == nil || !strings.Contains(err.Error(), "access_token") {
 		t.Fatalf("want access_token error, got %v", err)
 	}
 }
@@ -124,7 +124,7 @@ func TestWeComRequest(t *testing.T) {
 		MentionedMobileList: []string{"13800000000"},
 	})
 	n := &model.Notification{Type: "wecom", URL: srv.URL, Extra: extra}
-	if err := send(n, "磁盘告警", "/data 使用率 92%"); err != nil {
+	if err := send(n, "磁盘告警", "/data 使用率 92%", nil); err != nil {
 		t.Fatal(err)
 	}
 	body := readBody(t, got)
@@ -153,7 +153,7 @@ func TestFeishuTextRequestWithSignAndKeyword(t *testing.T) {
 		Keyword: "Argus",
 	})
 	n := &model.Notification{Type: "feishu", URL: srv.URL, Extra: extra}
-	if err := send(n, "服务异常", "端口 8080 无响应"); err != nil {
+	if err := send(n, "服务异常", "端口 8080 无响应", nil); err != nil {
 		t.Fatal(err)
 	}
 	body := readBody(t, got)
@@ -177,7 +177,7 @@ func TestFeishuInteractiveCard(t *testing.T) {
 	srv, got := captureServer(t)
 	extra := jsonExtra(t, FeishuConfig{Token: "fs-token", MsgType: "interactive"})
 	n := &model.Notification{Type: "feishu", URL: srv.URL, Extra: extra}
-	if err := send(n, "证书告警", "cert 将于 7 天后过期"); err != nil {
+	if err := send(n, "证书告警", "cert 将于 7 天后过期", nil); err != nil {
 		t.Fatal(err)
 	}
 	body := readBody(t, got)
@@ -209,7 +209,7 @@ func TestSlackRequest(t *testing.T) {
 		IconEmoji:  ":siren:",
 	})
 	n := &model.Notification{Type: "slack", Extra: extra}
-	if err := send(n, "CPU 高负载", "load1 = 8.2"); err != nil {
+	if err := send(n, "CPU 高负载", "load1 = 8.2", nil); err != nil {
 		t.Fatal(err)
 	}
 	body := readBody(t, got)
@@ -223,7 +223,7 @@ func TestSlackRequest(t *testing.T) {
 
 func TestSlackMissingWebhook(t *testing.T) {
 	n := &model.Notification{Type: "slack", Extra: `{}`}
-	if err := send(n, "t", "c"); err == nil || !strings.Contains(err.Error(), "webhook_url") {
+	if err := send(n, "t", "c", nil); err == nil || !strings.Contains(err.Error(), "webhook_url") {
 		t.Fatalf("want webhook_url error, got %v", err)
 	}
 }
@@ -239,7 +239,7 @@ func TestWxPusherRequest(t *testing.T) {
 		ContentType: 3,
 	})
 	n := &model.Notification{Type: "wxpusher", URL: srv.URL, Extra: extra}
-	if err := send(n, "流量告警", "本月已用 90%"); err != nil {
+	if err := send(n, "流量告警", "本月已用 90%", nil); err != nil {
 		t.Fatal(err)
 	}
 	body := readBody(t, got)
@@ -266,7 +266,7 @@ func TestWxPusherRequest(t *testing.T) {
 func TestWxPusherMissingTarget(t *testing.T) {
 	srv, _ := captureServer(t)
 	n := &model.Notification{Type: "wxpusher", URL: srv.URL, Extra: `{"app_token":"AT_xxx"}`}
-	if err := send(n, "t", "c"); err == nil || !strings.Contains(err.Error(), "uids or topic_ids") {
+	if err := send(n, "t", "c", nil); err == nil || !strings.Contains(err.Error(), "uids or topic_ids") {
 		t.Fatalf("want uids error, got %v", err)
 	}
 }
@@ -281,7 +281,7 @@ func TestMatrixRequest(t *testing.T) {
 		RoomID:      "!room:example.org",
 	})
 	n := &model.Notification{Type: "matrix", URL: srv.URL, Extra: extra}
-	if err := send(n, "节点离线", "node-01 无心跳"); err != nil {
+	if err := send(n, "节点离线", "node-01 无心跳", nil); err != nil {
 		t.Fatal(err)
 	}
 	if auth := got.Header.Get("Authorization"); auth != "Bearer syt_abc" {
@@ -296,7 +296,7 @@ func TestMatrixRequest(t *testing.T) {
 func TestMatrixMissingConfig(t *testing.T) {
 	srv, _ := captureServer(t)
 	n := &model.Notification{Type: "matrix", URL: srv.URL, Extra: `{"homeserver":"https://x"}`}
-	if err := send(n, "t", "c"); err == nil || !strings.Contains(err.Error(), "room_id") {
+	if err := send(n, "t", "c", nil); err == nil || !strings.Contains(err.Error(), "room_id") {
 		t.Fatalf("want room_id error, got %v", err)
 	}
 }
