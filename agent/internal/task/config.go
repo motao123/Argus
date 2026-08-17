@@ -33,6 +33,9 @@ func (h *Handler) handleApplyConfig(params json.RawMessage) (any, *protocol.RPCE
 	if cfg.Capabilities != nil {
 		existing["capabilities"] = cfg.Capabilities
 	}
+	if cfg.AutoUpdate != nil {
+		existing["auto_update"] = *cfg.AutoUpdate
+	}
 	if cfg.InterfaceInclude != nil {
 		existing["interface_include"] = cfg.InterfaceInclude
 	}

@@ -4,9 +4,36 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { api, type ServiceHistoryPoint, type ServiceItem } from "../lib/api";
+import { api, type HTTPMethod, type ServiceHistoryPoint, type ServiceItem } from "../lib/api";
 import { useServers } from "../context/servers";
 import { useI18n } from "../lib/i18n";
+
+// 请求头 JSON（[{"key","value"}]）与「每行 Key: Value」文本互转。
+function headersToLines(raw: string | undefined): string {
+  if (!raw) return "";
+  try {
+    const arr = JSON.parse(raw) as { key: string; value: string }[];
+    return arr.map((h) => (h.value === "" ? h.key : `${h.key}: ${h.value}`)).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function linesToHeaders(text: string): string {
+  const out: { key: string; value: string }[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const idx = trimmed.indexOf(":");
+    if (idx <= 0) continue; // 无冒号或空 key 的行忽略
+    out.push({ key: trimmed.slice(0, idx).trim(), value: trimmed.slice(idx + 1).trim() });
+  }
+  return out.length ? JSON.stringify(out) : "";
+}
+
+// 仅 POST/PUT/PATCH 允许携带请求体。
+const bodyMethods: HTTPMethod[] = ["POST", "PUT", "PATCH"];
+const httpMethods: HTTPMethod[] = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
 
 // 延迟趋势折线图（1d 分钟级延迟，借鉴 dash-v2 ServiceTracker）
 function DelayTrend({ svcId, name }: { svcId: number; name: string }) {
@@ -91,6 +118,7 @@ export default function Services() {
   const [form, setForm] = useState<Partial<ServiceItem> | null>(null);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [headerLines, setHeaderLines] = useState("");
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["services"] });
 
@@ -119,7 +147,10 @@ export default function Services() {
           <p className="text-sm text-muted">{t("services.subtitle")}</p>
         </div>
         <button
-          onClick={() => setForm({ server_id: servers[0]?.id ?? 0, name: "", type: "http", target: "", interval: 60, enabled: true, hidden: false, notify: false, http_method: "GET", verify_tls: true, timeout: 10, expected_status_min: 200, expected_status_max: 399, ping_count: 4, cert_warn: true })}
+          onClick={() => {
+            setHeaderLines("");
+            setForm({ server_id: servers[0]?.id ?? 0, name: "", type: "http", target: "", interval: 60, enabled: true, hidden: false, notify: false, http_method: "GET", verify_tls: true, timeout: 10, expected_status_min: 200, expected_status_max: 399, ping_count: 4, cert_warn: true });
+          }}
           className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
@@ -176,7 +207,7 @@ export default function Services() {
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
             {form.type === "http" && <>
-              <select value={form.http_method ?? "GET"} onChange={(e) => setForm({ ...form, http_method: e.target.value as "GET" | "HEAD" })} className="rounded-lg border border-border bg-bg px-3 py-2"><option>GET</option><option>HEAD</option></select>
+              <select value={form.http_method ?? "GET"} onChange={(e) => setForm({ ...form, http_method: e.target.value as HTTPMethod })} className="rounded-lg border border-border bg-bg px-3 py-2">{httpMethods.map(m => <option key={m} value={m}>{m}</option>)}</select>
               <label className="flex items-center gap-2"><input type="checkbox" checked={form.verify_tls !== false} onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })} />{t("services.verifyTls")}</label>
               <input type="number" title={t("services.expectedMin")} value={form.expected_status_min ?? 200} onChange={(e) => setForm({ ...form, expected_status_min: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
               <input type="number" title={t("services.expectedMax")} value={form.expected_status_max ?? 399} onChange={(e) => setForm({ ...form, expected_status_max: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2" />
@@ -191,9 +222,41 @@ export default function Services() {
             <select value={form.failure_trigger_cron_id ?? 0} onChange={(e) => setForm({ ...form, failure_trigger_cron_id: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>{t("services.failureCron")}</option>{crons.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
             <select value={form.recovery_trigger_cron_id ?? 0} onChange={(e) => setForm({ ...form, recovery_trigger_cron_id: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2"><option value={0}>{t("services.recoveryCron")}</option>{crons.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           </div>
+          {form.type === "http" && <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-muted">{t("services.requestHeaders")}</span>
+              <textarea
+                value={headerLines}
+                onChange={(e) => setHeaderLines(e.target.value)}
+                rows={3}
+                placeholder={t("services.requestHeadersPlaceholder")}
+                className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-muted">{t("services.requestBody")}</span>
+              <textarea
+                value={form.request_body ?? ""}
+                onChange={(e) => setForm({ ...form, request_body: e.target.value })}
+                rows={3}
+                disabled={!bodyMethods.includes(form.http_method ?? "GET")}
+                placeholder={t("services.requestBodyPlaceholder")}
+                className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none disabled:opacity-40"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-muted">{t("services.assertContains")}</span>
+              <input
+                value={form.assert_contains ?? ""}
+                onChange={(e) => setForm({ ...form, assert_contains: e.target.value })}
+                placeholder={t("services.assertContainsPlaceholder")}
+                className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+              />
+            </label>
+          </div>}
           <div className="mt-3 flex gap-2">
             <button
-              onClick={() => save.mutate(form)}
+              onClick={() => save.mutate({ ...form, request_headers: linesToHeaders(headerLines) })}
               disabled={!form.server_id || !form.name || !form.target}
               className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-40"
             >
@@ -234,7 +297,7 @@ export default function Services() {
               </div>
             </button>
             <div className="flex justify-end gap-1 pr-1 pt-2">
-              <button onClick={() => setForm({ ...svc })} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
+              <button title={t("common.edit")} onClick={() => { setHeaderLines(headersToLines(svc.request_headers)); setForm({ ...svc }); }} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
                 <Pencil className="h-4 w-4" />
               </button>
               <button
@@ -251,6 +314,14 @@ export default function Services() {
                 <span>{t("services.packetLoss", { value: svc.loss_rate === null ? "—" : `${svc.loss_rate}%` })}</span>
                 <span>{t("services.statusCode", { value: svc.status_code ?? "—" })}</span><span>{t("services.cert", { value: svc.cert_days === null ? "—" : t("services.certDays", { days: svc.cert_days }) })}</span>
                 <span>{t("services.phases", { value: [svc.dns_ms, svc.connect_ms, svc.tls_ms, svc.ttfb_ms].map(v => v === null ? "—" : `${v}ms`).join(" / ") })}</span>
+              </div>
+              {/* 延迟分位数（滑动窗口，样本不足 30 时后端返回 null → 显示 —） */}
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted sm:grid-cols-5">
+                <span>{t("services.latencyP50", { value: svc.delay_p50 === null ? "—" : `${svc.delay_p50}ms` })}</span>
+                <span>{t("services.latencyP95", { value: svc.delay_p95 === null ? "—" : `${svc.delay_p95}ms` })}</span>
+                <span>{t("services.latencyP99", { value: svc.delay_p99 === null ? "—" : `${svc.delay_p99}ms` })}</span>
+                <span>{t("services.stddev", { value: svc.delay_stddev_ms === null ? "—" : `${svc.delay_stddev_ms}ms` })}</span>
+                <span>{t("services.jitter", { value: svc.delay_jitter_ms === null ? "—" : `${svc.delay_jitter_ms}ms` })}</span>
               </div><DelayTrend svcId={svc.id} name={svc.name} />
             </div>}
           </div>

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,13 @@ import (
 	"github.com/motao123/Argus/protocol/rpc"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/store"
+)
+
+// Agent 自动更新设置键（admin 在设置页维护；供 agent.check_update 使用）。
+const (
+	SettingUpgradeLatestVersion = "upgrade_latest_version" // 最新版本号
+	SettingUpgradeLatestURL     = "upgrade_latest_url"     // 制品下载 URL
+	SettingUpgradeLatestSHA256  = "upgrade_latest_sha256"  // 制品 SHA-256（64 位十六进制）
 )
 
 // Hub 持有全部 Agent 连接。
@@ -115,6 +123,8 @@ func (ch *connHandler) Handle(method string, params json.RawMessage) (any, *prot
 		return ch.handleRegister(params)
 	case protocol.MethodReport:
 		return ch.handleReport(params)
+	case protocol.MethodCheckUpdate:
+		return ch.handleCheckUpdate(params)
 	case protocol.MethodTermData:
 		// Agent 终端输出 → 回调给 API 层转发浏览器
 		var d protocol.TerminalData
@@ -247,6 +257,33 @@ func (ch *connHandler) handleReport(params json.RawMessage) (any, *protocol.RPCE
 	ch.hub.store.SetReport(id, p.Host, &p)
 	ch.hub.batcher.Feed(id, &p)
 	return nil, nil
+}
+
+// handleCheckUpdate Agent 自动更新检查：返回设置中维护的最新版本与下载信息；
+// 未完整配置（版本/URL/SHA-256 缺一）时返回空结果 = 无更新。
+func (ch *connHandler) handleCheckUpdate(params json.RawMessage) (any, *protocol.RPCError) {
+	return ch.hub.latestUpgrade(), nil
+}
+
+// latestUpgrade 读取 upgrade_latest_* 设置组装更新信息。三项齐全才视为有更新，
+// 避免 URL 或校验和缺失时 Agent 拿到半截配置走下载流程。
+func (h *Hub) latestUpgrade() protocol.CheckUpdateResult {
+	version := strings.TrimSpace(h.getSetting(SettingUpgradeLatestVersion, ""))
+	url := strings.TrimSpace(h.getSetting(SettingUpgradeLatestURL, ""))
+	sha := strings.TrimSpace(h.getSetting(SettingUpgradeLatestSHA256, ""))
+	if version == "" || url == "" || len(sha) != 64 {
+		return protocol.CheckUpdateResult{}
+	}
+	return protocol.CheckUpdateResult{Version: version, URL: url, SHA256: sha}
+}
+
+// getSetting 读站点设置（默认值兜底）。
+func (h *Hub) getSetting(key, def string) string {
+	var st model.Setting
+	if err := h.db.Where("key = ?", key).First(&st).Error; err != nil || st.Value == "" {
+		return def
+	}
+	return st.Value
 }
 
 // attach 记录连接与服务器绑定。

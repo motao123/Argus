@@ -5,6 +5,8 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 )
 
 // ProtocolVersion identifies the additive wire protocol version.
@@ -64,8 +66,9 @@ const (
 
 const (
 	// Agent → Server
-	MethodRegister = "agent.register"
-	MethodReport   = "agent.report"
+	MethodRegister    = "agent.register"
+	MethodReport      = "agent.report"
+	MethodCheckUpdate = "agent.check_update"
 
 	// Server → Agent
 	MethodExec         = "agent.exec"
@@ -91,6 +94,7 @@ type AgentConfig struct {
 	Interval         int           `json:"interval,omitempty"`   // 上报间隔（秒）
 	Secret           string        `json:"secret,omitempty"`     // 新密钥
 	Capabilities     *Capabilities `json:"capabilities,omitempty"`
+	AutoUpdate       *bool         `json:"auto_update,omitempty"` // 自动更新检查（nil = 保持现状）
 	InterfaceInclude []string      `json:"interface_include,omitempty"`
 	InterfaceExclude []string      `json:"interface_exclude,omitempty"`
 	MountInclude     []string      `json:"mount_include,omitempty"`
@@ -163,6 +167,20 @@ type UpgradeParams struct {
 	URL     string `json:"url"`
 	SHA256  string `json:"sha256"`
 	Version string `json:"version"`
+}
+
+// ---- 自动更新检查 ----
+
+// CheckUpdateParams Agent 自动更新检查请求（当前无需参数，版本号供服务端日志/后续使用）。
+type CheckUpdateParams struct {
+	Version string `json:"version,omitempty"` // 当前 Agent 版本
+}
+
+// CheckUpdateResult Agent 自动更新检查结果。全部字段为空表示无更新。
+type CheckUpdateResult struct {
+	Version string `json:"version,omitempty"` // 最新版本号
+	URL     string `json:"url,omitempty"`     // 制品下载地址（http/https）
+	SHA256  string `json:"sha256,omitempty"`  // 制品 SHA-256（64 位十六进制）
 }
 
 // ---- 上报结构 ----
@@ -303,17 +321,44 @@ type TerminalResize struct {
 
 // ---- 服务监控 ----
 
+// KeyValue 自定义请求头键值对。
+type KeyValue struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// AllowedHTTPMethods HTTP 探测支持的方法（server 与 agent 共用同一校验）。
+var AllowedHTTPMethods = []string{
+	http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+	http.MethodPatch, http.MethodDelete,
+}
+
+// IsAllowedHTTPMethod 判断 HTTP 方法是否在支持列表内（大小写不敏感）。
+func IsAllowedHTTPMethod(method string) bool {
+	m := strings.ToUpper(strings.TrimSpace(method))
+	for _, allowed := range AllowedHTTPMethods {
+		if m == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 // ServiceCheckParams 服务探测参数（server → agent）。
+// Headers/Body/AssertContains 为可选字段：缺省时行为与旧版本一致。
 type ServiceCheckParams struct {
-	Type              string `json:"type"`
-	Target            string `json:"target"`
-	Timeout           int    `json:"timeout"`
-	Method            string `json:"method,omitempty"`
-	VerifyTLS         *bool  `json:"verify_tls,omitempty"`
-	ExpectedStatusMin int    `json:"expected_status_min,omitempty"`
-	ExpectedStatusMax int    `json:"expected_status_max,omitempty"`
-	MaxRedirects      int    `json:"max_redirects,omitempty"`
-	PingCount         int    `json:"ping_count,omitempty"`
+	Type              string     `json:"type"`
+	Target            string     `json:"target"`
+	Timeout           int        `json:"timeout"`
+	Method            string     `json:"method,omitempty"`
+	VerifyTLS         *bool      `json:"verify_tls,omitempty"`
+	ExpectedStatusMin int        `json:"expected_status_min,omitempty"`
+	ExpectedStatusMax int        `json:"expected_status_max,omitempty"`
+	MaxRedirects      int        `json:"max_redirects,omitempty"`
+	PingCount         int        `json:"ping_count,omitempty"`
+	Headers           []KeyValue `json:"headers,omitempty"`         // 自定义请求头（Host 经特殊处理）
+	Body              string     `json:"body,omitempty"`            // 仅 POST/PUT/PATCH 发送
+	AssertContains    string     `json:"assert_contains,omitempty"` // 响应体关键字断言，空 = 不启用
 }
 
 // ServiceCheckResult 服务探测结果（agent → server）。新增字段可被旧 server 安全忽略。

@@ -289,6 +289,10 @@ type Service struct {
 	MaxRedirects      int    `gorm:"default:3" json:"max_redirects"`
 	PingCount         int    `gorm:"default:4" json:"ping_count"`
 	CertWarn          bool   `gorm:"default:true" json:"cert_warn"`
+	// 自定义请求（HTTP 专用，缺省为空 = 旧行为）。
+	RequestHeaders string `gorm:"type:text;default:''" json:"request_headers"` // JSON: [{"key","value"}]
+	RequestBody    string `gorm:"type:text;default:''" json:"request_body"`    // 仅 POST/PUT/PATCH 发送
+	AssertContains string `gorm:"type:text;default:''" json:"assert_contains"` // 响应体关键字断言，空 = 不启用
 	// 故障/恢复通知及任务分别接线，避免恢复误执行故障任务。
 	Notify                bool      `gorm:"default:false" json:"notify"`
 	NotifyWebhookID       int64     `json:"notify_webhook_id"` // 单渠道（兼容）
@@ -302,26 +306,35 @@ type Service struct {
 }
 
 // ServiceHistory 探测历史（分钟级聚合，保留 30 天）。
+// 延迟分位数（P50/P95/P99/标准差/抖动）为哨兵内存滑动窗口的快照：
+// 窗口保存每服务最近 DelayWindowSize 次成功探测的延迟（跨分钟），
+// 分钟桶落库时写入当前窗口值；DelaySamples < DelayMinSamples（30）时无意义，API 输出 null。
 type ServiceHistory struct {
-	ID         int64   `gorm:"primaryKey" json:"-"`
-	ServiceID  int64   `gorm:"index:idx_svc_hist" json:"service_id"`
-	Ts         int64   `gorm:"index:idx_svc_hist" json:"ts"`
-	UpCount    int     `json:"up_count"`
-	Total      int     `json:"total"`
-	DelaySum   int64   `json:"delay_sum"`
-	DelayMin   int     `json:"delay_min"`
-	DelayMax   int     `json:"delay_max"`
-	Sent       int     `json:"sent"`
-	Received   int     `json:"received"`
-	StatusCode int     `json:"status_code"`
-	DNSMs      int     `json:"dns_ms"`
-	ConnectMs  int     `json:"connect_ms"`
-	TLSMs      int     `json:"tls_ms"`
-	TTFBMs     int     `json:"ttfb_ms"`
-	CertDays   *int    `json:"cert_days"`
-	CertIssuer string  `gorm:"size:512;default:''" json:"cert_issuer"`
-	CertExpiry int64   `json:"cert_expiry"`
-	LossSum    float64 `json:"loss_sum"`
+	ID            int64   `gorm:"primaryKey" json:"-"`
+	ServiceID     int64   `gorm:"index:idx_svc_hist" json:"service_id"`
+	Ts            int64   `gorm:"index:idx_svc_hist" json:"ts"`
+	UpCount       int     `json:"up_count"`
+	Total         int     `json:"total"`
+	DelaySum      int64   `json:"delay_sum"`
+	DelayMin      int     `json:"delay_min"`
+	DelayMax      int     `json:"delay_max"`
+	DelayP50      int     `json:"delay_p50"`
+	DelayP95      int     `json:"delay_p95"`
+	DelayP99      int     `json:"delay_p99"`
+	DelayStdDevMs int     `gorm:"column:delay_stddev_ms" json:"delay_stddev_ms"`
+	DelayJitterMs int     `json:"delay_jitter_ms"`
+	DelaySamples  int     `json:"delay_samples"` // 窗口快照时的样本数
+	Sent          int     `json:"sent"`
+	Received      int     `json:"received"`
+	StatusCode    int     `json:"status_code"`
+	DNSMs         int     `json:"dns_ms"`
+	ConnectMs     int     `json:"connect_ms"`
+	TLSMs         int     `json:"tls_ms"`
+	TTFBMs        int     `json:"ttfb_ms"`
+	CertDays      *int    `json:"cert_days"`
+	CertIssuer    string  `gorm:"size:512;default:''" json:"cert_issuer"`
+	CertExpiry    int64   `json:"cert_expiry"`
+	LossSum       float64 `json:"loss_sum"`
 }
 
 // DDNSProfile 动态解析配置。RecordType: A / AAAA / dual。

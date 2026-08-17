@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { useI18n, type TKey } from "../lib/i18n";
 
 // 全局设置：站点、终端外观与后台数据保留策略。
-const fieldMeta: { key: string; label: TKey; type: "text" | "number" | "select" | "textarea"; defaultValue?: string; min?: number; max?: number; section?: TKey; help?: TKey; options?: { v: string; label: TKey }[] }[] = [
+const fieldMeta: { key: string; label: TKey; type: "text" | "number" | "select" | "textarea"; defaultValue?: string; min?: number; max?: number; section?: TKey; note?: TKey; help?: TKey; options?: { v: string; label: TKey }[] }[] = [
   { key: "site_name", label: "settings.siteName", type: "text" },
   { key: "site_desc", label: "settings.siteDesc", type: "text" },
   { key: "favicon", label: "settings.favicon", type: "text" },
@@ -24,6 +24,10 @@ const fieldMeta: { key: string; label: TKey; type: "text" | "number" | "select" 
   { key: "retention_task_run_days", label: "settings.retentionTaskRun", type: "number", defaultValue: "30", min: 1, max: 3650, section: "settings.retentionSection" },
   { key: "retention_audit_days", label: "settings.retentionAudit", type: "number", defaultValue: "365", min: 1, max: 3650, section: "settings.retentionSection", help: "settings.retentionAuditHelp" },
   { key: "retention_audit_max_rows", label: "settings.retentionAuditRows", type: "number", defaultValue: "5000", min: 100, max: 1000000, section: "settings.retentionSection", help: "settings.retentionAuditRowsHelp" },
+  // Agent 自动更新（对标 Nezha：agent 随机 30-90 分钟自查，发现新版本自动升级）
+  { key: "upgrade_latest_version", label: "settings.upgradeVersion", type: "text", section: "settings.upgradeSection", note: "settings.upgradeNote" },
+  { key: "upgrade_latest_url", label: "settings.upgradeUrl", type: "text", section: "settings.upgradeSection" },
+  { key: "upgrade_latest_sha256", label: "settings.upgradeSha256", type: "text", section: "settings.upgradeSection" },
 ];
 
 export default function Settings() {
@@ -64,7 +68,7 @@ export default function Settings() {
               {f.section && f.section !== fieldMeta[index - 1]?.section && (
                 <div className="border-t border-border pt-4">
                   <h2 className="text-base font-semibold">{t(f.section)}</h2>
-                  <p className="mt-1 text-xs text-muted">{t("settings.retentionNote")}</p>
+                  <p className="mt-1 text-xs text-muted">{t(f.note ?? "settings.retentionNote")}</p>
                 </div>
               )}
             <label className="block">

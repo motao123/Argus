@@ -299,6 +299,8 @@ export interface TaskRun {
   results?: TaskRunResult[];
 }
 
+export type HTTPMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+
 export interface ServiceItem {
   id: number;
   owner_id: number;
@@ -312,13 +314,16 @@ export interface ServiceItem {
   notify: boolean;
   notify_webhook_id: number;
   notification_group_id: number;
-  http_method: "GET" | "HEAD";
+  http_method: HTTPMethod;
   verify_tls: boolean | null;
   timeout: number;
   expected_status_min: number;
   expected_status_max: number;
   ping_count: number;
   cert_warn: boolean;
+  request_headers: string;
+  request_body: string;
+  assert_contains: string;
   failure_trigger_cron_id: number;
   recovery_trigger_cron_id: number;
   last_up: boolean | null;
@@ -329,6 +334,11 @@ export interface ServiceItem {
   min_delay: number | null;
   avg_delay: number | null;
   max_delay: number | null;
+  delay_p50: number | null;
+  delay_p95: number | null;
+  delay_p99: number | null;
+  delay_stddev_ms: number | null;
+  delay_jitter_ms: number | null;
   loss_rate: number | null;
   status_code: number | null;
   cert_days: number | null;

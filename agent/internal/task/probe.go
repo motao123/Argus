@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/motao123/Argus/protocol"
 )
+
+// maxProbeBodyBytes 断言读取的响应体上限（超出部分截断，不参与关键字匹配）。
+const maxProbeBodyBytes = 1 << 20
 
 // probeService executes one bounded service probe.
 func probeService(p protocol.ServiceCheckParams) *protocol.ServiceCheckResult {
@@ -43,7 +47,7 @@ func probeHTTP(ctx context.Context, p protocol.ServiceCheckParams) *protocol.Ser
 	if method == "" {
 		method = http.MethodGet
 	}
-	if method != http.MethodGet && method != http.MethodHead {
+	if !protocol.IsAllowedHTTPMethod(method) {
 		return &protocol.ServiceCheckResult{Error: "unsupported HTTP method: " + method}
 	}
 	verifyTLS := p.VerifyTLS == nil || *p.VerifyTLS
@@ -62,6 +66,13 @@ func probeHTTP(ctx context.Context, p protocol.ServiceCheckParams) *protocol.Ser
 			}
 			return nil
 		},
+	}
+
+	// Body 仅 POST/PUT/PATCH 发送；GET/HEAD 携带 body 时忽略（语义明确：无请求体）。
+	sendBody := (method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch) && p.Body != ""
+	var bodyReader io.Reader
+	if sendBody {
+		bodyReader = strings.NewReader(p.Body)
 	}
 
 	started := time.Now()
@@ -87,11 +98,12 @@ func probeHTTP(ctx context.Context, p protocol.ServiceCheckParams) *protocol.Ser
 		},
 		GotFirstResponseByte: func() { result.TTFBMs = durationMS(time.Since(started)) },
 	}
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), method, target, nil)
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), method, target, bodyReader)
 	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
+	applyRequestHeaders(req, p.Headers, sendBody)
 	resp, err := client.Do(req)
 	result.DelayMs = durationMS(time.Since(started))
 	if err != nil {
@@ -116,8 +128,48 @@ func probeHTTP(ctx context.Context, p protocol.ServiceCheckParams) *protocol.Ser
 	result.Up = resp.StatusCode >= minStatus && resp.StatusCode <= maxStatus
 	if !result.Up {
 		result.Error = fmt.Sprintf("HTTP %d outside expected range %d-%d", resp.StatusCode, minStatus, maxStatus)
+		return result
+	}
+	// 关键字断言：仅在状态码符合范围后读取响应体（上限内），不命中则判 down。
+	if p.AssertContains != "" {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxProbeBodyBytes+1))
+		if readErr != nil {
+			result.Up = false
+			result.Error = "failed to read response body: " + readErr.Error()
+			return result
+		}
+		if !strings.Contains(string(body), p.AssertContains) {
+			result.Up = false
+			result.Error = fmt.Sprintf("response body does not contain expected keyword %q", p.AssertContains)
+			return result
+		}
 	}
 	return result
+}
+
+// applyRequestHeaders 应用自定义请求头。
+// Host 通过 req.Host 设置（Go 中 Header 的 Host 不生效）；Content-Length 由客户端按 body 计算，忽略用户指定值避免冲突。
+// 发送 body 时默认 Content-Type: text/plain，可被自定义 Headers 覆盖。
+func applyRequestHeaders(req *http.Request, headers []protocol.KeyValue, hasBody bool) {
+	for _, h := range headers {
+		key := strings.TrimSpace(h.Key)
+		if key == "" {
+			continue
+		}
+		switch strings.ToLower(key) {
+		case "host":
+			req.Host = h.Value
+		case "content-length":
+			// 忽略：Content-Length 由 http.Client 依据实际 body 计算
+		default:
+			req.Header.Set(key, h.Value)
+		}
+	}
+	if hasBody {
+		if req.Header.Get("Content-Type") == "" {
+			req.Header.Set("Content-Type", "text/plain")
+		}
+	}
 }
 
 func probeTCP(ctx context.Context, target string) *protocol.ServiceCheckResult {

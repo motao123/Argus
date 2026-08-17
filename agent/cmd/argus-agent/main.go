@@ -30,6 +30,8 @@ func main() {
 		secret    = flag.String("k", "", "注册密钥（服务器密钥或用户 Agent 密钥；必填，不再支持空密钥首次注册）")
 		interval  = flag.Duration("i", 2*time.Second, "上报间隔")
 		configDir = flag.String("c", ".", "配置目录（用于保存注册密钥）")
+		// disableAutoUpdate 命令行开关：优先于配置文件，禁用自动更新检查。
+		disableAutoUpdate = flag.Bool("disable-auto-update", false, "禁用自动更新检查（默认启用，周期随机 30-90 分钟）")
 	)
 	flag.Parse()
 
@@ -38,7 +40,8 @@ func main() {
 
 	cfgFile := filepath.Join(*configDir, "argus-agent.json")
 	task.ApplyConfigPath = cfgFile
-	// 读取已下发的配置（重启生效）
+	// 读取已下发的配置（重启生效）；自动更新默认启用
+	autoUpdate := true
 	if data, err := os.ReadFile(cfgFile); err == nil {
 		var applied map[string]any
 		if json.Unmarshal(data, &applied) == nil {
@@ -48,7 +51,13 @@ func main() {
 			if iv, ok := applied["interval"].(float64); ok && iv > 0 {
 				*interval = time.Duration(iv) * time.Second
 			}
+			if au, ok := applied["auto_update"].(bool); ok {
+				autoUpdate = au
+			}
 		}
+	}
+	if *disableAutoUpdate {
+		autoUpdate = false
 	}
 	if *secret == "" {
 		if s, err := loadSecret(cfgFile); err == nil && s != "" {
@@ -86,7 +95,7 @@ func main() {
 			}
 		}
 		log.Printf("connecting to %s ...", *serverURL)
-		if err := run(ctx, *serverURL, *secret, *interval, col, cfgFile, caps); err != nil {
+		if err := run(ctx, *serverURL, *secret, *interval, col, cfgFile, caps, autoUpdate); err != nil {
 			log.Printf("connection error: %v, retrying in 5s", err)
 		}
 		select {
@@ -97,7 +106,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, serverURL, secret string, interval time.Duration, col *collector.Collector, cfgFile string, caps protocol.Capabilities) error {
+func run(ctx context.Context, serverURL, secret string, interval time.Duration, col *collector.Collector, cfgFile string, caps protocol.Capabilities, autoUpdate bool) error {
 	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
 	if err != nil {
 		return err
@@ -139,6 +148,15 @@ func run(ctx context.Context, serverURL, secret string, interval time.Duration, 
 		log.Printf("registered as server #%d", reg.ServerID)
 	} else {
 		log.Printf("authenticated as server #%d", reg.ServerID)
+	}
+
+	// 自动更新检查：随机 30-90 分钟向服务端请求最新版本，发现新版本走升级流程；
+	// 失败只记日志进入下一周期，不中断上报。每次重连（run 重新进入）都会重置周期。
+	// 检查循环绑定连接生命周期：run 返回（断线/退出）即取消，避免重连时泄漏旧循环。
+	upCtx, upCancel := context.WithCancel(ctx)
+	defer upCancel()
+	if autoUpdate {
+		go task.NewAutoUpdater(peer, version).Run(upCtx)
 	}
 
 	// 上报循环

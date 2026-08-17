@@ -1,13 +1,18 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/sentinel"
 )
 
 // serviceView 服务监控视图：配置 + 最近状态 + 今日可用率。
@@ -21,6 +26,11 @@ type serviceView struct {
 	MinDelay     *int     `json:"min_delay"`
 	AvgDelay     *int     `json:"avg_delay"`
 	MaxDelay     *int     `json:"max_delay"`
+	DelayP50     *int     `json:"delay_p50"` // 滑动窗口分位数（窗口样本 < 30 时为 null）
+	DelayP95     *int     `json:"delay_p95"`
+	DelayP99     *int     `json:"delay_p99"`
+	DelayStdDev  *int     `json:"delay_stddev_ms"`
+	DelayJitter  *int     `json:"delay_jitter_ms"`
 	LossRate     *float64 `json:"loss_rate"`
 	StatusCode   *int     `json:"status_code"`
 	CertDays     *int     `json:"cert_days"`
@@ -105,6 +115,9 @@ func (s *Server) listServices(c *gin.Context) {
 			}
 			v.LossRate = &loss
 		}
+		// 滑动窗口分位数：取最近 24h 内最新一个样本充足（≥ 30）的分钟桶快照。
+		v.DelayP50, v.DelayP95, v.DelayP99, v.DelayStdDev, v.DelayJitter =
+			s.latestDelayQuantiles(services[i].ID, time.Now().Add(-24*time.Hour).Unix())
 		out = append(out, v)
 	}
 	okPage(c, gin.H{"services": out}, total, offset, limit)
@@ -142,6 +155,9 @@ func (s *Server) createService(c *gin.Context) {
 		ExpectedStatusMax     int    `json:"expected_status_max"`
 		MaxRedirects          int    `json:"max_redirects"`
 		PingCount             int    `json:"ping_count"`
+		RequestHeaders        string `json:"request_headers"` // JSON: [{"key","value"}]
+		RequestBody           string `json:"request_body"`
+		AssertContains        string `json:"assert_contains"`
 		CertWarn              bool   `json:"cert_warn"`
 		Hidden                bool   `json:"hidden"`
 		FailureTriggerCronID  int64  `json:"failure_trigger_cron_id"`
@@ -167,8 +183,21 @@ func (s *Server) createService(c *gin.Context) {
 	if req.HTTPMethod == "" {
 		req.HTTPMethod = "GET"
 	}
-	if req.HTTPMethod != "GET" && req.HTTPMethod != "HEAD" {
-		fail(c, http.StatusBadRequest, "http_method must be GET or HEAD")
+	if !protocol.IsAllowedHTTPMethod(req.HTTPMethod) {
+		fail(c, http.StatusBadRequest, "http_method must be one of "+strings.Join(protocol.AllowedHTTPMethods, "/"))
+		return
+	}
+	headers, err := normalizeRequestHeaders(req.RequestHeaders)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateHTTPBody(req.HTTPMethod, req.RequestBody); err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.AssertContains) > 1024 {
+		fail(c, http.StatusBadRequest, "assert_contains too long")
 		return
 	}
 	if req.Timeout <= 0 {
@@ -220,6 +249,9 @@ func (s *Server) createService(c *gin.Context) {
 		ExpectedStatusMin:     req.ExpectedStatusMin,
 		ExpectedStatusMax:     req.ExpectedStatusMax,
 		PingCount:             req.PingCount,
+		RequestHeaders:        headers,
+		RequestBody:           req.RequestBody,
+		AssertContains:        req.AssertContains,
 		CertWarn:              req.CertWarn,
 		FailureTriggerCronID:  req.FailureTriggerCronID,
 		RecoveryTriggerCronID: req.RecoveryTriggerCronID,
@@ -255,6 +287,9 @@ func (s *Server) updateService(c *gin.Context) {
 		ExpectedStatusMax     *int    `json:"expected_status_max"`
 		MaxRedirects          *int    `json:"max_redirects"`
 		PingCount             *int    `json:"ping_count"`
+		RequestHeaders        *string `json:"request_headers"`
+		RequestBody           *string `json:"request_body"`
+		AssertContains        *string `json:"assert_contains"`
 		Enabled               *bool   `json:"enabled"`
 		Hidden                *bool   `json:"hidden"`
 		Notify                *bool   `json:"notify"`
@@ -294,8 +329,8 @@ func (s *Server) updateService(c *gin.Context) {
 		updates["timeout"] = *req.Timeout
 	}
 	if req.HTTPMethod != nil {
-		if *req.HTTPMethod != "GET" && *req.HTTPMethod != "HEAD" {
-			fail(c, http.StatusBadRequest, "http_method must be GET or HEAD")
+		if !protocol.IsAllowedHTTPMethod(*req.HTTPMethod) {
+			fail(c, http.StatusBadRequest, "http_method must be one of "+strings.Join(protocol.AllowedHTTPMethods, "/"))
 			return
 		}
 		updates["http_method"] = *req.HTTPMethod
@@ -370,6 +405,33 @@ func (s *Server) updateService(c *gin.Context) {
 	if req.PingCount != nil && (*req.PingCount < 1 || *req.PingCount > 10) {
 		fail(c, http.StatusBadRequest, "ping_count must be 1-10")
 		return
+	}
+	// 自定义请求参数（HTTP 专用）：方法与 body 的搭配、请求头 JSON、断言关键字长度。
+	method := svc.HTTPMethod
+	if req.HTTPMethod != nil {
+		method = *req.HTTPMethod
+	}
+	if req.RequestBody != nil {
+		if err := validateHTTPBody(method, *req.RequestBody); err != nil {
+			fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["request_body"] = *req.RequestBody
+	}
+	if req.RequestHeaders != nil {
+		headers, err := normalizeRequestHeaders(*req.RequestHeaders)
+		if err != nil {
+			fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["request_headers"] = headers
+	}
+	if req.AssertContains != nil {
+		if len(*req.AssertContains) > 1024 {
+			fail(c, http.StatusBadRequest, "assert_contains too long")
+			return
+		}
+		updates["assert_contains"] = *req.AssertContains
 	}
 	if err := s.DB.Model(&svc).Updates(updates).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
@@ -514,13 +576,70 @@ func (s *Server) serviceStats(c *gin.Context) {
 	if agg.Sent > 0 {
 		lossRate = float64(agg.Sent-agg.Received) / float64(agg.Sent) * 100
 	}
+	// 滑动窗口分位数：最近 24h 内最新一个样本充足（≥ 30）的分钟桶快照；缺样本为 null。
+	p50, p95, p99, stddev, jitter := s.latestDelayQuantiles(id, from)
 	ok(c, gin.H{
 		"up_rate":   round2(upRate),
 		"loss_rate": round2(lossRate),
 		"min_delay": int(agg.MinDelay), "avg_delay": avgDelay, "max_delay": int(agg.MaxDelay),
+		"delay_p50": p50, "delay_p95": p95, "delay_p99": p99,
+		"delay_stddev_ms": stddev, "delay_jitter_ms": jitter,
 		"total_probes": agg.Total, "sent": agg.Sent, "received": agg.Received,
 		"failures": agg.Sent - agg.Received, "cert_days_min": agg.CertDaysMin,
 	})
+}
+
+// latestDelayQuantiles 读取服务在 [from, now] 内最新一个样本充足
+// （滑动窗口样本数 ≥ sentinel.DelayMinSamples）的分钟桶分位数快照；
+// 无满足条件的桶时返回全 nil（API 输出 null）。
+func (s *Server) latestDelayQuantiles(serviceID int64, from int64) (p50, p95, p99, stddev, jitter *int) {
+	var row model.ServiceHistory
+	if err := s.DB.Model(&model.ServiceHistory{}).
+		Where("service_id = ? AND delay_samples >= ? AND ts >= ?", serviceID, sentinel.DelayMinSamples, from).
+		Order("ts DESC, id DESC").First(&row).Error; err != nil {
+		return nil, nil, nil, nil, nil
+	}
+	return &row.DelayP50, &row.DelayP95, &row.DelayP99, &row.DelayStdDevMs, &row.DelayJitterMs
+}
+
+// normalizeRequestHeaders 校验并规范化请求头 JSON（[{"key","value"}]）。
+// 空串/空数组返回 ""；key 为空、或 JSON 非法时返回错误。
+func normalizeRequestHeaders(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" || raw == "null" {
+		return "", nil
+	}
+	var headers []protocol.KeyValue
+	if err := json.Unmarshal([]byte(raw), &headers); err != nil {
+		return "", fmt.Errorf("request_headers must be a JSON array of {\"key\",\"value\"} objects")
+	}
+	out := make([]protocol.KeyValue, 0, len(headers))
+	for _, h := range headers {
+		if strings.TrimSpace(h.Key) == "" {
+			return "", fmt.Errorf("request_headers contains an empty header key")
+		}
+		out = append(out, protocol.KeyValue{Key: strings.TrimSpace(h.Key), Value: h.Value})
+	}
+	if len(out) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("invalid request_headers")
+	}
+	return string(b), nil
+}
+
+// validateHTTPBody 校验方法与请求体的搭配：仅 POST/PUT/PATCH 允许携带 body。
+func validateHTTPBody(method, body string) error {
+	method = strings.ToUpper(strings.TrimSpace(method))
+	if body == "" {
+		return nil
+	}
+	if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
+		return fmt.Errorf("request_body only allowed for POST/PUT/PATCH methods")
+	}
+	return nil
 }
 
 // canManage 检查当前身份能否管理 owner 的资源。
