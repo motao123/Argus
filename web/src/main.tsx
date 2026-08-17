@@ -22,6 +22,7 @@ import Access from "./pages/Access";
 import Sessions from "./pages/Sessions";
 import Settings from "./pages/Settings";
 import Network from "./pages/Network";
+import NetworkTest from "./pages/NetworkTest";
 import Security from "./pages/Security";
 import Waf from "./pages/Waf";
 import Maintenance from "./pages/Maintenance";
@@ -99,6 +100,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/admin/access" element={<RequireRole roles={["admin"]}><Access /></RequireRole>} />
             <Route path="/admin/sessions" element={<Sessions />} />
             <Route path="/admin/network" element={<RequireRole roles={["admin", "user"]}><Network /></RequireRole>} />
+            <Route path="/admin/network-test" element={<RequireRole roles={["admin", "user"]}><NetworkTest /></RequireRole>} />
             <Route path="/admin/security" element={<Security />} />
             <Route path="/admin/waf" element={<RequireRole roles={["admin"]}><Waf /></RequireRole>} />
             <Route path="/admin/maintenance" element={<RequireRole roles={["admin"]}><Maintenance /></RequireRole>} />

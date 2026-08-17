@@ -22,6 +22,7 @@ const (
 	CapabilityFiles    = "files"
 	CapabilityUpgrade  = "upgrade"
 	CapabilityNAT      = "nat"
+	CapabilityTrace    = "trace" // 路由追踪 + 带宽测速
 )
 
 // ---- JSON-RPC 2.0 信封 ----
@@ -87,6 +88,11 @@ const (
 	MethodNATClose     = "agent.nat.close"
 	MethodApplyConfig  = "agent.apply_config"
 	MethodUpgrade      = "agent.upgrade"
+
+	// 网络测试（借鉴 komari networkTest，能力开关为 CapabilityTrace）
+	MethodTrace          = "agent.trace"
+	MethodBandwidthServe = "agent.bandwidth.serve"
+	MethodBandwidthProbe = "agent.bandwidth.probe"
 )
 
 // AgentConfig 服务端下发的 Agent 运行配置（借鉴 nezha ApplyConfig）。
@@ -111,11 +117,12 @@ type Capabilities struct {
 	Files    bool `json:"files"`
 	Upgrade  bool `json:"upgrade"`
 	NAT      bool `json:"nat"`
+	Trace    bool `json:"trace"`
 }
 
 // CapabilityNames 返回全部受支持的能力名（与 Capabilities 字段一一对应）。
 func CapabilityNames() []string {
-	return []string{CapabilityMetrics, CapabilityProbe, CapabilityCommand, CapabilityTerminal, CapabilityFiles, CapabilityUpgrade, CapabilityNAT}
+	return []string{CapabilityMetrics, CapabilityProbe, CapabilityCommand, CapabilityTerminal, CapabilityFiles, CapabilityUpgrade, CapabilityNAT, CapabilityTrace}
 }
 
 // ValidCapability 报告 name 是否为受支持的能力名。
@@ -129,7 +136,7 @@ func ValidCapability(name string) bool {
 }
 
 // ParseCapabilities 校验并规范化能力配置：仅接受已知能力名（未知名报错），
-// 未提供的字段按禁用处理，保证返回的结构体七个字段全部显式设置。
+// 未提供的字段按禁用处理，保证返回的结构体八个字段全部显式设置。
 // raw 为空或 null 时返回 nil（表示"不修改"，兼容旧客户端）。
 func ParseCapabilities(raw json.RawMessage) (*Capabilities, error) {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -156,6 +163,8 @@ func ParseCapabilities(raw json.RawMessage) (*Capabilities, error) {
 			caps.Upgrade = enabled
 		case CapabilityNAT:
 			caps.NAT = enabled
+		case CapabilityTrace:
+			caps.Trace = enabled
 		default:
 			return nil, fmt.Errorf("unknown capability %q", name)
 		}
@@ -493,4 +502,64 @@ type FsDeleteParams struct {
 // FsDeleteResult 删除结果。
 type FsDeleteResult struct {
 	Error string `json:"error,omitempty"`
+}
+
+// ---- 网络测试（路由追踪 / 带宽测速）----
+
+// TraceProtocol 路由追踪协议：icmp（默认）/ tcp / udp。
+type TraceProtocol string
+
+const (
+	TraceICMP TraceProtocol = "icmp"
+	TraceTCP  TraceProtocol = "tcp"
+	TraceUDP  TraceProtocol = "udp"
+)
+
+// TraceParams 路由追踪参数（server → agent）。
+type TraceParams struct {
+	Target    string        `json:"target"`
+	Protocol  TraceProtocol `json:"protocol,omitempty"` // icmp/tcp/udp；空 = icmp
+	MaxHops   int           `json:"max_hops,omitempty"` // 默认 30
+	TimeoutSec int          `json:"timeout_sec,omitempty"` // 单跳探测超时；默认 3
+}
+
+// TraceHop 一跳的结果。
+type TraceHop struct {
+	Hop     int     `json:"hop"`
+	IP      string  `json:"ip"`
+	RTTMs   float64 `json:"rtt_ms"` // 平均往返毫秒；0 = 无响应
+	Loss    float64 `json:"loss"`   // 丢包率 0-100；0 = 未知
+	Reached bool    `json:"reached"` // 目标节点
+}
+
+// TraceResult 路由追踪结果（agent → server）。
+type TraceResult struct {
+	OK       bool       `json:"ok"`
+	Error    string     `json:"error,omitempty"`
+	Hops     []TraceHop `json:"hops,omitempty"`
+	RawText  string     `json:"raw_text,omitempty"` // 原始输出（截断后）
+	ExitCode int        `json:"exit_code,omitempty"`
+	Truncated bool      `json:"truncated,omitempty"`
+}
+
+// BandwidthParams 带宽测速参数。
+// Serve 模式：Agent 监听随机 TCP 端口等待连接，返回实际端口。
+// Probe 模式：Agent 作为客户端向目标 host:port 持续发送 N 秒数据，返回吞吐。
+type BandwidthParams struct {
+	// Serve
+	ListenAddr string `json:"listen_addr,omitempty"` // 监听地址（如 127.0.0.1:0）；空 = 0.0.0.0:0
+	// Probe
+	Target   string `json:"target,omitempty"` // host:port
+	Duration int    `json:"duration,omitempty"` // 测速秒数；默认 5，上限 60
+	Parallel int    `json:"parallel,omitempty"` // 并发连接数；默认 1，上限 8
+}
+
+// BandwidthResult 带宽测速结果（agent → server）。
+type BandwidthResult struct {
+	OK          bool   `json:"ok"`
+	Error       string `json:"error,omitempty"`
+	Port        int    `json:"port,omitempty"`         // Serve 模式：监听端口
+	BitsPerSec  float64 `json:"bits_per_sec,omitempty"` // Probe 模式：吞吐（bit/s）
+	BytesSent   uint64 `json:"bytes_sent,omitempty"`
+	DurationMs  int64  `json:"duration_ms,omitempty"`
 }

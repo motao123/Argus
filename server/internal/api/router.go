@@ -113,8 +113,13 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/servers/:id/exec", requireScope(ScopeServerExec), s.serverExec)
 			authed.GET("/servers/:id/install-command", requireScope(ScopeServerRead), s.serverInstallCommand)
 
-			// 多节点指标对比（admin/owner 逐 id 校验，最多 10 台）
-			authed.GET("/metrics/compare", s.compareMetrics)
+				// 多节点指标对比（admin/owner 逐 id 校验，最多 10 台）
+				authed.GET("/metrics/compare", s.compareMetrics)
+
+				// 网络测试：路由追踪 / 带宽测速（借用 server exec scope + owner 校验）
+				authed.POST("/servers/:id/trace", requireScope(ScopeServerExec), s.serverTrace)
+				authed.POST("/network-test/trace-mesh", requireScope(ScopeServerExec), s.traceMesh)
+				authed.POST("/network-test/bandwidth", requireScope(ScopeServerExec), s.bandwidthTest)
 
 			// 资源排行 TOP N（admin 全量 / owner 自有，实时快照取数；PAT 需 server:read scope）
 			authed.GET("/admin/top", requireScope(ScopeServerRead), s.serverTop)

@@ -369,6 +369,40 @@ export interface ServiceHistoryPoint {
   delay: number;
 }
 
+// 网络测试结果类型
+export interface TraceHop {
+  hop: number;
+  ip: string;
+  rtt_ms: number;
+  loss: number;
+  reached: boolean;
+}
+
+export interface TraceResult {
+  ok: boolean;
+  error?: string;
+  hops: TraceHop[];
+  raw_text?: string;
+  exit_code?: number;
+  truncated?: boolean;
+}
+
+export interface TraceMeshItem {
+  source_id: number;
+  source_name: string;
+  target: string;
+  trace: TraceResult;
+}
+
+export interface BandwidthResult {
+  ok: boolean;
+  error?: string;
+  port?: number;
+  bits_per_sec?: number;
+  bytes_sent?: number;
+  duration_ms?: number;
+}
+
 export interface FsEntry {
   name: string;
   path: string;
@@ -856,6 +890,23 @@ export const api = {
   top: (metric: TopMetric, limit = 10) =>
     request<{ metric: TopMetric; limit: number; servers: TopServerEntry[] }>(
       `/api/v1/admin/top?metric=${metric}&limit=${limit}`,
+    ),
+
+  // 网络测试：路由追踪 / 多源追踪 / 带宽测速
+  trace: (id: number, target: string, opts: { protocol?: string; max_hops?: number; timeout_sec?: number } = {}) =>
+    request<{ trace: TraceResult; server_id: number; server_name: string; target: string }>(`/api/v1/servers/${id}/trace`, {
+      method: "POST",
+      body: JSON.stringify({ target, ...opts }),
+    }),
+  traceMesh: (body: { source_ids: number[]; targets: string[]; mode?: string; protocol?: string; max_hops?: number }) =>
+    request<{ results: TraceMeshItem[]; mode: string }>("/api/v1/network-test/trace-mesh", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  bandwidthTest: (body: { source_id: number; target: string; duration?: number; parallel?: number }) =>
+    request<{ result: BandwidthResult; source_id: number; source_name: string; target: string }>(
+      "/api/v1/network-test/bandwidth",
+      { method: "POST", body: JSON.stringify(body) },
     ),
 
   alerts: () => request<{ alerts: Alert[] }>("/api/v1/alerts"),

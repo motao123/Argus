@@ -2,6 +2,7 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
@@ -38,7 +39,7 @@ func NewHandler(conn *websocket.Conn) *Handler {
 }
 
 func DefaultCapabilities() protocol.Capabilities {
-	return protocol.Capabilities{Metrics: true, Probe: true, Command: true, Terminal: true, Files: true, Upgrade: true, NAT: true}
+	return protocol.Capabilities{Metrics: true, Probe: true, Command: true, Terminal: true, Files: true, Upgrade: true, NAT: true, Trace: true}
 }
 
 func (h *Handler) SetCapabilities(c protocol.Capabilities) { h.caps = c }
@@ -132,9 +133,53 @@ func (h *Handler) Handle(method string, params json.RawMessage) (any, *protocol.
 			return disabled()
 		}
 		return h.handleUpgrade(params)
+	case protocol.MethodTrace:
+		if !h.caps.Trace {
+			return disabled()
+		}
+		return h.handleTrace(params)
+	case protocol.MethodBandwidthServe:
+		if !h.caps.Trace {
+			return disabled()
+		}
+		return h.handleBandwidthServe(params)
+	case protocol.MethodBandwidthProbe:
+		if !h.caps.Trace {
+			return disabled()
+		}
+		return h.handleBandwidthProbe(params)
 	default:
 		return nil, protocol.NewError(protocol.ErrMethod, "unknown method: "+method)
 	}
+}
+
+// ---- 网络测试 ----
+
+func (h *Handler) handleTrace(params json.RawMessage) (any, *protocol.RPCError) {
+	var p protocol.TraceParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, protocol.NewError(protocol.ErrParams, err.Error())
+	}
+	if p.Target == "" {
+		return nil, protocol.NewError(protocol.ErrParams, "target required")
+	}
+	return runTrace(context.Background(), p), nil
+}
+
+func (h *Handler) handleBandwidthServe(params json.RawMessage) (any, *protocol.RPCError) {
+	var p protocol.BandwidthParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, protocol.NewError(protocol.ErrParams, err.Error())
+	}
+	return serveBandwidth(p), nil
+}
+
+func (h *Handler) handleBandwidthProbe(params json.RawMessage) (any, *protocol.RPCError) {
+	var p protocol.BandwidthParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, protocol.NewError(protocol.ErrParams, err.Error())
+	}
+	return probeBandwidth(context.Background(), p), nil
 }
 
 // handleUpgrade 自升级：下载 → SHA-256 校验 → 备份 → 原子替换 → 重启。

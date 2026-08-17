@@ -1,4 +1,4 @@
-import { Activity, Bell, BellRing, CalendarClock, ChartLine, ClipboardList, DatabaseBackup, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Palette, Radar, ScrollText, Settings as SettingsIcon, ShieldAlert, ShieldCheck, Sun, TriangleAlert, Users, Wrench, X, Zap } from "lucide-react";
+import { Activity, Bell, BellRing, CalendarClock, ChartLine, ClipboardList, DatabaseBackup, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Palette, Radar, RadioTower, ScrollText, Settings as SettingsIcon, ShieldAlert, ShieldCheck, Sun, TriangleAlert, Users, Wrench, X, Zap } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -32,6 +32,7 @@ const navGroups: NavGroup[] = [
       { to: "/admin/crons", key: "nav.crons", icon: CalendarClock, roles: ["admin", "user"] },
       { to: "/admin/files", key: "nav.files", icon: FolderOpen, roles: ["admin", "user"] },
       { to: "/admin/network", key: "nav.network", icon: NetworkIcon, roles: ["admin", "user"] },
+      { to: "/admin/network-test", key: "nav.networkTest", icon: RadioTower, roles: ["admin", "user"] },
       { to: "/admin/clipboard", key: "nav.clipboard", icon: ClipboardList, roles: ["admin", "user"] },
       { to: "/admin/lifecycle", key: "nav.lifecycle", icon: Wrench, roles: ["admin"] },
     ],

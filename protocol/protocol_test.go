@@ -35,7 +35,7 @@ func TestReportBackwardCompatibility(t *testing.T) {
 }
 
 func TestValidCapability(t *testing.T) {
-	for _, name := range []string{CapabilityMetrics, CapabilityProbe, CapabilityCommand, CapabilityTerminal, CapabilityFiles, CapabilityUpgrade, CapabilityNAT} {
+	for _, name := range []string{CapabilityMetrics, CapabilityProbe, CapabilityCommand, CapabilityTerminal, CapabilityFiles, CapabilityUpgrade, CapabilityNAT, CapabilityTrace} {
 		if !ValidCapability(name) {
 			t.Errorf("ValidCapability(%q) = false, want true", name)
 		}
@@ -45,8 +45,8 @@ func TestValidCapability(t *testing.T) {
 			t.Errorf("ValidCapability(%q) = true, want false", name)
 		}
 	}
-	if got := len(CapabilityNames()); got != 7 {
-		t.Errorf("CapabilityNames() = %d names, want 7", got)
+	if got := len(CapabilityNames()); got != 8 {
+		t.Errorf("CapabilityNames() = %d names, want 8", got)
 	}
 }
 
