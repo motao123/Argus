@@ -12,6 +12,7 @@ import Login from "./pages/Login";
 import Overview from "./pages/Overview";
 import ServerDetail from "./pages/ServerDetail";
 import Servers from "./pages/Servers";
+import Compare from "./pages/Compare";
 import Clipboard from "./pages/Clipboard";
 import Alerts from "./pages/Alerts";
 import Crons from "./pages/Crons";
@@ -89,6 +90,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />
             <Route path="/admin/overview" element={<Overview />} />
             <Route path="/admin/servers" element={<Servers />} />
+            <Route path="/admin/compare" element={<RequireRole roles={["admin", "user"]}><Compare /></RequireRole>} />
             <Route path="/admin/clipboard" element={<RequireRole roles={["admin", "user"]}><Clipboard /></RequireRole>} />
             <Route path="/admin/alerts" element={<RequireRole roles={["admin", "user"]}><Alerts /></RequireRole>} />
             <Route path="/admin/crons" element={<RequireRole roles={["admin", "user"]}><Crons /></RequireRole>} />

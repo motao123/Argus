@@ -132,7 +132,26 @@ type Alert struct {
 	AckedBy     string     `gorm:"size:32;default:''" json:"acked_by"`
 	SilenceFrom *time.Time `json:"silence_from"` // 静默开始（nil = 从现在起）
 	SilenceTo   *time.Time `json:"silence_to"`   // 静默结束；静默期间不发送通知
-	CreatedAt   time.Time  `json:"created_at"`
+	// 重复提醒：RepeatMinutes > 0 表示告警持续期间每 N 分钟重发一次通知（event=repeat）；0 = 不重复。
+	RepeatMinutes int `json:"repeat_minutes"`
+	// 升级：EscalateToChannelID > 0 且告警持续超过 EscalateAfterMinutes 分钟后，
+	// 首次发送 event=escalated 并切换渠道，此后重复通知（event=repeat）改发该渠道；
+	// 需校验渠道存在且 owner 匹配。EscalateToChannelID = 0 表示不升级；
+	// EscalateAfterMinutes = 0 表示触发后立即升级。
+	EscalateToChannelID  int64     `json:"escalate_to_channel_id"`
+	EscalateAfterMinutes int       `json:"escalate_after_minutes"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
+// AlertState 告警持续状态（报警引擎持久化，重启后恢复重复提醒/升级进度）。
+// 一条规则 × 一台服务器一行；告警恢复后由引擎清除。
+type AlertState struct {
+	AlertID      int64      `gorm:"primaryKey" json:"alert_id"`
+	ServerID     int64      `gorm:"primaryKey" json:"server_id"`
+	TriggeredAt  time.Time  `json:"triggered_at"`   // 首次触发时间（升级延迟计时基准）
+	LastNotifyAt time.Time  `json:"last_notify_at"` // 上次通知时间（重复间隔基准）
+	EscalatedAt  *time.Time `json:"escalated_at"`   // 升级时间（nil = 未升级）
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // Notification 通知渠道（借鉴 komari 多渠道设计 + nezha 模板）。
@@ -140,17 +159,22 @@ type Alert struct {
 // dingtalk / wecom / feishu / slack / wxpusher / matrix
 // 预设渠道（dingtalk/wecom/feishu/slack/wxpusher/matrix）的专属配置存于 Extra（JSON）。
 type Notification struct {
-	ID        int64     `gorm:"primaryKey" json:"id"`
-	OwnerID   int64     `gorm:"index;default:0" json:"owner_id"`
-	Name      string    `gorm:"size:64;not null" json:"name"`
-	Type      string    `gorm:"size:16;default:'webhook'" json:"type"`
-	URL       string    `gorm:"size:512;not null" json:"url"`
-	Method    string    `gorm:"size:8;default:'POST'" json:"method"`
-	Headers   string    `gorm:"size:2048;default:'{}'" json:"headers"` // JSON 对象
-	Body      string    `gorm:"size:2048;default:'{}'" json:"body"`    // 支持 {{title}} {{content}} 模板
-	ChatID    string    `gorm:"size:64;default:''" json:"chat_id"`     // telegram/email 目标
-	Extra     string    `gorm:"type:text;default:''" json:"extra"`     // 预设渠道专属 JSON 配置（脱敏不回显）
-	CreatedAt time.Time `json:"created_at"`
+	ID      int64  `gorm:"primaryKey" json:"id"`
+	OwnerID int64  `gorm:"index;default:0" json:"owner_id"`
+	Name    string `gorm:"size:64;not null" json:"name"`
+	Type    string `gorm:"size:16;default:'webhook'" json:"type"`
+	URL     string `gorm:"size:512;not null" json:"url"`
+	Method  string `gorm:"size:8;default:'POST'" json:"method"`
+	Headers string `gorm:"size:2048;default:'{}'" json:"headers"` // JSON 对象
+	Body    string `gorm:"size:2048;default:'{}'" json:"body"`    // 支持 {{title}} {{content}} 模板
+	ChatID  string `gorm:"size:64;default:''" json:"chat_id"`     // telegram/email 目标
+	Extra   string `gorm:"type:text;default:''" json:"extra"`     // 预设渠道专属 JSON 配置（脱敏不回显）
+	// 渠道级限流（0 = 不限）。RateLimitPerMin 为每分钟补充的令牌数（持续补充），
+	// BurstLimit 为令牌桶容量（允许的瞬时突发投递数）；两者都 > 0 时限流才生效，
+	// 任一为 0 表示不限（旧渠道默认 0/0，行为不变）。
+	RateLimitPerMin int       `gorm:"default:0" json:"rate_limit_per_min"`
+	BurstLimit      int       `gorm:"default:0" json:"burst_limit"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // 通知送达状态。

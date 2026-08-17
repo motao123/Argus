@@ -37,9 +37,12 @@ type Queue struct {
 	BackoffCap time.Duration
 	// PollInterval worker 轮询间隔（默认 5s；测试可注入更小值）。
 	PollInterval time.Duration
+	// Now 时钟源（默认 time.Now；测试可注入可推进的假时钟）。
+	Now func() time.Time
 
-	stop chan struct{}
-	done chan struct{}
+	stop    chan struct{}
+	done    chan struct{}
+	limiter rateLimiter // 每渠道令牌桶（渠道限流）
 }
 
 // NewQueue 创建持久队列（自动补齐默认参数）。
@@ -52,7 +55,16 @@ func NewQueue(db *gorm.DB) *Queue {
 		PollInterval: 5 * time.Second,
 		stop:         make(chan struct{}),
 		done:         make(chan struct{}),
+		limiter:      rateLimiter{buckets: map[int64]*rateBucket{}},
 	}
+}
+
+// now 返回当前时间（可注入时钟优先）。
+func (q *Queue) now() time.Time {
+	if q == nil || q.Now == nil {
+		return time.Now()
+	}
+	return q.Now()
 }
 
 // Enqueue 创建一条送达记录并立即尝试发送（失败则进入退避重试）。
@@ -81,7 +93,7 @@ func (q *Queue) EnqueueCtx(n *model.Notification, title, content string, ownerID
 		Status:      model.DeliveryPending,
 		MaxAttempts: q.maxAttempts(),
 	}
-	now := time.Now()
+	now := q.now()
 	d.NextRetry = &now
 	if err := q.db.Create(&d).Error; err != nil {
 		return err
@@ -119,7 +131,7 @@ func (q *Queue) ProcessDue() {
 	}
 	var due []model.NotificationDelivery
 	if err := q.db.
-		Where("status = ? AND (next_retry IS NULL OR next_retry <= ?)", model.DeliveryPending, time.Now()).
+		Where("status = ? AND (next_retry IS NULL OR next_retry <= ?)", model.DeliveryPending, q.now()).
 		Order("id").Limit(20).Find(&due).Error; err != nil {
 		log.Printf("notifier: fetch due deliveries: %v", err)
 		return
@@ -129,7 +141,8 @@ func (q *Queue) ProcessDue() {
 	}
 }
 
-// sendOne 单次发送：成功 → sent；失败 → 退避重试或 failed（封顶）。
+// sendOne 单次发送：成功 → sent；限流 → 保持 pending 并排下次重试；
+// 失败 → 退避重试或 failed（封顶）。
 func (q *Queue) sendOne(d *model.NotificationDelivery) {
 	var n model.Notification
 	if err := q.db.First(&n, d.WebhookID).Error; err != nil {
@@ -140,9 +153,18 @@ func (q *Queue) sendOne(d *model.NotificationDelivery) {
 		})
 		return
 	}
+	now := q.now()
+	// 渠道级令牌桶限流：超限时不丢弃，保持 pending 并把 next_retry 排到
+	// 预计有令牌可用的时刻，由既有重试路径（Run 轮询）稍后重试。
+	if wait, ok := q.limiter.allow(n.ID, n.RateLimitPerMin, n.BurstLimit, now); !ok {
+		next := now.Add(wait + 50*time.Millisecond)
+		q.db.Model(d).Updates(map[string]any{
+			"next_retry": next, "last_error": "rate limited, will retry",
+		})
+		return
+	}
 	err := send(&n, d.Title, d.Content, notifyctx.Decode(d.ContextData))
 	attempts := d.Attempts + 1
-	now := time.Now()
 	if err == nil {
 		q.db.Model(d).Updates(map[string]any{
 			"status": model.DeliverySent, "attempts": attempts,
@@ -175,7 +197,7 @@ func (q *Queue) Retry(id int64) error {
 	if d.Status != model.DeliveryFailed {
 		return fmt.Errorf("delivery %d is not failed", id)
 	}
-	now := time.Now()
+	now := q.now()
 	if err := q.db.Model(&d).Updates(map[string]any{
 		"status": model.DeliveryPending, "attempts": 0, "next_retry": now, "last_error": "",
 	}).Error; err != nil {

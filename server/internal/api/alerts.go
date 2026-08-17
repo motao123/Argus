@@ -207,6 +207,9 @@ func (s *Server) unsilenceAlert(c *gin.Context) {
 // validateAlertTargets enforces server ownership and PAT whitelist for alert rules.
 func (s *Server) validateAlertTargets(c *gin.Context, a *model.Alert) bool {
 	p := principalFromContext(c)
+	if !s.validateEscalateChannel(c, a, p) {
+		return false
+	}
 	if p.IsAdmin {
 		return true
 	}
@@ -246,6 +249,28 @@ func (s *Server) validateAlertTargets(c *gin.Context, a *model.Alert) bool {
 				return false
 			}
 		}
+	}
+	return true
+}
+
+// validateEscalateChannel 校验升级渠道：存在且归属匹配。
+// 规则 owner 与渠道 owner 必须一致；admin 系统规则（owner=0）可使用操作者名下的渠道。
+func (s *Server) validateEscalateChannel(c *gin.Context, a *model.Alert, p *principal) bool {
+	if a.EscalateToChannelID <= 0 {
+		return true
+	}
+	var n model.Notification
+	if err := s.DB.First(&n, a.EscalateToChannelID).Error; err != nil {
+		fail(c, http.StatusBadRequest, "escalate channel not found")
+		return false
+	}
+	if a.OwnerID != 0 && n.OwnerID != a.OwnerID {
+		fail(c, http.StatusForbidden, "escalate channel access denied")
+		return false
+	}
+	if a.OwnerID == 0 && n.OwnerID != p.UserID {
+		fail(c, http.StatusForbidden, "escalate channel access denied")
+		return false
 	}
 	return true
 }
@@ -317,6 +342,11 @@ func (s *Server) createNotification(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "unsupported notification type: "+n.Type)
 		return
 	}
+	// 渠道限流字段：0 = 不限，或 >= 1（不允许负数）
+	if n.RateLimitPerMin < 0 || n.BurstLimit < 0 {
+		fail(c, http.StatusBadRequest, "rate limit must be 0 or a positive integer")
+		return
+	}
 	n.OwnerID = p.UserID
 	if err := s.DB.Create(&n).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
@@ -346,6 +376,9 @@ func (s *Server) updateNotification(c *gin.Context) {
 		ClearHeaders *bool   `json:"clear_headers"`
 		ClearBody    *bool   `json:"clear_body"`
 		ClearExtra   *bool   `json:"clear_extra"`
+		// 渠道限流：0 = 不限，或 >= 1
+		RateLimitPerMin *int `json:"rate_limit_per_min"`
+		BurstLimit      *int `json:"burst_limit"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
@@ -387,6 +420,20 @@ func (s *Server) updateNotification(c *gin.Context) {
 		updates["extra"] = ""
 	} else if req.Extra != nil && *req.Extra != "" {
 		updates["extra"] = *req.Extra
+	}
+	if req.RateLimitPerMin != nil {
+		if *req.RateLimitPerMin < 0 {
+			fail(c, http.StatusBadRequest, "rate limit must be 0 or a positive integer")
+			return
+		}
+		updates["rate_limit_per_min"] = *req.RateLimitPerMin
+	}
+	if req.BurstLimit != nil {
+		if *req.BurstLimit < 0 {
+			fail(c, http.StatusBadRequest, "rate limit must be 0 or a positive integer")
+			return
+		}
+		updates["burst_limit"] = *req.BurstLimit
 	}
 	if len(updates) > 0 {
 		if err := s.DB.Model(&n).Updates(updates).Error; err != nil {

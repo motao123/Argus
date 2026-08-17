@@ -206,6 +206,10 @@ export interface Alert {
   acked_by: string;
   silence_from: string | null;
   silence_to: string | null;
+  // 重复提醒（分钟，0=关闭）；升级渠道与升级延迟（分钟）
+  repeat_minutes: number;
+  escalate_to_channel_id: number;
+  escalate_after_minutes: number;
 }
 
 export interface Notification {
@@ -218,6 +222,9 @@ export interface Notification {
   body: string;
   chat_id: string;
   extra: string;
+  // 渠道限流（0 = 不限）
+  rate_limit_per_min: number;
+  burst_limit: number;
 }
 
 export interface NotificationDelivery {
@@ -248,6 +255,8 @@ export function notificationUpdatePayload(n: NotificationUpdate): NotificationUp
   if (n.type !== undefined) payload.type = n.type;
   if (n.method !== undefined) payload.method = n.method;
   if (n.chat_id !== undefined) payload.chat_id = n.chat_id;
+  if (n.rate_limit_per_min !== undefined) payload.rate_limit_per_min = n.rate_limit_per_min;
+  if (n.burst_limit !== undefined) payload.burst_limit = n.burst_limit;
   if (n.clear_url) payload.clear_url = true;
   else if (n.url && !n.url.endsWith("/***")) payload.url = n.url;
   if (n.clear_headers) payload.clear_headers = true;
@@ -465,6 +474,13 @@ export interface MetricPoint {
   disk_write_speed: number;
   disk_read_iops: number;
   disk_write_iops: number;
+}
+
+/** 指标对比：单台服务器的历史点序列（GET /api/v1/metrics/compare）。 */
+export interface CompareSeries {
+  server_id: number;
+  server_name: string;
+  points: MetricPoint[];
 }
 
 // ---- 状态页：事故 / 维护窗口 / SLA ----
@@ -814,6 +830,8 @@ export const api = {
     }),
   metrics: (id: number, period: "1h" | "24h" | "7d") =>
     request<{ period: string; points: MetricPoint[] }>(`/api/v1/servers/${id}/metrics?period=${period}`),
+  metricsCompare: (ids: number[], period: "1h" | "24h" | "7d") =>
+    request<{ period: string; series: CompareSeries[] }>(`/api/v1/metrics/compare?ids=${ids.join(",")}&period=${period}`),
 
   alerts: () => request<{ alerts: Alert[] }>("/api/v1/alerts"),
   saveAlert: (a: Partial<Alert> & { id?: number }) =>

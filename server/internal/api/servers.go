@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -375,36 +376,25 @@ func (s *Server) deleteServer(c *gin.Context) {
 	ok(c, gin.H{"ok": true})
 }
 
-// serverMetrics 查询历史指标。
-// period: 1h / 24h / 7d；返回聚合后的点（最多 ~120 点）。
-func (s *Server) serverMetrics(c *gin.Context) {
-	id := mustID(c)
-	if _, ok := s.authorizePublicServer(c, id); !ok {
-		fail(c, http.StatusNotFound, "server not found")
-		return
-	}
-	period := c.DefaultQuery("period", "1h")
-	now := time.Now()
+// maxCompareServers 指标对比单次最多服务器数（前端选择上限与之一致）。
+const maxCompareServers = 10
 
-	seconds, step, gran := 3600, int64(60), 60
+// metricPeriodConfig 解析 period 参数（1h / 24h / 7d，非法值回退 1h），
+// 返回时间窗秒数、降采样步长（秒）与存储粒度（秒）。
+func metricPeriodConfig(period string) (seconds, step int64, gran int) {
 	switch period {
 	case "24h":
-		seconds, step, gran = 24*3600, 300, 300
+		return 24 * 3600, 300, 300
 	case "7d":
-		seconds, step, gran = 7*24*3600, 3600, 3600
+		return 7 * 24 * 3600, 3600, 3600
 	default:
-		period = "1h"
+		return 3600, 60, 60
 	}
+}
 
-	from := now.Add(-time.Duration(seconds) * time.Second).Unix()
-	var rows []model.Metric
-	if err := s.DB.Where("server_id = ? AND ts >= ? AND granularity = ?", id, from, gran).
-		Order("ts").Find(&rows).Error; err != nil {
-		fail(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// 内存聚合降采样到 step
+// aggregateMetrics 把原始指标行按 step 秒降采样为聚合点
+// （与单机 serverMetrics 口径完全一致，多机对比可复用）。
+func aggregateMetrics(rows []model.Metric, step int64) []gin.H {
 	type agg struct {
 		count                                                                         int
 		cpu, netIn, netOut, load1, temp, gpu, process, tcpEstablished, tcpListen, udp float64
@@ -462,7 +452,92 @@ func (s *Server) serverMetrics(c *gin.Context) {
 			"disk_total": a.diskTotal,
 		})
 	}
-	ok(c, gin.H{"period": period, "points": out})
+	return out
+}
+
+// serverMetrics 查询单台服务器历史指标。
+// period: 1h / 24h / 7d；返回聚合后的点（最多 ~120 点）。
+func (s *Server) serverMetrics(c *gin.Context) {
+	id := mustID(c)
+	if _, ok := s.authorizePublicServer(c, id); !ok {
+		fail(c, http.StatusNotFound, "server not found")
+		return
+	}
+	period := c.DefaultQuery("period", "1h")
+	seconds, step, gran := metricPeriodConfig(period)
+	from := time.Now().Add(-time.Duration(seconds) * time.Second).Unix()
+
+	var rows []model.Metric
+	if err := s.DB.Where("server_id = ? AND ts >= ? AND granularity = ?", id, from, gran).
+		Order("ts").Find(&rows).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok(c, gin.H{"period": period, "points": aggregateMetrics(rows, step)})
+}
+
+// compareMetrics 批量对比多台服务器历史指标（admin/owner 逐 id 校验）。
+// GET /api/v1/metrics/compare?ids=1,2,3&period=24h
+// 单次 IN 查询拉取全部原始行、Go 内按 server_id 分桶聚合，避免 N+1；最多 10 台。
+func (s *Server) compareMetrics(c *gin.Context) {
+	p := principalFromContext(c)
+	if p == nil {
+		fail(c, http.StatusUnauthorized, "login required")
+		return
+	}
+	// 解析 ids（逗号分隔，去重、忽略非法项，保持请求顺序）
+	ids := make([]int64, 0, 10)
+	seen := make(map[int64]bool)
+	for _, part := range strings.Split(c.Query("ids"), ",") {
+		id := parseIntQuery64(strings.TrimSpace(part))
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		fail(c, http.StatusBadRequest, "ids required")
+		return
+	}
+	if len(ids) > maxCompareServers {
+		fail(c, http.StatusBadRequest, "at most 10 servers per compare")
+		return
+	}
+	// 逐 id 校验：admin 或 owner（PAT 需 scope + 白名单）
+	servers := make([]model.Server, 0, len(ids))
+	for _, id := range ids {
+		srv, ok := s.authorizeServer(c, id, ScopeServerRead)
+		if !ok {
+			fail(c, http.StatusForbidden, "server access denied")
+			return
+		}
+		servers = append(servers, *srv)
+	}
+
+	period := c.DefaultQuery("period", "1h")
+	seconds, step, gran := metricPeriodConfig(period)
+	from := time.Now().Add(-time.Duration(seconds) * time.Second).Unix()
+
+	var rows []model.Metric
+	if err := s.DB.Where("server_id IN ? AND ts >= ? AND granularity = ?", ids, from, gran).
+		Order("ts").Find(&rows).Error; err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	byServer := make(map[int64][]model.Metric)
+	for _, r := range rows {
+		byServer[r.ServerID] = append(byServer[r.ServerID], r)
+	}
+	out := make([]gin.H, 0, len(servers))
+	for _, srv := range servers {
+		out = append(out, gin.H{
+			"server_id":   srv.ID,
+			"server_name": srv.Name,
+			"points":      aggregateMetrics(byServer[srv.ID], step),
+		})
+	}
+	ok(c, gin.H{"period": period, "series": out})
 }
 
 // serverApplyConfig 下发 Agent 配置（借鉴 nezha ApplyConfig）。

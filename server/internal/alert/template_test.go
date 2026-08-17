@@ -55,7 +55,7 @@ func TestNotifyDefaultTemplate(t *testing.T) {
 	e, cap := newTemplateTestEngine(t)
 	max := 90.0
 	a := &model.Alert{ID: 1, Name: "cpu-rule", Metric: "cpu", Max: &max, Notify: true, WebhookID: 1}
-	e.notify(a, templateState(), 95, "triggered")
+	e.notify(a, templateState(), 95, "triggered", true, false)
 
 	if len(cap.titles) != 1 || cap.titles[0] != "[Argus] node-1 triggered" {
 		t.Errorf("title = %v", cap.titles)
@@ -83,7 +83,7 @@ func TestNotifyDefaultTemplate(t *testing.T) {
 func TestNotifyDefaultTemplateRecovered(t *testing.T) {
 	e, cap := newTemplateTestEngine(t)
 	a := &model.Alert{ID: 1, Name: "cpu-rule", Metric: "cpu", Notify: true, WebhookID: 1}
-	e.notify(a, templateState(), 50, "recovered")
+	e.notify(a, templateState(), 50, "recovered", true, false)
 	if len(cap.contents) != 1 || cap.contents[0] != "node-1: cpu-rule back to normal" {
 		t.Errorf("recovered content = %v", cap.contents)
 	}
@@ -101,7 +101,7 @@ func TestNotifyRuleTemplateOverride(t *testing.T) {
 		ID: 1, Name: "mem-rule", Metric: "mem", Min: &min, Notify: true, WebhookID: 1,
 		Template: "{{event}}|{{server.name}}|{{server.ipv4}}\n{{rule}} {{metric}}={{value}} 阈值 {{threshold}} 时间 {{time}}",
 	}
-	e.notify(a, templateState(), 10, "triggered")
+	e.notify(a, templateState(), 10, "triggered", true, false)
 
 	if len(cap.titles) != 1 {
 		t.Fatal("no notification captured")
@@ -122,7 +122,7 @@ func TestNotifyRuleTemplateMissingVars(t *testing.T) {
 		ID: 1, Name: "offline-rule", Metric: "offline", Notify: true, WebhookID: 1,
 		Template: "{{server.name}} [{{server.ipv6}}] 阈值={{threshold}} 未知={{nope}}",
 	}
-	e.notify(a, templateState(), 1, "triggered")
+	e.notify(a, templateState(), 1, "triggered", true, false)
 
 	if len(cap.contents) != 1 {
 		t.Fatal("no notification captured")
@@ -141,7 +141,7 @@ func TestNotifyRuleTemplateMissingVars(t *testing.T) {
 func TestNotifyRuleTemplateEmptyFallsBack(t *testing.T) {
 	e, cap := newTemplateTestEngine(t)
 	a := &model.Alert{ID: 1, Name: "cpu-rule", Metric: "cpu", Notify: true, WebhookID: 1, Template: "   \n "}
-	e.notify(a, templateState(), 95, "triggered")
+	e.notify(a, templateState(), 95, "triggered", true, false)
 	if len(cap.titles) != 1 || cap.titles[0] != "[Argus] node-1 triggered" {
 		t.Errorf("blank template title = %v", cap.titles)
 	}

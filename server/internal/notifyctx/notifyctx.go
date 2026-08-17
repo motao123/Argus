@@ -25,7 +25,7 @@ const TimeFormat = "2006-01-02 15:04:05"
 
 // Ctx 统一通知上下文。字段缺省（空串/零值）时对应占位符渲染为空字符串。
 type Ctx struct {
-	// Event 事件类型：triggered / recovered / offline / online /
+	// Event 事件类型：triggered / recovered / repeat / escalated / offline / online /
 	// traffic_quota / failure / certificate_changed / certificate_expiring /
 	// report / expire_check / test …
 	Event string

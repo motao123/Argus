@@ -38,6 +38,9 @@ const mockAlert = {
   trigger_ratio: null as number | null,
   template: "",
   enabled: true,
+  repeat_minutes: 0,
+  escalate_to_channel_id: 0,
+  escalate_after_minutes: 0,
   acked_at: null as string | null,
   acked_by: "",
   silence_from: null as string | null,
@@ -54,6 +57,8 @@ const mockNotification = {
   body: '{"title":{{title}},"content":{{content}}}',
   chat_id: "",
   extra: "",
+  rate_limit_per_min: 0,
+  burst_limit: 0,
 };
 
 function renderPage() {

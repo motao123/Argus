@@ -113,6 +113,9 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/servers/:id/exec", requireScope(ScopeServerExec), s.serverExec)
 			authed.GET("/servers/:id/install-command", requireScope(ScopeServerRead), s.serverInstallCommand)
 
+			// 多节点指标对比（admin/owner 逐 id 校验，最多 10 台）
+			authed.GET("/metrics/compare", s.compareMetrics)
+
 			// 一键安装命令（用户 Agent 密钥模式）
 			authed.GET("/install/command", s.installCommand)
 

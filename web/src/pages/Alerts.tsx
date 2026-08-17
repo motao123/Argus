@@ -89,6 +89,7 @@ const emptyAlert = {
   name: "", metric: "cpu", min: null as number | null, max: null as number | null, duration: 30,
   notify: true, webhook_id: 0, group_id: 0, trigger_cron_id: 0, trigger_ratio: null as number | null,
   template: "", enabled: true,
+  repeat_minutes: 0, escalate_to_channel_id: 0, escalate_after_minutes: 0,
 };
 
 // 静默时长选项（小时）
@@ -121,7 +122,7 @@ export default function Alerts() {
     setNForm(
       n
         ? { ...n }
-        : { name: "", type: "webhook", url: "", method: "POST", headers: "{}", body: '{"title":{{title}},"content":{{content}}}', chat_id: "", extra: "" },
+        : { name: "", type: "webhook", url: "", method: "POST", headers: "{}", body: '{"title":{{title}},"content":{{content}}}', chat_id: "", extra: "", rate_limit_per_min: 0, burst_limit: 0 },
     );
   };
 
@@ -199,6 +200,9 @@ export default function Alerts() {
       if (n.body && n.body !== "{}") payload.body = n.body;
       if (n.chat_id) payload.chat_id = n.chat_id;
       if (n.extra && n.extra !== "{}") payload.extra = n.extra;
+      // 限流字段：0 是合法值（不限），必须显式提交
+      if (n.rate_limit_per_min !== undefined && !Number.isNaN(n.rate_limit_per_min)) payload.rate_limit_per_min = n.rate_limit_per_min;
+      if (n.burst_limit !== undefined && !Number.isNaN(n.burst_limit)) payload.burst_limit = n.burst_limit;
       return api.saveNotification(payload);
     },
     onSuccess: () => {
@@ -345,6 +349,45 @@ export default function Alerts() {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
+            <label className="flex items-center gap-2 text-sm">
+              {t("alerts.repeatLabel")}
+              <input
+                type="number"
+                min={0}
+                value={form.repeat_minutes}
+                onChange={(e) => setForm({ ...form, repeat_minutes: Math.max(0, Number(e.target.value)) })}
+                className="w-20 rounded-lg border border-border bg-bg px-2 py-1.5 text-sm outline-none"
+              />
+              {t("alerts.minutes")}
+            </label>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted">{t("alerts.escalateChannel")}</span>
+              <select
+                value={form.escalate_to_channel_id}
+                onChange={(e) => setForm({ ...form, escalate_to_channel_id: Number(e.target.value) })}
+                className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+              >
+                <option value={0}>{t("alerts.escalateNone")}</option>
+                {notifications.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              {t("alerts.escalateDelayLabel")}
+              <input
+                type="number"
+                min={0}
+                value={form.escalate_after_minutes}
+                onChange={(e) => setForm({ ...form, escalate_after_minutes: Math.max(0, Number(e.target.value)) })}
+                className="w-20 rounded-lg border border-border bg-bg px-2 py-1.5 text-sm outline-none"
+              />
+              {t("alerts.minutes")}
+            </label>
           </div>
           <div className="mt-3">
             <label className="mb-1 block text-sm text-muted">{t("alerts.template")}</label>
@@ -583,6 +626,29 @@ export default function Alerts() {
                 />
               </>
             )}
+          </div>
+          {/* 渠道限流：0 = 不限；两者都 > 0 时按令牌桶限流（每分钟补充 rate_limit_per_min 个令牌，桶容量 burst_limit） */}
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs text-muted">{t("alerts.rateLimitPerMin")}</div>
+              <input
+                type="number"
+                min={0}
+                value={nForm.rate_limit_per_min ?? 0}
+                onChange={(e) => setNForm({ ...nForm, rate_limit_per_min: Number(e.target.value) })}
+                className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-xs text-muted">{t("alerts.burstLimit")}</div>
+              <input
+                type="number"
+                min={0}
+                value={nForm.burst_limit ?? 0}
+                onChange={(e) => setNForm({ ...nForm, burst_limit: Number(e.target.value) })}
+                className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
+              />
+            </div>
           </div>
           <div className="mt-3 flex gap-2">
             <button

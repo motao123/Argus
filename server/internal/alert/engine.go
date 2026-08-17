@@ -37,6 +37,8 @@ type Engine struct {
 	state map[string]*violation // key: alertID:serverID
 	stop  chan struct{}
 	done  chan struct{}
+	// nowFn 可注入时钟（测试用）；nil 时回退 time.Now。
+	nowFn func() time.Time
 }
 
 // violation 一条规则 × 一台服务器的触发状态。
@@ -44,19 +46,33 @@ type violation struct {
 	triggeredAt time.Time
 	notified    bool
 	recovering  bool // 已恢复但通知未发（下一轮发恢复通知）
+	// lastNotifyAt 上次通知时间（重复提醒间隔基准；0 = 尚未通知过）。
+	lastNotifyAt time.Time
+	// escalatedAt 升级时间（nil = 未升级）；升级后重复通知改发升级渠道。
+	escalatedAt *time.Time
 	// 达标比例采样窗口（借鉴 komari LoadNotification）
 	sampleCount  int
 	violateCount int
 }
 
 func NewEngine(db *gorm.DB, st *store.Hub) *Engine {
-	return &Engine{
+	e := &Engine{
 		db:    db,
 		store: st,
 		state: make(map[string]*violation),
 		stop:  make(chan struct{}),
 		done:  make(chan struct{}),
 	}
+	e.loadStates()
+	return e
+}
+
+// now 返回引擎当前时间（可注入时钟，测试用）。
+func (e *Engine) now() time.Time {
+	if e.nowFn != nil {
+		return e.nowFn()
+	}
+	return time.Now()
 }
 
 // Run 每 3s 检查一轮。
@@ -127,7 +143,7 @@ func (e *Engine) checkOnce() {
 				ratio = *a.TriggerRatio
 			}
 			fired := e.inRange(&a, value)
-			now := time.Now()
+			now := e.now()
 
 			if ratio < 100 {
 				if v == nil {
@@ -165,7 +181,26 @@ func (e *Engine) checkOnce() {
 				if !v.notified && now.Sub(v.triggeredAt) >= time.Duration(a.Duration)*time.Second {
 					v.notified = true
 					v.recovering = false
-					e.notify(&a, st, value, "triggered")
+					v.lastNotifyAt = now
+					e.persistState(&a, serverID, v)
+					e.notify(&a, st, value, "triggered", true, false)
+				}
+				// 升级：告警持续超过升级延迟后，发一条 event=escalated 并切换渠道
+				// （实际投递后才记录升级，静默/确认/渠道缺失时不升级）。
+				if v.notified && a.EscalateToChannelID > 0 && v.escalatedAt == nil &&
+					now.Sub(v.triggeredAt) >= time.Duration(a.EscalateAfterMinutes)*time.Minute {
+					if e.notify(&a, st, value, "escalated", false, true) {
+						t := now
+						v.escalatedAt = &t
+						e.persistState(&a, serverID, v)
+					}
+				}
+				// 重复提醒：持续期间每 N 分钟重发一次（升级后发往升级渠道）。
+				if v.notified && a.RepeatMinutes > 0 && now.Sub(v.lastNotifyAt) >= time.Duration(a.RepeatMinutes)*time.Minute {
+					if e.notify(&a, st, value, "repeat", false, v.escalatedAt != nil) {
+						v.lastNotifyAt = now
+						e.persistState(&a, serverID, v)
+					}
 				}
 			} else {
 				if v != nil {
@@ -173,10 +208,11 @@ func (e *Engine) checkOnce() {
 					if v.notified && !v.recovering {
 						v.recovering = true
 						e.clearAck(&a)
-						e.notify(&a, st, value, "recovered")
+						e.notify(&a, st, value, "recovered", true, false)
 					}
-					// 恢复 60s 后清除状态
+					// 恢复 60s 后清除状态（内存 + 持久化）
 					if now.Sub(v.triggeredAt) > time.Duration(a.Duration)*time.Second+60*time.Second {
+						e.clearState(&a, serverID)
 						e.mu.Lock()
 						delete(e.state, key)
 						e.mu.Unlock()
@@ -335,37 +371,41 @@ func (e *Engine) clearAck(a *model.Alert) {
 }
 
 // notify 发送通知（多渠道）。
-func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind string) {
+// sideEffects=true（triggered/recovered）附带插件 hook 与任务联动；
+// repeat/escalated 仅为通知（不重复触发任务/插件）。
+// escalated=true 时通知发往升级渠道（校验存在且 owner 匹配）。
+// 返回是否实际投递（静默/确认/无目标渠道时返回 false，调用方据此推进重复/升级状态）。
+func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind string, sideEffects, escalated bool) bool {
 	// 插件事件 hook（异步分发，不影响通知主流程）
-	if e.AlertHook != nil {
+	if sideEffects && e.AlertHook != nil {
 		e.AlertHook(a, st, value, kind)
 	}
 	// 触发任务联动与通知解耦（借鉴 nezha 报警失败/恢复触发任务）
-	if a.TriggerCronID > 0 && e.Trigger != nil {
+	if sideEffects && a.TriggerCronID > 0 && e.Trigger != nil {
 		var cron model.Cron
 		if err := e.db.First(&cron, a.TriggerCronID).Error; err == nil {
 			// 联动 Cron 必须与报警规则同租户，并且目标服务器归属该租户。
 			if cron.OwnerID != a.OwnerID || (a.OwnerID != 0 && st.Server.OwnerID != a.OwnerID) {
-				return
+				return false
 			}
 			if targets := alertServerIDs(cron.ServerIDs); targets != nil && !targets[st.Server.ID] {
-				return
+				return false
 			}
 			go e.Trigger(&cron, st.Server.ID, kind)
 		}
 	}
 	if !a.Notify {
-		return
+		return false
 	}
 	// 静默窗口内 / 已确认的告警不发送通知（任务联动与插件 hook 不受影响）
-	now := time.Now()
+	now := e.now()
 	if e.silencedAt(a, now) {
 		log.Printf("alert %s (%s): silenced until %s, notification skipped", a.Name, kind, a.SilenceTo.Format(time.RFC3339))
-		return
+		return false
 	}
 	if a.AckedAt != nil {
 		log.Printf("alert %s (%s): acknowledged by %s, notification skipped", a.Name, kind, a.AckedBy)
-		return
+		return false
 	}
 	serverName := st.Server.Name
 	// 统一通知上下文：事件/服务器/规则/指标/阈值/时间，默认格式标题正文。
@@ -388,9 +428,20 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 		title, content = renderAlertTemplate(a.Template, ctx, title)
 	}
 	ctx.Title, ctx.Content = title, content
-	// 分组扇出（借鉴 nezha NotificationGroup）或单渠道
+	// 分组扇出（借鉴 nezha NotificationGroup）或单渠道；升级后仅发升级渠道
 	targets := make([]model.Notification, 0)
-	if a.GroupID > 0 {
+	if escalated && a.EscalateToChannelID > 0 {
+		var n model.Notification
+		if err := e.db.First(&n, a.EscalateToChannelID).Error; err != nil {
+			log.Printf("alert %s (%s): escalate channel #%d not found, notification dropped", a.Name, kind, a.EscalateToChannelID)
+			return false
+		}
+		if a.OwnerID != 0 && n.OwnerID != a.OwnerID {
+			log.Printf("alert %s (%s): escalate channel #%d owner mismatch, notification dropped", a.Name, kind, a.EscalateToChannelID)
+			return false
+		}
+		targets = append(targets, n)
+	} else if a.GroupID > 0 {
 		var group model.NotificationGroup
 		if err := e.db.First(&group, a.GroupID).Error; err == nil {
 			for _, idStr := range strings.Split(group.MemberIDs, ",") {
@@ -407,15 +458,69 @@ func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind stri
 		}
 	}
 	vars := ctx.Flat()
+	delivered := false
 	for i := range targets {
 		n := targets[i]
 		if e.Notify != nil {
 			e.Notify(&n, title, content, a.OwnerID, vars)
+			delivered = true
 		} else {
 			log.Printf("alert notify: no queue wired, drop delivery to channel #%d", n.ID)
 		}
 	}
 	log.Printf("alert %s (%s): %s", a.Name, kind, content)
+	return delivered
+}
+
+// loadStates 启动时从 DB 恢复进行中的告警状态（重启后重复提醒/升级进度不丢失）。
+// 恢复的条目视为已通知（避免重启后重复发送 triggered），lastNotifyAt/escalatedAt
+// 决定后续重复/升级节奏。
+func (e *Engine) loadStates() {
+	if e.db == nil {
+		return
+	}
+	var rows []model.AlertState
+	if err := e.db.Find(&rows).Error; err != nil {
+		log.Printf("alert: load persisted states: %v", err)
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for i := range rows {
+		r := &rows[i]
+		e.state[fmt.Sprintf("%d:%d", r.AlertID, r.ServerID)] = &violation{
+			triggeredAt:  r.TriggeredAt,
+			notified:     true,
+			lastNotifyAt: r.LastNotifyAt,
+			escalatedAt:  r.EscalatedAt,
+		}
+	}
+}
+
+// persistState 幂等持久化告警持续状态（重复/升级进度，重启恢复用）。
+func (e *Engine) persistState(a *model.Alert, serverID int64, v *violation) {
+	if e.db == nil {
+		return
+	}
+	row := model.AlertState{
+		AlertID:      a.ID,
+		ServerID:     serverID,
+		TriggeredAt:  v.triggeredAt,
+		LastNotifyAt: v.lastNotifyAt,
+		EscalatedAt:  v.escalatedAt,
+	}
+	_ = e.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "alert_id"}, {Name: "server_id"}},
+		UpdateAll: true,
+	}).Create(&row).Error
+}
+
+// clearState 恢复后清除持久化告警状态。
+func (e *Engine) clearState(a *model.Alert, serverID int64) {
+	if e.db == nil {
+		return
+	}
+	_ = e.db.Where("alert_id = ? AND server_id = ?", a.ID, serverID).Delete(&model.AlertState{}).Error
 }
 
 // alertThreshold 触发时对应的阈值文本：低于下限取 min，高于上限取 max；

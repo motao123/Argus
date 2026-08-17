@@ -61,6 +61,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.Incident{},
 		&model.MaintenanceWindow{},
 		&model.NotificationDelivery{},
+		&model.AlertState{},
 		&model.BackupSchedule{},
 		&model.BackupRun{},
 	); err != nil {

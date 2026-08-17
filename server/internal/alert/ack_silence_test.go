@@ -77,7 +77,7 @@ func TestSilenceSuppressesNotification(t *testing.T) {
 	a := &model.Alert{ID: 1, Name: "cpu", Metric: "cpu", Notify: true, WebhookID: 1,
 		SilenceFrom: &from, SilenceTo: &to}
 	// 静默窗口内触发 → 不通知
-	e.notify(a, testState(), 99, "triggered")
+	e.notify(a, testState(), 99, "triggered", true, false)
 	if *count != 0 {
 		t.Fatalf("silenced alert should not notify, got %d", *count)
 	}
@@ -85,7 +85,7 @@ func TestSilenceSuppressesNotification(t *testing.T) {
 	a.SilenceFrom = nil
 	past := time.Now().Add(-time.Hour)
 	a.SilenceTo = &past
-	e.notify(a, testState(), 99, "triggered")
+	e.notify(a, testState(), 99, "triggered", true, false)
 	if *count != 1 {
 		t.Fatalf("alert outside silence window should notify, got %d", *count)
 	}
@@ -95,7 +95,7 @@ func TestAckSuppressesNotification(t *testing.T) {
 	e, count := newSilenceTestEngine(t)
 	a := &model.Alert{ID: 1, Name: "cpu", Metric: "cpu", Notify: true, WebhookID: 1}
 	// 未确认 → 通知
-	e.notify(a, testState(), 99, "triggered")
+	e.notify(a, testState(), 99, "triggered", true, false)
 	if *count != 1 {
 		t.Fatalf("unacked alert should notify, got %d", *count)
 	}
@@ -103,13 +103,13 @@ func TestAckSuppressesNotification(t *testing.T) {
 	now := time.Now()
 	a.AckedAt = &now
 	a.AckedBy = "alice"
-	e.notify(a, testState(), 99, "triggered")
+	e.notify(a, testState(), 99, "triggered", true, false)
 	if *count != 1 {
 		t.Fatalf("acked alert should not notify, got %d", *count)
 	}
 	// 取消确认 → 恢复通知
 	a.AckedAt = nil
-	e.notify(a, testState(), 99, "triggered")
+	e.notify(a, testState(), 99, "triggered", true, false)
 	if *count != 2 {
 		t.Fatalf("unacked alert should notify again, got %d", *count)
 	}
@@ -148,7 +148,7 @@ func TestClearAckPersistsToDB(t *testing.T) {
 func TestAckNotRequiredForRecovery(t *testing.T) {
 	e, count := newSilenceTestEngine(t)
 	a := &model.Alert{ID: 1, Name: "cpu", Metric: "cpu", Notify: true, WebhookID: 1}
-	e.notify(a, testState(), 0, "recovered")
+	e.notify(a, testState(), 0, "recovered", true, false)
 	if *count != 1 {
 		t.Fatalf("recovery should notify, got %d", *count)
 	}
