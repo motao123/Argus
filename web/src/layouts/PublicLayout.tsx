@@ -5,19 +5,9 @@ import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
 import { getToken, setToken } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useTheme } from "../lib/theme";
 import { useQuery } from "@tanstack/react-query";
 import CommandPalette from "../components/CommandPalette";
-
-function useTheme() {
-  const [theme, setTheme] = useState<"light" | "dark">(() =>
-    document.documentElement.classList.contains("dark") ? "dark" : "light",
-  );
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("argus-theme", theme);
-  }, [theme]);
-  return [theme, setTheme] as const;
-}
 
 // 实时时钟（借鉴 dash-v2 Header）
 function Clock() {
@@ -35,7 +25,7 @@ function Clock() {
 }
 
 export default function PublicLayout() {
-  const [theme, setTheme] = useTheme();
+  const { mode: theme, toggleMode } = useTheme();
   const { online, total } = useServers();
   const { lang, setLang, t } = useI18n();
   const navigate = useNavigate();
@@ -72,7 +62,7 @@ export default function PublicLayout() {
               {lang === "zh-CN" ? "EN" : "中文"}
             </button>
             <button
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              onClick={toggleMode}
               className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5"
               title={t("common.theme")}
             >

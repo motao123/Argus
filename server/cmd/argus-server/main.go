@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/motao123/Argus/server/internal/scheduler"
 	"github.com/motao123/Argus/server/internal/sentinel"
 	"github.com/motao123/Argus/server/internal/store"
+	"github.com/motao123/Argus/server/internal/theme"
 )
 
 func main() {
@@ -96,7 +98,46 @@ func main() {
 		log.Printf("preloaded %d servers into memory hub", len(allServers))
 	}
 
-	// 4. 定时调度器 + 报警引擎（触发任务联动）
+	// 4. 插件管理器（data/plugins 目录；注入宿主能力与事件 hook 接线）
+	plugin.MarketDir = filepath.Join(filepath.Dir(cfg.DBPath), "market", "plugins")
+	plugins := plugin.New(filepath.Join(filepath.Dir(cfg.DBPath), "plugins"))
+	// 脱敏只读服务器列表（不含密钥/计费/备注/所有者）
+	plugins.ServerSource = func() []plugin.ServerView {
+		snap := st.Snapshot()
+		out := make([]plugin.ServerView, 0, len(snap))
+		for id, s := range snap {
+			v := plugin.ServerView{ID: id, Online: s.Online}
+			if s.Server != nil {
+				v.Name, v.Group, v.Tags = s.Server.Name, s.Server.Group, s.Server.Tags
+			}
+			v.Hostname = s.Host.Hostname
+			v.IP = s.Host.IP
+			v.OS, v.Arch, v.AgentVersion = s.Host.OS, s.Host.Arch, s.Host.AgentVersion
+			out = append(out, v)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+		return out
+	}
+	plugins.NotifyFunc = func(id int64, title, content string) error {
+		var n model.Notification
+		if err := gdb.First(&n, id).Error; err != nil {
+			return fmt.Errorf("notification %d not found", id)
+		}
+		notifier.Send(&n, title, content)
+		return nil
+	}
+	// 服务器上线/离线 → 插件事件 hook
+	st.OnOnline = func(serverID int64) {
+		plugins.FireEvent("onServerOnline", serverEventPayload(serverID, st))
+	}
+	st.OnOffline = func(serverID int64) {
+		plugins.FireEvent("onServerOffline", serverEventPayload(serverID, st))
+	}
+	_ = plugins.Load()
+	plugins.Start()
+	defer plugins.Stop()
+
+	// 5. 定时调度器 + 报警引擎（触发任务联动）
 	sched := scheduler.New(gdb, agents)
 	sched.Start()
 	defer sched.Stop()
@@ -109,6 +150,19 @@ func main() {
 			trigger = scheduler.TriggerAlertRecovery
 		}
 		_, _ = sched.Enqueue(cron, trigger, &serverID)
+	}
+	// 报警触发/恢复 → 插件 onAlert 事件 hook
+	engine.AlertHook = func(a *model.Alert, st store.State, value float64, kind string) {
+		plugins.FireEvent("onAlert", map[string]any{
+			"alert_id":    a.ID,
+			"alert":       a.Name,
+			"metric":      a.Metric,
+			"server_id":   st.Server.ID,
+			"server_name": st.Server.Name,
+			"value":       value,
+			"kind":        kind,
+			"time":        time.Now().Format(time.RFC3339),
+		})
 	}
 	go engine.Run()
 	defer engine.Stop()
@@ -203,24 +257,20 @@ func main() {
 	}()
 	defer natProxy.Close()
 
-	// 插件管理器（data/plugins 目录）
-	plugin.MarketDir = filepath.Join(filepath.Dir(cfg.DBPath), "market", "plugins")
-	plugins := plugin.New(filepath.Join(filepath.Dir(cfg.DBPath), "plugins"))
-	_ = plugins.Load()
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			_ = plugins.Load() // 增量扫描新插件
-			plugins.RunScheduled()
-		}
-	}()
-
 	// 5. API 路由
 	geoipSvc := geoip.New()
 	if ep := os.Getenv("ARGUS_GEOIP_ENDPOINT"); ep != "" {
 		geoipSvc.SetProvider(&geoip.HTTPProvider{Endpoint: ep})
 		log.Printf("GeoIP provider: %s", ep)
+	}
+	// 主题管理器（data/themes 目录；远程市场索引经 ARGUS_THEME_MARKET_INDEX 配置）
+	themes := theme.New(filepath.Join(filepath.Dir(cfg.DBPath), "themes"))
+	themes.MarketIndexURL = cfg.ThemeMarketIndex
+	if themes.MarketIndexURL != "" {
+		log.Printf("theme market index: %s", themes.MarketIndexURL)
+	}
+	if active := themes.ValidateActive(); active != theme.DefaultName {
+		log.Printf("theme manager: active theme %s", active)
 	}
 	srv := &api.Server{
 		DB:        gdb,
@@ -231,6 +281,7 @@ func main() {
 		OAuth:     oauth.NewClient(),
 		GeoIP:     geoipSvc,
 		Plugins:   plugins,
+		Themes:    themes,
 		NAT:       natProxy,
 	}
 	srv.ReloadOAuthConfigs()
@@ -374,4 +425,17 @@ func displayAddr(l string) string {
 		return "localhost" + l
 	}
 	return l
+}
+
+// serverEventPayload 构造服务器上线/离线事件载荷（插件 hook）。
+func serverEventPayload(id int64, st *store.Hub) map[string]any {
+	name := ""
+	if s := st.Get(id); s != nil && s.Server != nil {
+		name = s.Server.Name
+	}
+	return map[string]any{
+		"server_id":   id,
+		"server_name": name,
+		"time":        time.Now().Format(time.RFC3339),
+	}
 }

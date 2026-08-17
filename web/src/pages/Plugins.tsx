@@ -50,23 +50,51 @@ export default function Plugins() {
             <div key={p.name} className="rounded-xl border border-border bg-panel p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2 font-medium">
+                  <div className="flex flex-wrap items-center gap-2 font-medium">
                     {p.name}
                     <span className="text-xs text-muted">v{p.version}</span>
-                    {p.permissions_allow_fetch && (
+                    {p.running && (
+                      <span className="animate-pulse rounded-full bg-accent/15 px-2 py-0.5 text-xs text-accent">{t("plugins.running")}</span>
+                    )}
+                    {p.permissions?.allow_fetch && (
                       <span className="rounded-full bg-warn/15 px-2 py-0.5 text-xs text-warn">{t("plugins.needNetwork")}</span>
                     )}
                     {p.approved ? (
                       <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs text-ok">{t("plugins.approved")}</span>
-                    ) : p.permissions_allow_fetch ? (
+                    ) : p.permissions?.allow_fetch || p.permissions?.allow_notify ? (
                       <span className="rounded-full bg-err/15 px-2 py-0.5 text-xs text-err">{t("plugins.pendingApproval")}</span>
                     ) : null}
                   </div>
                   <p className="mt-1 text-xs text-muted">{p.description}</p>
-                  <p className="mt-1 text-xs text-muted">{t("plugins.cronInfo", { cron: p.cron || t("plugins.noCron"), lastRun: p.last_run || "—" })}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {p.permissions?.allow_fetch && (
+                      <span className="rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-xs text-warn" title={t("plugins.fetchDomainsTitle")}>
+                        {t("plugins.fetchDomains")}: {(p.permissions.fetch_domains ?? []).length
+                          ? p.permissions.fetch_domains.slice(0, 2).join(", ") + (p.permissions.fetch_domains.length > 2 ? " …" : "")
+                          : "—"}
+                      </span>
+                    )}
+                    {p.permissions?.allow_notify && (
+                      <span className="rounded-full border border-border bg-muted/10 px-2 py-0.5 text-xs text-muted">{t("plugins.allowNotify")}</span>
+                    )}
+                    {(p.events ?? []).map((ev) => (
+                      <span key={ev} className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent" title={t("plugins.hookTitle", { event: ev })}>
+                        {ev}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-xs text-muted">
+                    {t("plugins.cronInfo", { cron: p.cron || t("plugins.noCron"), lastRun: p.last_run || "—" })}
+                    {p.run_count > 0 && ` · ${t("plugins.runCount", { count: p.run_count })}`}
+                    {p.last_status === "error" && (
+                      <span className="ml-1 text-err" title={p.last_error || ""}>
+                        · {t("plugins.statusError")}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  {p.permissions_allow_fetch && (
+                  {(p.permissions?.allow_fetch || p.permissions?.allow_notify) && (
                     <button
                       onClick={() => approve.mutate({ name: p.name, approved: !p.approved })}
                       title={t("plugins.approveTitle")}

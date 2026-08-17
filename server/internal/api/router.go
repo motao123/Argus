@@ -19,6 +19,7 @@ import (
 	"github.com/motao123/Argus/server/internal/plugin"
 	"github.com/motao123/Argus/server/internal/scheduler"
 	"github.com/motao123/Argus/server/internal/store"
+	"github.com/motao123/Argus/server/internal/theme"
 )
 
 var errInvalidToken = errors.New("invalid token")
@@ -33,6 +34,7 @@ type Server struct {
 	OAuth     *oauth.Client
 	GeoIP     *geoip.Service
 	Plugins   *plugin.Manager
+	Themes    *theme.Manager
 	DDNS      *ddns.Client
 	NAT       *nat.Proxy
 
@@ -142,6 +144,15 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/plugins/:name/run", requireAdmin(), s.runPluginNow)
 			authed.DELETE("/plugins/:name", requireAdmin(), s.deletePlugin)
 
+			// 主题包（admin；仅 CSS 变量/CSS + 受限静态资源，禁止 JS）
+			authed.GET("/themes", requireAdmin(), s.listThemes)
+			authed.POST("/themes/upload", requireAdmin(), s.uploadTheme)
+			authed.POST("/themes/:name/activate", requireAdmin(), s.activateTheme)
+			authed.POST("/themes/:name/rollback", requireAdmin(), s.rollbackTheme)
+			authed.DELETE("/themes/:name", requireAdmin(), s.deleteTheme)
+			authed.GET("/themes/market", requireAdmin(), s.listThemeMarket)
+			authed.POST("/themes/market/:name/install", requireAdmin(), s.installThemeMarket)
+
 			// 通知分组
 			authed.GET("/notification-groups", s.listNotificationGroups)
 			authed.POST("/notification-groups", s.saveNotificationGroup)
@@ -219,6 +230,8 @@ func New(s *Server) *gin.Engine {
 		api.GET("/ws", s.optionalAuthMiddleware(), s.dashboardWS)
 		api.GET("/terminal/:serverId", s.authWS, s.terminalWS)
 	}
+	// 主题静态资源（公开，游客也可加载；安装时已白名单校验 + 响应头加固）
+	r.GET("/theme-assets/*filepath", s.themeAsset)
 	return r
 }
 

@@ -25,6 +25,7 @@ type Config struct {
 	MCPRateLimit             int      // requests per token per minute
 	MCPTransferMax           int64    // one-time transfer maximum bytes
 	MCPTransferTTL           time.Duration
+	ThemeMarketIndex         string // 远程主题市场静态索引（HTTPS；空 = 禁用）
 }
 
 // Load 从环境变量/默认值加载配置。
@@ -43,6 +44,7 @@ func Load() *Config {
 		MCPRateLimit:             getenvInt("ARGUS_MCP_RATE_LIMIT", 60),
 		MCPTransferMax:           int64(getenvInt("ARGUS_MCP_TRANSFER_MAX_MB", 64)) << 20,
 		MCPTransferTTL:           time.Duration(getenvInt("ARGUS_MCP_TRANSFER_TTL_SECONDS", 300)) * time.Second,
+		ThemeMarketIndex:         os.Getenv("ARGUS_THEME_MARKET_INDEX"),
 	}
 	if c.JWTSecret == "" {
 		c.JWTSecret = loadOrGenerateJWT(c.DBPath)

@@ -4,9 +4,11 @@ import { useNavigate } from "react-router-dom";
 import { Activity, Command, MonitorSmartphone, Moon, Sun } from "lucide-react";
 import { useServers } from "../context/servers";
 import { useI18n } from "../lib/i18n";
+import { useTheme } from "../lib/theme";
 
 export default function CommandPalette() {
   const { t } = useI18n();
+  const { mode, toggleMode } = useTheme();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const { servers } = useServers();
@@ -38,9 +40,7 @@ export default function CommandPalette() {
   if (!open) return null;
 
   const toggleTheme = () => {
-    const dark = document.documentElement.classList.contains("dark");
-    document.documentElement.classList.toggle("dark", !dark);
-    localStorage.setItem("argus-theme", dark ? "light" : "dark");
+    toggleMode();
     setOpen(false);
   };
 
@@ -87,7 +87,7 @@ export default function CommandPalette() {
               onClick={toggleTheme}
               className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5"
             >
-              {document.documentElement.classList.contains("dark") ? (
+              {mode === "dark" ? (
                 <Sun className="h-4 w-4 text-muted" />
               ) : (
                 <Moon className="h-4 w-4 text-muted" />

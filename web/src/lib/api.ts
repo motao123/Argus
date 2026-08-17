@@ -388,8 +388,42 @@ export interface PluginInfo {
   enabled: boolean;
   approved: boolean;
   permissions_allow_fetch: boolean;
+  permissions: {
+    allow_fetch: boolean;
+    fetch_domains: string[];
+    allow_notify: boolean;
+  };
+  events: string[];
   logs: string[];
   last_run: string;
+  last_status: string;
+  last_error: string;
+  run_count: number;
+  running: boolean;
+}
+
+export interface ThemeInfo {
+  name: string;
+  display_name: string;
+  version: string;
+  argus: string;
+  author: string;
+  entry: string;
+  preview: string;
+  active: boolean;
+  rollback: boolean;
+}
+
+export interface MarketThemeEntry {
+  name: string;
+  display_name: string;
+  version: string;
+  author: string;
+  description: string;
+  download_url: string;
+  sha256: string;
+  size: number;
+  installed: boolean;
 }
 
 export interface NotificationGroup {
@@ -534,6 +568,18 @@ export const api = {
   pluginDelete: (name: string) => request(`/api/v1/plugins/${encodeURIComponent(name)}`, { method: "DELETE" }),
   pluginMarket: () => request<{ plugins: Array<{ name: string; description: string; version: string; installed: boolean }> }>("/api/v1/plugins/market"),
   pluginInstall: (name: string) => request<{ ok: boolean }>(`/api/v1/plugins/market/${encodeURIComponent(name)}/install`, { method: "POST" }),
+  themeList: () => request<{ themes: ThemeInfo[] }>("/api/v1/themes"),
+  themeUpload: (file: File, sha256 = "") => {
+    const form = new FormData();
+    form.append("file", file);
+    if (sha256) form.append("sha256", sha256);
+    return request<{ theme: ThemeInfo }>("/api/v1/themes/upload", { method: "POST", body: form });
+  },
+  themeActivate: (name: string) => request<{ ok: boolean; active: string }>(`/api/v1/themes/${encodeURIComponent(name)}/activate`, { method: "POST" }),
+  themeRollback: (name: string) => request<{ ok: boolean }>(`/api/v1/themes/${encodeURIComponent(name)}/rollback`, { method: "POST" }),
+  themeDelete: (name: string) => request<{ ok: boolean; active: string }>(`/api/v1/themes/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  themeMarket: () => request<{ themes: MarketThemeEntry[] }>("/api/v1/themes/market"),
+  themeMarketInstall: (name: string) => request<{ ok: boolean }>(`/api/v1/themes/market/${encodeURIComponent(name)}/install`, { method: "POST" }),
   groups: () => request<{ groups: ServerGroup[] }>("/api/v1/groups"),
   createGroup: (name: string) => request<ServerGroup>("/api/v1/groups", { method: "POST", body: JSON.stringify({ name }) }),
   deleteGroup: (id: number) => request(`/api/v1/groups/${id}`, { method: "DELETE" }),

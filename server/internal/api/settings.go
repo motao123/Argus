@@ -36,11 +36,19 @@ func (s *Server) GetSetting(key, def string) string {
 
 // getPublicSettings 公开设置（前台/游客可读）。
 func (s *Server) getPublicSettings(c *gin.Context) {
+	activeTheme := "default"
+	activeEntry := ""
+	if s.Themes != nil {
+		activeTheme = s.Themes.Active()
+		activeEntry = s.Themes.ActiveEntry()
+	}
 	ok(c, gin.H{
-		"site_name":  s.GetSetting(SettingSiteName, "Argus"),
-		"site_desc":  s.GetSetting(SettingSiteDesc, "轻量自托管服务器监控"),
-		"favicon":    s.GetSetting(SettingFavicon, ""),
-		"force_auth": s.GetSetting(SettingForceAuth, "0") == "1",
+		"site_name":          s.GetSetting(SettingSiteName, "Argus"),
+		"site_desc":          s.GetSetting(SettingSiteDesc, "轻量自托管服务器监控"),
+		"favicon":            s.GetSetting(SettingFavicon, ""),
+		"force_auth":         s.GetSetting(SettingForceAuth, "0") == "1",
+		"active_theme":       activeTheme,
+		"active_theme_entry": activeEntry,
 	})
 }
 

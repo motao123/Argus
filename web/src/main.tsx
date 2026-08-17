@@ -7,6 +7,7 @@ import PublicLayout from "./layouts/PublicLayout";
 import { ServersProvider } from "./context/servers";
 import { getToken } from "./lib/api";
 import { I18nProvider } from "./lib/i18n";
+import { ThemeProvider } from "./lib/theme";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
 import ServerDetail from "./pages/ServerDetail";
@@ -22,6 +23,7 @@ import Network from "./pages/Network";
 import Security from "./pages/Security";
 import Maintenance from "./pages/Maintenance";
 import Plugins from "./pages/Plugins";
+import Themes from "./pages/Themes";
 import Audit from "./pages/Audit";
 import Notifications from "./pages/Notifications";
 import Lifecycle from "./pages/Lifecycle";
@@ -43,6 +45,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <I18nProvider>
+      <ThemeProvider>
       <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
@@ -84,6 +87,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/admin/security" element={<Security />} />
             <Route path="/admin/maintenance" element={<Maintenance />} />
             <Route path="/admin/plugins" element={<Plugins />} />
+            <Route path="/admin/themes" element={<Themes />} />
             <Route path="/admin/audit" element={<Audit />} />
             <Route path="/admin/notifications" element={<Notifications />} />
             <Route path="/admin/lifecycle" element={<Lifecycle />} />
@@ -97,8 +101,9 @@ createRoot(document.getElementById("root")!).render(
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
-    </QueryClientProvider>
+      </QueryClientProvider>
       </ErrorBoundary>
+      </ThemeProvider>
     </I18nProvider>
   </StrictMode>,
 );

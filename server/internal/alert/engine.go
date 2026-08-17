@@ -25,6 +25,8 @@ type Engine struct {
 	store *store.Hub
 	// Trigger 联动任务执行器（kind 为 triggered/recovered）。
 	Trigger func(cron *model.Cron, serverID int64, kind string)
+	// AlertHook 报警触发/恢复事件回调（main 注入，如插件 onAlert hook）。
+	AlertHook func(a *model.Alert, st store.State, value float64, kind string)
 
 	mu    sync.Mutex
 	state map[string]*violation // key: alertID:serverID
@@ -277,6 +279,10 @@ func (e *Engine) inRange(a *model.Alert, v float64) bool {
 
 // notify 发送通知（多渠道）。
 func (e *Engine) notify(a *model.Alert, st store.State, value float64, kind string) {
+	// 插件事件 hook（异步分发，不影响通知主流程）
+	if e.AlertHook != nil {
+		e.AlertHook(a, st, value, kind)
+	}
 	// 触发任务联动与通知解耦（借鉴 nezha 报警失败/恢复触发任务）
 	if a.TriggerCronID > 0 && e.Trigger != nil {
 		var cron model.Cron

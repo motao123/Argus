@@ -28,6 +28,9 @@ type Hub struct {
 	servers map[int64]*State
 	// 流量账本（reset-aware 小时桶，重启恢复）
 	Ledger *TrafficLedger
+	// 上线/离线转换回调（main 注入，如插件事件 hook；调用时不持有锁）
+	OnOnline  func(serverID int64)
+	OnOffline func(serverID int64)
 }
 
 // NewHub 构造 Hub（流量账本由 main 注入，因为需要 DB）。
@@ -86,19 +89,25 @@ func (h *Hub) SetReport(id int64, host protocol.HostInfo, r *protocol.ReportPara
 // MarkOffline 标记服务器离线（检测到连接断开时调用）。
 func (h *Hub) MarkOffline(id int64) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if st, ok := h.servers[id]; ok {
 		st.Online = false
+	}
+	h.mu.Unlock()
+	if h.OnOffline != nil {
+		h.OnOffline(id)
 	}
 }
 
 // SetOnline 标记上线（连接建立、鉴权通过时调用）。
 func (h *Hub) SetOnline(id int64) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if st, ok := h.servers[id]; ok {
 		st.Online = true
 		st.LastSeen = time.Now()
+	}
+	h.mu.Unlock()
+	if h.OnOnline != nil {
+		h.OnOnline(id)
 	}
 }
 
