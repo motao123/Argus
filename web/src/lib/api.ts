@@ -648,6 +648,14 @@ export interface TwoFASetup {
   otpauth_url: string;
 }
 
+export interface PluginConfigItem {
+  key: string;
+  label: string;
+  type: "text" | "number" | "boolean" | "select";
+  default?: unknown;
+  options?: string[];
+}
+
 export interface PluginInfo {
   name: string;
   version: string;
@@ -660,7 +668,16 @@ export interface PluginInfo {
     allow_fetch: boolean;
     fetch_domains: string[];
     allow_notify: boolean;
+    allow_rpc: boolean;
+    allow_system_rpc: boolean;
+    allow_routes: boolean;
+    allow_cron: boolean;
   };
+  configuration: PluginConfigItem[];
+  html_head: string;
+  html_body: string;
+  rpcs: string[];
+  routes: string[];
   events: string[];
   logs: string[];
   last_run: string;
@@ -873,6 +890,9 @@ export const api = {
   pluginDelete: (name: string) => request(`/api/v1/plugins/${encodeURIComponent(name)}`, { method: "DELETE" }),
   pluginMarket: () => request<{ plugins: Array<{ name: string; description: string; version: string; installed: boolean }> }>("/api/v1/plugins/market"),
   pluginInstall: (name: string) => request<{ ok: boolean }>(`/api/v1/plugins/market/${encodeURIComponent(name)}/install`, { method: "POST" }),
+  pluginConfig: (name: string) => request<{ config: Record<string, unknown> }>(`/api/v1/plugins/${encodeURIComponent(name)}/config`),
+  pluginSaveConfig: (name: string, config: Record<string, unknown>) =>
+    request<{ ok: boolean }>(`/api/v1/plugins/${encodeURIComponent(name)}/config`, { method: "PUT", body: JSON.stringify({ config }) }),
   themeList: () => request<{ themes: ThemeInfo[] }>("/api/v1/themes"),
   themeUpload: (file: File, sha256 = "") => {
     const form = new FormData();

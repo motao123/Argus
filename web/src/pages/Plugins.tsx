@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Play, ShieldCheck, Trash2, Zap } from "lucide-react";
+import { CheckCircle2, Play, Settings2, ShieldCheck, Trash2, Zap } from "lucide-react";
 import { api, type PluginInfo } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 
@@ -13,6 +13,25 @@ export default function Plugins() {
   const market = marketData?.plugins ?? [];
   const [tab, setTab] = useState<"installed" | "market">("installed");
   const [logs, setLogs] = useState<PluginInfo | null>(null);
+  const [cfgPlugin, setCfgPlugin] = useState<PluginInfo | null>(null);
+  const [cfgValues, setCfgValues] = useState<Record<string, unknown>>({});
+
+  // 打开配置对话框时拉取当前配置并初始化表单
+  const { data: cfgData } = useQuery({
+    queryKey: ["plugin-config", cfgPlugin?.name],
+    queryFn: () => api.pluginConfig(cfgPlugin!.name),
+    enabled: !!cfgPlugin,
+  });
+  useEffect(() => {
+    if (cfgPlugin) {
+      const init: Record<string, unknown> = {};
+      for (const item of cfgPlugin.configuration ?? []) {
+        init[item.key] = cfgData?.config?.[item.key] ?? item.default ?? (item.type === "boolean" ? false : item.type === "number" ? 0 : "");
+      }
+      setCfgValues(init);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfgPlugin]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["plugins"] });
@@ -23,6 +42,19 @@ export default function Plugins() {
   const run = useMutation({ mutationFn: api.pluginRun, onSuccess: invalidate });
   const del = useMutation({ mutationFn: api.pluginDelete, onSuccess: invalidate });
   const install = useMutation({ mutationFn: api.pluginInstall, onSuccess: invalidate });
+  const saveCfg = useMutation({
+    mutationFn: ({ name, config }: { name: string; config: Record<string, unknown> }) => api.pluginSaveConfig(name, config),
+    onSuccess: () => {
+      setCfgPlugin(null);
+      invalidate();
+    },
+  });
+
+  // 是否需要批准（危险能力任一声明）
+  const needsApproval = (p: PluginInfo) => {
+    const perms = p.permissions ?? {};
+    return !!(perms.allow_fetch || perms.allow_notify || perms.allow_rpc || perms.allow_system_rpc || perms.allow_routes || perms.allow_cron);
+  };
 
   return (
     <div>
@@ -61,7 +93,7 @@ export default function Plugins() {
                     )}
                     {p.approved ? (
                       <span className="rounded-full bg-ok/15 px-2 py-0.5 text-xs text-ok">{t("plugins.approved")}</span>
-                    ) : p.permissions?.allow_fetch || p.permissions?.allow_notify ? (
+                    ) : needsApproval(p) ? (
                       <span className="rounded-full bg-err/15 px-2 py-0.5 text-xs text-err">{t("plugins.pendingApproval")}</span>
                     ) : null}
                   </div>
@@ -77,6 +109,28 @@ export default function Plugins() {
                     {p.permissions?.allow_notify && (
                       <span className="rounded-full border border-border bg-muted/10 px-2 py-0.5 text-xs text-muted">{t("plugins.allowNotify")}</span>
                     )}
+                    {p.permissions?.allow_routes && (
+                      <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent">{t("plugins.allowRoutes")}</span>
+                    )}
+                    {p.permissions?.allow_rpc && (
+                      <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent">{t("plugins.allowRPC")}</span>
+                    )}
+                    {p.permissions?.allow_system_rpc && (
+                      <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent">{t("plugins.allowSystemRPC")}</span>
+                    )}
+                    {p.permissions?.allow_cron && (
+                      <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent">{t("plugins.allowCron")}</span>
+                    )}
+                    {(p.routes ?? []).map((r) => (
+                      <span key={r} className="rounded-full border border-border bg-muted/10 px-2 py-0.5 font-mono text-[11px] text-muted" title={t("plugins.routeTitle")}>
+                        {r}
+                      </span>
+                    ))}
+                    {(p.rpcs ?? []).map((r) => (
+                      <span key={r} className="rounded-full border border-border bg-muted/10 px-2 py-0.5 font-mono text-[11px] text-muted" title={t("plugins.rpcTitle")}>
+                        {r}()
+                      </span>
+                    ))}
                     {(p.events ?? []).map((ev) => (
                       <span key={ev} className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent" title={t("plugins.hookTitle", { event: ev })}>
                         {ev}
@@ -94,13 +148,18 @@ export default function Plugins() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  {(p.permissions?.allow_fetch || p.permissions?.allow_notify) && (
+                  {needsApproval(p) && (
                     <button
                       onClick={() => approve.mutate({ name: p.name, approved: !p.approved })}
                       title={t("plugins.approveTitle")}
                       className={`rounded p-1.5 ${p.approved ? "text-ok" : "text-muted"}`}
                     >
                       <ShieldCheck className="h-4 w-4" />
+                    </button>
+                  )}
+                  {(p.configuration ?? []).length > 0 && (
+                    <button onClick={() => setCfgPlugin(p)} title={t("plugins.configure")} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
+                      <Settings2 className="h-4 w-4" />
                     </button>
                   )}
                   <button onClick={() => setLogs(p)} title={t("plugins.viewLogs")} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
@@ -159,6 +218,58 @@ export default function Plugins() {
               {logs.logs?.join("\n") || t("plugins.noLogs")}
             </pre>
             <button onClick={() => setLogs(null)} className="mt-3 rounded-lg border border-border px-4 py-1.5 text-sm">{t("common.close")}</button>
+          </div>
+        </div>
+      )}
+
+      {cfgPlugin && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setCfgPlugin(null)}>
+          <div className="w-full max-w-md rounded-xl border border-border bg-panel p-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-3 text-sm font-medium">{t("plugins.configureTitle", { name: cfgPlugin.name })}</h3>
+            <div className="space-y-3">
+              {(cfgPlugin.configuration ?? []).map((item) => (
+                <label key={item.key} className="block">
+                  <span className="mb-1 block text-sm">{item.label}</span>
+                  {item.type === "boolean" ? (
+                    <select
+                      value={cfgValues[item.key] === true || cfgValues[item.key] === "true" ? "true" : "false"}
+                      onChange={(e) => setCfgValues({ ...cfgValues, [item.key]: e.target.value === "true" })}
+                      className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+                    >
+                      <option value="true">{t("common.enabled")}</option>
+                      <option value="false">{t("common.disabled")}</option>
+                    </select>
+                  ) : item.type === "select" ? (
+                    <select
+                      value={String(cfgValues[item.key] ?? "")}
+                      onChange={(e) => setCfgValues({ ...cfgValues, [item.key]: e.target.value })}
+                      className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+                    >
+                      {(item.options ?? []).map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={item.type === "number" ? "number" : "text"}
+                      value={String(cfgValues[item.key] ?? "")}
+                      onChange={(e) => setCfgValues({ ...cfgValues, [item.key]: item.type === "number" ? Number(e.target.value) : e.target.value })}
+                      className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => saveCfg.mutate({ name: cfgPlugin.name, config: cfgValues })}
+                disabled={saveCfg.isPending}
+                className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white"
+              >
+                {t("common.save")}
+              </button>
+              <button onClick={() => setCfgPlugin(null)} className="rounded-lg border border-border px-4 py-1.5 text-sm">{t("common.cancel")}</button>
+            </div>
           </div>
         </div>
       )}

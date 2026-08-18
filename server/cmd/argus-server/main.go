@@ -372,16 +372,24 @@ func main() {
 		log.Fatalf("invalid trusted proxies: %v", err)
 	}
 
-	// 自定义代码注入（设置键 custom_css / custom_js / custom_footer，热更新）
+	// 自定义代码注入（设置键 custom_css / custom_js / custom_footer + 插件 html_head/html_body，热更新）
 	injectHTML = func(html string) string {
 		css := srv.GetSetting(api.SettingCustomCSS, "")
 		js := srv.GetSetting(api.SettingCustomJS, "")
 		footer := srv.GetSetting(api.SettingCustomFooter, "")
+		// 插件注入：启用 + 批准的插件声明的 html_head/html_body（完整 HTML 片段，直接拼入）
+		pHead, pBody := plugins.HTMLInject()
 		if css != "" {
 			html = strings.Replace(html, "</head>", "<style>\n"+css+"\n</style>\n</head>", 1)
 		}
+		if pHead != "" {
+			html = strings.Replace(html, "</head>", pHead+"\n</head>", 1)
+		}
 		if js != "" {
 			html = strings.Replace(html, "</body>", "<script>\n"+js+"\n</script>\n</body>", 1)
+		}
+		if pBody != "" {
+			html = strings.Replace(html, "</body>", pBody+"\n</body>", 1)
 		}
 		if footer != "" {
 			html = strings.Replace(html, "Powered by Argus", footer+"\nPowered by Argus", 1)

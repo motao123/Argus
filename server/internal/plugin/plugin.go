@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,21 +47,37 @@ const (
 
 // Manifest 插件清单。
 type Manifest struct {
-	Name        string      `json:"name"`
-	Version     string      `json:"version"`
-	Description string      `json:"description"`
-	Cron        string      `json:"cron"`   // 标准 5/6 段 cron 或 @every 30s / @daily 等
-	Events      []string    `json:"events"` // 声明的事件 hook：onSchedule/onAlert/onServerOnline/onServerOffline
-	Permissions Permissions `json:"permissions"`
+	Name          string       `json:"name"`
+	Version       string       `json:"version"`
+	Description   string       `json:"description"`
+	Cron          string       `json:"cron"`   // 标准 5/6 段 cron 或 @every 30s / @daily 等
+	Events        []string     `json:"events"` // 声明的事件 hook：onSchedule/onAlert/onServerOnline/onServerOffline
+	Permissions   Permissions  `json:"permissions"`
+	Configuration []ConfigItem `json:"configuration,omitempty"` // 声明式配置项（管理端表单）
+	HTMLHead      string       `json:"html_head,omitempty"`     // 注入所有页面 <head> 的 HTML
+	HTMLBody      string       `json:"html_body,omitempty"`     // 注入所有页面 </body> 前的 HTML
+}
+
+// ConfigItem 插件声明式配置项（argus.config 合并默认值，管理端可覆盖）。
+type ConfigItem struct {
+	Key     string   `json:"key"`
+	Label   string   `json:"label"`
+	Type    string   `json:"type"` // text / number / boolean / select
+	Default any      `json:"default,omitempty"`
+	Options []string `json:"options,omitempty"`
 }
 
 // Permissions 插件权限声明（不声明即不授予；借鉴 komari manifest 权限模型）。
 type Permissions struct {
-	AllowFetch   bool     `json:"allow_fetch"`   // 允许网络请求（还需 fetch_domains 白名单 + 批准）
-	FetchDomains []string `json:"fetch_domains"` // fetch 域名白名单（空 = 不授予网络访问）
-	AllowNotify  bool     `json:"allow_notify"`  // 允许通过 argus.notify 发送通知（需批准）
-	AllowExec    bool     `json:"allow_exec"`    // 已删除的虚假权限：声明 true 将拒绝加载
-	Approved     bool     `json:"approved"`      // 管理员批准（运行时状态，state.json 持久化）
+	AllowFetch     bool     `json:"allow_fetch"`      // 允许网络请求（还需 fetch_domains 白名单 + 批准）
+	FetchDomains   []string `json:"fetch_domains"`    // fetch 域名白名单（空 = 不授予网络访问）
+	AllowNotify    bool     `json:"allow_notify"`     // 允许通过 argus.notify 发送通知（需批准）
+	AllowRPC       bool     `json:"allow_rpc"`        // 允许 argus.registerRPC 暴露 HTTP 可调用的 RPC 方法
+	AllowSystemRPC bool     `json:"allow_system_rpc"` // 允许 argus.callRPC 调用其他插件 RPC
+	AllowRoutes    bool     `json:"allow_routes"`     // 允许 argus.route 注册 HTTP 路由
+	AllowCron      bool     `json:"allow_cron"`       // 允许 argus.cron 注册定时任务
+	AllowExec      bool     `json:"allow_exec"`       // 已删除的虚假权限：声明 true 将拒绝加载
+	Approved       bool     `json:"approved"`         // 管理员批准（运行时状态，state.json 持久化）
 }
 
 // Plugin 运行中的插件。
@@ -112,6 +129,13 @@ type Manager struct {
 
 	cron *cron.Cron // 宿主调度器（标准 5/6 段 + 描述符）
 	ids  map[string]cron.EntryID
+	// scriptCron 记录 JS argus.cron 注册的调度（key "name:expr" → entryID），避免重复调度。
+	scriptCron map[string]cron.EntryID
+	// rpcMethods / routes 记录各插件通过宿主 API 暴露的 RPC 方法 / 路由（管理端展示）。
+	rpcMethods map[string]map[string]bool // plugin -> method
+	routes     map[string]map[string]bool // plugin -> "METHOD path"
+	// dispatching 派发深度（跨 VM 递归防护：插件 A 调 A/B 时阻断自递归与深度嵌套）。
+	dispatching map[string]int
 
 	// 宿主能力（main 注入；nil 表示不可用）
 	ServerSource func() []ServerView                         // 脱敏只读服务器列表
@@ -126,14 +150,41 @@ type Manager struct {
 	RunTimeout time.Duration // 单次执行/事件 hook 超时（0 = 默认 5s）
 }
 
+// invocation 一次插件 VM 调用的上下文；dispatch 非空时为「回调派发」模式
+// （重跑顶层脚本收集 handler 后按 kind/key 调用，不改持久状态）。
+type invocation struct {
+	name string
+	ctx  context.Context
+	// dispatch 目标（route/rpc/cron）。
+	kind string // "route" / "rpc" / "cron"
+	key  string // 路由 "METHOD path" / RPC method / cron expr
+	arg  any
+	// 本次 VM 内收集的 handler（顶层脚本调用 argus.registerRPC/route/cron 时填入）。
+	rpcs   map[string]goja.Callable
+	routes map[string]goja.Callable
+	crons  map[string]goja.Callable
+}
+
+// routeResult 插件路由 handler 返回的响应（dispatch 后由 HTTP 层写出）。
+type routeResult struct {
+	StatusCode int
+	Headers    map[string]string
+	Body       string
+	// streaming 未实现（保持缓冲一次返回，满足自托管监控场景）。
+}
+
 // New 创建管理器（dir = 插件根目录，如 ./data/plugins）。
 func New(dir string) *Manager {
 	return &Manager{
-		dir:     dir,
-		plugins: make(map[string]*Plugin),
-		running: make(map[string]bool),
-		cron:    cron.New(cron.WithParser(pluginCronParser)),
-		ids:     make(map[string]cron.EntryID),
+		dir:         dir,
+		plugins:     make(map[string]*Plugin),
+		running:     make(map[string]bool),
+		cron:        cron.New(cron.WithParser(pluginCronParser)),
+		ids:         make(map[string]cron.EntryID),
+		scriptCron:  make(map[string]cron.EntryID),
+		rpcMethods:  make(map[string]map[string]bool),
+		routes:      make(map[string]map[string]bool),
+		dispatching: make(map[string]int),
 	}
 }
 
@@ -247,6 +298,9 @@ func (m *Manager) SetEnabled(name string, enabled bool) bool {
 	p.syncPerm()
 	m.persistStateLocked(p)
 	m.mu.Unlock()
+	if !enabled {
+		m.stopScriptCrons(name)
+	}
 	m.schedule(name)
 	return true
 }
@@ -303,7 +357,10 @@ func (m *Manager) Delete(name string) bool {
 		return false
 	}
 	delete(m.plugins, name)
+	delete(m.rpcMethods, name)
+	delete(m.routes, name)
 	m.mu.Unlock()
+	m.stopScriptCrons(name)
 	if eid, ok := m.ids[name]; ok {
 		m.cron.Remove(eid)
 		delete(m.ids, name)
@@ -462,6 +519,41 @@ func (m *Manager) Run(name string) error {
 // runPlugin 在独立 VM 中执行插件：顶层脚本 + （可选）事件 hook 函数。
 // 超时中断、panic 恢复；任何错误都不影响宿主进程。
 func (m *Manager) runPlugin(p *Plugin, hook string, payload any) (err error) {
+	_, err = m.execute(p, &invocation{name: p.Name}, hook, payload)
+	return err
+}
+
+// dispatch 派发插件注册的回调（route / rpc / cron）：
+// 在独立 VM 中重跑顶层脚本收集 handler，再按 kind/key 调用并返回 JS 结果。
+// dispatch 模式下 argus.registerRPC/route/cron 只记录 handler，不修改持久状态、不重复调度。
+func (m *Manager) dispatch(name, kind, key string, arg any) (result any, err error) {
+	m.mu.Lock()
+	p, ok := m.plugins[name]
+	if ok && m.dispatching[name] > 0 {
+		ok = false // 递归派发阻断
+	}
+	if ok {
+		m.dispatching[name]++
+	}
+	m.mu.Unlock()
+	if !ok {
+		if p == nil {
+			return nil, fmt.Errorf("plugin %s not found", name)
+		}
+		return nil, fmt.Errorf("plugin %s recursive dispatch blocked", name)
+	}
+	defer func() {
+		m.mu.Lock()
+		m.dispatching[name]--
+		m.mu.Unlock()
+	}()
+	run := clonePlugin(p)
+	inv := &invocation{name: name, kind: kind, key: key, arg: arg}
+	return m.execute(run, inv, "", nil, m.dispatchAfter(inv))
+}
+
+// execute 在独立 VM 中运行插件顶层脚本，然后执行 afterTop 回调（hook 调用 / dispatch 派发）。
+func (m *Manager) execute(p *Plugin, inv *invocation, hook string, payload any, afterTop ...func(vm *goja.Runtime) (any, error)) (result any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("plugin %s panicked: %v", p.Name, r)
@@ -470,7 +562,7 @@ func (m *Manager) runPlugin(p *Plugin, hook string, payload any) (err error) {
 
 	src, err := os.ReadFile(filepath.Join(m.dir, p.Name, "plugin.js"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	timeout := m.RunTimeout
@@ -479,10 +571,11 @@ func (m *Manager) runPlugin(p *Plugin, hook string, payload any) (err error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	inv.ctx = ctx
 
 	vm := goja.New()
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
-	m.injectAPI(vm, p.Name, ctx)
+	m.injectAPI(vm, inv)
 
 	done := make(chan struct{})
 	go func() {
@@ -494,20 +587,323 @@ func (m *Manager) runPlugin(p *Plugin, hook string, payload any) (err error) {
 	}()
 
 	if _, err := vm.RunString(string(src)); err != nil {
-		return err
+		return nil, err
 	}
 
-	if hook != "" {
+	if len(afterTop) > 0 && afterTop[0] != nil {
+		result, err = afterTop[0](vm)
+	} else if hook != "" {
 		if fnVal := vm.Get(hook); fnVal != nil && !goja.IsUndefined(fnVal) && !goja.IsNull(fnVal) {
 			if fn, ok := goja.AssertFunction(fnVal); ok {
 				if _, err := fn(goja.Undefined(), vm.ToValue(payload)); err != nil {
-					return fmt.Errorf("%s hook: %v", hook, err)
+					return nil, fmt.Errorf("%s hook: %v", hook, err)
 				}
 			}
 		}
 	}
 	close(done)
+	return result, err
+}
+
+// dispatchAfter 生成 execute 的 afterTop 回调：在本次 VM 中按 kind/key 查找 handler 并调用。
+func (m *Manager) dispatchAfter(inv *invocation) func(vm *goja.Runtime) (any, error) {
+	return func(vm *goja.Runtime) (any, error) {
+		var fn goja.Callable
+		var ok bool
+		switch inv.kind {
+		case "rpc":
+			fn, ok = inv.rpcs[inv.key]
+		case "cron":
+			fn, ok = inv.crons[inv.key]
+		case "route":
+			fn, ok = inv.routes[inv.key]
+		default:
+			return nil, fmt.Errorf("unknown dispatch kind %q", inv.kind)
+		}
+		if !ok {
+			return nil, fmt.Errorf("plugin %s has no %s handler %q", inv.name, inv.kind, inv.key)
+		}
+		if inv.kind == "route" {
+			return m.runRouteHandler(vm, inv, fn)
+		}
+		rv, callErr := fn(goja.Undefined(), vm.ToValue(inv.arg))
+		if callErr != nil {
+			return nil, fmt.Errorf("%s %s: %v", inv.kind, inv.key, callErr)
+		}
+		return exportJSValue(vm, rv), nil
+	}
+}
+
+// exportJSValue 把 JS 值导出为可 JSON 序列化的 Go 值。
+func exportJSValue(vm *goja.Runtime, v goja.Value) any {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return nil
+	}
+	return v.Export()
+}
+
+// ---- 宿主 API 对外入口 ----
+
+// routeRequest 插件 route handler 收到的请求（HTTP 层构造）。
+type RouteRequest struct {
+	Method  string
+	Path    string
+	Query   map[string][]string
+	Headers map[string]string
+	Body    string
+}
+
+// CallRPC 调用插件通过 argus.registerRPC 暴露的 RPC 方法（同步返回 JS 结果）。
+func (m *Manager) CallRPC(name, method string, params any) (any, error) {
+	if !m.Has(name) {
+		return nil, fmt.Errorf("plugin %s not found", name)
+	}
+	return m.dispatch(name, "rpc", method, params)
+}
+
+// DispatchRoute 派发插件注册的 HTTP 路由（method + path 精确匹配）。
+func (m *Manager) DispatchRoute(name, method, path string, req *RouteRequest) (*routeResult, error) {
+	if !m.Has(name) {
+		return nil, fmt.Errorf("plugin %s not found", name)
+	}
+	key := strings.ToUpper(strings.TrimSpace(method)) + " " + path
+	arg := req
+	if arg == nil {
+		arg = &RouteRequest{Method: method, Path: path}
+	}
+	res, err := m.dispatch(name, "route", key, arg)
+	if err != nil {
+		return nil, err
+	}
+	rr, ok := res.(*routeResult)
+	if !ok {
+		return nil, fmt.Errorf("plugin %s route returned invalid result", name)
+	}
+	return rr, nil
+}
+
+// CronFire 触发 JS argus.cron 注册的回调（按 expr 查找 handler）。
+func (m *Manager) CronFire(name, expr string) {
+	if _, err := m.dispatch(name, "cron", expr, map[string]any{"time": time.Now().Format(time.RFC3339)}); err != nil {
+		m.addLog(name, "ERR cron "+expr+": "+err.Error())
+	}
+}
+
+// RPCs 返回插件暴露的 RPC 方法列表（去重保序，管理端展示）。
+func (m *Manager) RPCs(name string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.rpcMethods[name]))
+	for method := range m.rpcMethods[name] {
+		out = append(out, method)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Routes 返回插件注册的路由列表（"METHOD path"，去重保序）。
+func (m *Manager) Routes(name string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.routes[name]))
+	for key := range m.routes[name] {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// HTMLInject 聚合已启用 + 批准插件的 html_head / html_body 注入内容。
+func (m *Manager) HTMLInject() (head, body string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var hb, bb strings.Builder
+	for _, p := range m.plugins {
+		if !p.Enabled || !p.Permissions.Approved {
+			continue
+		}
+		if p.HTMLHead != "" {
+			hb.WriteString(p.HTMLHead)
+			hb.WriteString("\n")
+		}
+		if p.HTMLBody != "" {
+			bb.WriteString(p.HTMLBody)
+			bb.WriteString("\n")
+		}
+	}
+	return hb.String(), bb.String()
+}
+
+// recordRPCMethod 记录插件暴露的 RPC 方法（幂等）。
+func (m *Manager) recordRPCMethod(name, method string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.rpcMethods[name] == nil {
+		m.rpcMethods[name] = map[string]bool{}
+	}
+	m.rpcMethods[name][method] = true
+}
+
+// recordRoute 记录插件注册的路由（幂等）。
+func (m *Manager) recordRoute(name, method, path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.routes[name] == nil {
+		m.routes[name] = map[string]bool{}
+	}
+	m.routes[name][strings.ToUpper(method)+" "+path] = true
+}
+
+// scheduleScriptCron 调度 JS argus.cron 注册的任务（按 name:expr 去重）。
+func (m *Manager) scheduleScriptCron(name, expr string) {
+	if _, err := pluginCronParser.Parse(expr); err != nil {
+		m.addLog(name, "ERR argus.cron bad expr "+expr+": "+err.Error())
+		return
+	}
+	key := name + ":" + expr
+	m.mu.Lock()
+	if _, exists := m.scriptCron[key]; exists {
+		m.mu.Unlock()
+		return
+	}
+	// 预占：防止并发重复调度
+	m.scriptCron[key] = 0
+	m.mu.Unlock()
+	eid, err := m.cron.AddFunc(expr, func() { m.CronFire(name, expr) })
+	if err != nil {
+		m.mu.Lock()
+		delete(m.scriptCron, key)
+		m.mu.Unlock()
+		m.addLog(name, "ERR argus.cron schedule "+expr+": "+err.Error())
+		return
+	}
+	m.mu.Lock()
+	m.scriptCron[key] = eid
+	m.mu.Unlock()
+	m.addLog(name, "LOG argus.cron scheduled "+expr)
+}
+
+// stopScriptCrons 停止某插件的全部 JS cron 调度（删除/停用时调用）。
+func (m *Manager) stopScriptCrons(name string) {
+	m.mu.Lock()
+	var keys []string
+	for k := range m.scriptCron {
+		if strings.HasPrefix(k, name+":") {
+			keys = append(keys, k)
+		}
+	}
+	for _, k := range keys {
+		if eid, ok := m.scriptCron[k]; ok && eid != 0 {
+			m.cron.Remove(eid)
+		}
+		delete(m.scriptCron, k)
+	}
+	m.mu.Unlock()
+}
+
+// Config 返回插件配置：manifest 默认值 + config.json 覆盖值合并。
+func (m *Manager) Config(name string) map[string]any {
+	m.mu.Lock()
+	p, ok := m.plugins[name]
+	var defaults []ConfigItem
+	if ok {
+		defaults = append([]ConfigItem(nil), p.Configuration...)
+	}
+	m.mu.Unlock()
+	out := make(map[string]any)
+	for _, item := range defaults {
+		if item.Default != nil {
+			out[item.Key] = item.Default
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(m.dir, name, "config.json"))
+	if err == nil {
+		var overrides map[string]any
+		if json.Unmarshal(raw, &overrides) == nil {
+			for k, v := range overrides {
+				out[k] = v
+			}
+		}
+	}
+	return out
+}
+
+// SetConfig 保存插件配置到 config.json（仅接受 manifest 声明的键；值类型按声明强制）。
+func (m *Manager) SetConfig(name string, values map[string]any) error {
+	m.mu.Lock()
+	p, ok := m.plugins[name]
+	var items []ConfigItem
+	if ok {
+		items = append([]ConfigItem(nil), p.Configuration...)
+	}
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("plugin %s not found", name)
+	}
+	schema := make(map[string]ConfigItem, len(items))
+	for _, item := range items {
+		schema[item.Key] = item
+	}
+	clean := make(map[string]any)
+	for k, v := range values {
+		item, known := schema[k]
+		if !known {
+			continue
+		}
+		clean[k] = coerceConfigValue(item, v)
+	}
+	raw, _ := json.Marshal(clean)
+	if err := os.WriteFile(filepath.Join(m.dir, name, "config.json"), raw, 0o644); err != nil {
+		return err
+	}
 	return nil
+}
+
+// coerceConfigValue 按声明类型强制配置值类型。
+func coerceConfigValue(item ConfigItem, v any) any {
+	switch item.Type {
+	case "boolean":
+		switch t := v.(type) {
+		case bool:
+			return t
+		case string:
+			return t == "true" || t == "1"
+		case float64:
+			return t != 0
+		}
+	case "number":
+		switch t := v.(type) {
+		case float64:
+			return t
+		case int:
+			return float64(t)
+		case string:
+			if f, err := strconv.ParseFloat(t, 64); err == nil {
+				return f
+			}
+		}
+	case "select":
+		s := fmt.Sprint(v)
+		for _, opt := range item.Options {
+			if opt == s {
+				return s
+			}
+		}
+		if len(item.Options) > 0 {
+			return item.Options[0]
+		}
+	}
+	return fmt.Sprint(v)
+}
+
+// granted 检查权限：声明对应能力且已批准。
+func (m *Manager) granted(name, label string, check func(Permissions) bool) bool {
+	perms, ok := m.currentPermissions(name)
+	if !ok || !check(perms) || !perms.Approved {
+		m.addLog(name, "ERR argus."+label+" denied: missing permission or not approved")
+		return false
+	}
+	return true
 }
 
 // finishRun 记录运行状态并持久化。
@@ -532,8 +928,10 @@ func (m *Manager) finishRun(name string, err error) {
 
 // ---- 宿主 API ----
 
-// injectAPI 注入 console / argus / fetch。
-func (m *Manager) injectAPI(vm *goja.Runtime, name string, ctx context.Context) {
+// injectAPI 注入 console / argus / fetch / 宿主 API（route/rpc/cron/config）。
+func (m *Manager) injectAPI(vm *goja.Runtime, inv *invocation) {
+	name := inv.name
+	ctx := inv.ctx
 	console := vm.NewObject()
 	console.Set("log", func(call goja.FunctionCall) goja.Value {
 		m.logJS(name, "LOG", call)
@@ -595,6 +993,95 @@ func (m *Manager) injectAPI(vm *goja.Runtime, name string, ctx context.Context) 
 		return vm.ToValue(true)
 	})
 
+	// argus.registerRPC(method, fn) → 暴露 HTTP 可调用的 RPC 方法（需 allow_rpc + 批准）
+	argus.Set("registerRPC", func(call goja.FunctionCall) goja.Value {
+		defer m.recoverToLog(name, "argus.registerRPC")
+		if !m.granted(name, "registerRPC", func(p Permissions) bool { return p.AllowRPC }) {
+			return vm.ToValue(false)
+		}
+		method := strings.TrimSpace(call.Argument(0).String())
+		fn, ok := goja.AssertFunction(call.Argument(1))
+		if method == "" || !ok {
+			return vm.ToValue(false)
+		}
+		if inv.rpcs == nil {
+			inv.rpcs = map[string]goja.Callable{}
+		}
+		inv.rpcs[method] = fn
+		m.recordRPCMethod(name, method)
+		return vm.ToValue(true)
+	})
+
+	// argus.callRPC(name, method, params?) → 调用其他插件 RPC（同步返回；需 allow_system_rpc）
+	argus.Set("callRPC", func(call goja.FunctionCall) goja.Value {
+		defer m.recoverToLog(name, "argus.callRPC")
+		if !m.granted(name, "callRPC", func(p Permissions) bool { return p.AllowSystemRPC }) {
+			return goja.Undefined()
+		}
+		target := strings.TrimSpace(call.Argument(0).String())
+		method := strings.TrimSpace(call.Argument(1).String())
+		if target == "" || method == "" {
+			return goja.Undefined()
+		}
+		var params any
+		if len(call.Arguments) >= 3 && !goja.IsUndefined(call.Arguments[2]) && !goja.IsNull(call.Arguments[2]) {
+			params = call.Arguments[2].Export()
+		}
+		result, err := m.CallRPC(target, method, params)
+		if err != nil {
+			m.addLog(name, fmt.Sprintf("ERR argus.callRPC %s.%s: %v", target, method, err))
+			return goja.Undefined()
+		}
+		return vm.ToValue(result)
+	})
+
+	// argus.route(method, path, fn) → 注册 HTTP 路由（需 allow_routes + 批准；精确匹配 method+path）
+	argus.Set("route", func(call goja.FunctionCall) goja.Value {
+		defer m.recoverToLog(name, "argus.route")
+		if !m.granted(name, "route", func(p Permissions) bool { return p.AllowRoutes }) {
+			return vm.ToValue(false)
+		}
+		method := strings.ToUpper(strings.TrimSpace(call.Argument(0).String()))
+		path := strings.TrimSpace(call.Argument(1).String())
+		fn, ok := goja.AssertFunction(call.Argument(2))
+		if method == "" || path == "" || !ok {
+			return vm.ToValue(false)
+		}
+		if inv.routes == nil {
+			inv.routes = map[string]goja.Callable{}
+		}
+		inv.routes[method+" "+path] = fn
+		m.recordRoute(name, method, path)
+		return vm.ToValue(true)
+	})
+
+	// argus.cron(expr, fn) → 注册定时任务（需 allow_cron + 批准；dispatch 模式不重复调度）
+	argus.Set("cron", func(call goja.FunctionCall) goja.Value {
+		defer m.recoverToLog(name, "argus.cron")
+		if !m.granted(name, "cron", func(p Permissions) bool { return p.AllowCron }) {
+			return vm.ToValue(false)
+		}
+		expr := strings.TrimSpace(call.Argument(0).String())
+		fn, ok := goja.AssertFunction(call.Argument(1))
+		if expr == "" || !ok {
+			return vm.ToValue(false)
+		}
+		if inv.crons == nil {
+			inv.crons = map[string]goja.Callable{}
+		}
+		inv.crons[expr] = fn
+		if inv.kind == "" { // 仅普通运行（非 dispatch）时调度
+			m.scheduleScriptCron(name, expr)
+		}
+		return vm.ToValue(true)
+	})
+
+	// argus.config() → manifest 默认值 + 管理端覆盖值合并
+	argus.Set("config", func(goja.FunctionCall) goja.Value {
+		defer m.recoverToLog(name, "argus.config")
+		return vm.ToValue(m.Config(name))
+	})
+
 	// argus.kv.get/set → 每插件命名空间（kv.json 持久化，大小限制）
 	kv := vm.NewObject()
 	kv.Set("get", func(call goja.FunctionCall) goja.Value {
@@ -641,6 +1128,42 @@ func (m *Manager) injectAPI(vm *goja.Runtime, name string, ctx context.Context) 
 		}
 		return vm.ToValue(text)
 	})
+}
+
+// runRouteHandler 桥接插件 route handler：构造 req/res JS 对象，调用 fn(req, res)，读取 res。
+func (m *Manager) runRouteHandler(vm *goja.Runtime, inv *invocation, fn goja.Callable) (any, error) {
+	reqData, ok := inv.arg.(*RouteRequest)
+	if !ok {
+		reqData = &RouteRequest{}
+	}
+	req := vm.NewObject()
+	_ = req.Set("method", reqData.Method)
+	_ = req.Set("path", reqData.Path)
+	_ = req.Set("query", reqData.Query)
+	_ = req.Set("headers", reqData.Headers)
+	_ = req.Set("body", reqData.Body)
+	res := vm.NewObject()
+	_ = res.Set("statusCode", 200)
+	_ = res.Set("headers", vm.NewObject())
+	_ = res.Set("body", "")
+	if _, err := fn(goja.Undefined(), req, res); err != nil {
+		return nil, fmt.Errorf("route %s: %v", inv.key, err)
+	}
+	rr := &routeResult{StatusCode: 200, Headers: map[string]string{}}
+	if v := res.Get("statusCode"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+		rr.StatusCode = int(v.ToInteger())
+	}
+	if v := res.Get("headers"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+		if obj, ok := v.Export().(map[string]any); ok {
+			for k, val := range obj {
+				rr.Headers[k] = fmt.Sprint(val)
+			}
+		}
+	}
+	if v := res.Get("body"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+		rr.Body = v.String()
+	}
+	return rr, nil
 }
 
 func (m *Manager) currentPermissions(name string) (Permissions, bool) {

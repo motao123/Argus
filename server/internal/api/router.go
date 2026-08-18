@@ -193,6 +193,11 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/plugins/:name/approve", requireAdmin(), s.approvePlugin)
 			authed.POST("/plugins/:name/run", requireAdmin(), s.runPluginNow)
 			authed.DELETE("/plugins/:name", requireAdmin(), s.deletePlugin)
+			// 插件宿主 API：RPC 调用 / 路由派发 / 配置（admin）
+			authed.POST("/plugins/:name/rpc/:method", requireAdmin(), s.callPluginRPC)
+			authed.Any("/plugins/:name/route/*path", requireAdmin(), s.dispatchPluginRoute)
+			authed.GET("/plugins/:name/config", requireAdmin(), s.getPluginConfig)
+			authed.PUT("/plugins/:name/config", requireAdmin(), s.setPluginConfig)
 
 			// 主题包（admin；仅 CSS 变量/CSS + 受限静态资源，禁止 JS）
 			authed.GET("/themes", requireAdmin(), s.listThemes)
