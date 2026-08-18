@@ -205,6 +205,14 @@ bash scripts/release-build.sh   # 仅构建（需已存在 webdist）
 - [x] 服务器 / 报警 / 任务 / 服务监控 / 文件 / 访问控制 / 网络测试管理页
 - [x] 主题：light / dark / 跟随系统，主题市场
 
+**插件（goja 沙箱 + 宿主 API）**
+- [x] 本地市场安装 / 启停 / 权限审批 / 手动与 cron 执行 / 日志
+- [x] 宿主 API：`argus.registerRPC`（暴露 HTTP 可调用的 RPC 方法）、`argus.callRPC`（插件间调用）、`argus.route`（注册 HTTP 路由）、`argus.cron`（JS 定时任务）、`argus.config`（声明式配置 + 管理端覆盖）、`argus.getServers` / `argus.notify` / `argus.kv` / `fetch`（SSRF 防护）
+- [x] 页面注入：插件声明的 html_head / html_body 注入所有页面（启用 + 批准生效）
+
+**指标**
+- [x] CPU 分位数：分钟级 t-digest 采集、降采样无损合并，查询输出 cpu_p50/p95/p99（历史数据自动兼容）
+
 ## 协议
 
 Agent 与 Server 之间使用 WebSocket + JSON-RPC 2.0：

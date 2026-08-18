@@ -14,7 +14,7 @@
 | Agent 上报协议 | komari | JSON-RPC 2.0 over WS（v2），含 register/report/事件队列 | 借鉴式实现：无 jsonrpc 信封、无 pull/ack 事件队列、无 HTTP fallback；不兼容 komari v2 | ⚠️ 部分（协议风格借鉴） |
 | gRPC 上报流 | nezha | ReportSystemState/RequestTask 双向流 | 性能更强但工具链重，**不迁** | — |
 | 实时状态内存区 | nezha | ServerClass 内存台账 + 权限过滤 | 已实现 store.Hub | ✅ 已实现 |
-| 指标降采样 TSDB | komari | pkg/metric 分层 rollup（1m→5m→1h）+ t-digest | 单二进制场景采用 SQLite 分钟级 rollup + 聚合查询（internal/metric/rollup） | ✅ 已实现基础版 |
+| 指标降采样 TSDB | komari | pkg/metric 分层 rollup（1m→5m→1h）+ t-digest | 单二进制场景采用 SQLite 分钟级 rollup + 聚合查询（internal/metric/rollup）；P6b 补 CPU t-digest 百分位（p50/p95/p99，降采样无损合并） | ✅ 已实现基础版（+ CPU 分位数） |
 | 内存热降采样 | komari | raw 存内存 + 逐级物化 | 借鉴，Argus 已有 MetricBatcher | ✅ 已实现 |
 | VictoriaMetrics 封装 | nezha | pkg/tsdb 客户端 + 保留期 + 磁盘水位 | 单二进制可不迁（嵌入太重） | — |
 | GPU/温度采集 | nezha | State_SensorTemperature/GPU 字段 | agent hw.go 已采 GPU（nvidia-smi），温度待补 | ✅ GPU / 📋 温度 |
@@ -86,7 +86,7 @@
 | 审计日志 | komari/nezha | Log/MCPAuditLog | 后端分页查询与管理页均已实现；审计覆盖关键管理操作，但不是所有读取与内部任务 | ⚠️ 基础可用（非全量） |
 | 安装向导 | komari | 首启 install guide | 自动建 admin（ARGUS_ADMIN_USER/PASS） | ⚠️ 简化版 |
 | 主题系统 | komari | 主题包（zip+manifest）+ 主题市场 | 内置 light/dark + 自定义代码注入点 | ⚠️ 内置主题 |
-| 插件系统 | komari | goja 沙箱 JS 插件 + server 模块钩子 | 已有本地市场、安装/删除、持久启停、权限审批、手动/cron 执行与日志 UI；仍无通用路由/hook/页面扩展，沙箱不是强隔离边界，仅适合受信插件 | ⚠️ 基础可用（受信插件） |
+| 插件系统 | komari | goja 沙箱 JS 插件 + server 模块钩子 | P6a 宿主 API：argus.registerRPC/callRPC/route/cron/config + html_head/body 注入；dispatch 模式（每次调用重跑顶层收集 handler）；仍无完整 Node 模块与 WS 帧钩子，沙箱仅适合受信插件 | ⚠️ 基础可用（P6a 已补宿主 API） |
 | 分片上传 | komari | init/chunk/merge/cancel 通用上传 | 仅备份恢复 append 模式，无会话/顺序/哈希校验 | ⚠️ 简化，待重做 |
 | 私有站点模式 | komari | private_site 强制登录 | 第1项 force_auth（本次新增设置页入口） | ✅ 已实现 |
 | 自定义代码注入 | dash-v2/nezha | InjectContext 白标定制 | custom_code 设置项（komari 样式 head/body 注入） | ⚠️ 设置键待补全 |
@@ -197,7 +197,7 @@
 | 服务可用率条 | dash-v2 | ✅ 已实现 |
 | 命令面板 | dash-v2 | ✅ 已实现 |
 | GeoIP | nezha | ⚠️ 可选 HTTP provider，默认关闭；地图无定位数据时安全隐藏 |
-| 插件系统 | komari | ⚠️ 简化版（goja + 本地市场/管理 UI/权限审批），仅适合受信插件且无完整宿主扩展点 |
+| 插件系统 | komari | ✅ P6a 宿主 API（registerRPC/route/cron/config/HTML 注入），仍无完整 Node 模块/WS 钩子 |
 | 主题市场 | komari | 📋 待实现（内置主题 + 自定义代码） |
 | 计费/续费 | komari | ✅ 字段 + 到期提醒（界面待补） |
 | 多 GeoIP provider | komari | 📋 待实现 |
