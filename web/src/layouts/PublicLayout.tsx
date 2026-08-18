@@ -1,5 +1,5 @@
 // 前台布局（公开，无需登录）：顶栏式设计，借鉴 komari 前台 + dash-v2 游客模式
-import { Activity, Globe, LogIn, Moon, Settings, Sun } from "lucide-react";
+import { Activity, Globe, LogIn, Monitor, Moon, Settings, Sun } from "lucide-react";
 import { Outlet, Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useServers } from "../context/servers";
@@ -8,6 +8,7 @@ import { useI18n } from "../lib/i18n";
 import { useTheme } from "../lib/theme";
 import { useQuery } from "@tanstack/react-query";
 import CommandPalette from "../components/CommandPalette";
+import BackendErrorBanner from "../components/BackendErrorBanner";
 
 // 实时时钟（借鉴 dash-v2 Header）
 function Clock() {
@@ -40,6 +41,7 @@ export default function PublicLayout() {
 
   return (
     <div className="flex min-h-screen flex-col bg-bg">
+      <BackendErrorBanner />
       {/* 顶栏 */}
       <header className="sticky top-0 z-10 border-b border-border bg-panel/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
@@ -66,7 +68,7 @@ export default function PublicLayout() {
               className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5"
               title={t("common.theme")}
             >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "system" ? <Monitor className="h-4 w-4" /> : theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
             {loggedIn ? (
               <div className="flex items-center gap-2">

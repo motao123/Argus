@@ -25,6 +25,7 @@ export default {
     hidden: "隐藏",
     default: "默认",
     onlineOf: "在线 {online}/{total}",
+    backendUnreachable: "后端不可达，正在重试…",
     noMatch: "没有匹配的服务器",
     openMenu: "打开菜单",
     closeMenu: "关闭菜单",

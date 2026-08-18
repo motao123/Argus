@@ -167,15 +167,16 @@ bash scripts/release-build.sh   # 仅构建（需已存在 webdist）
 **监控**
 - [x] 实时监控：CPU / 内存 / 磁盘 / 网络速率 / 负载 / 在线状态
 - [x] 历史指标：SQLite 分钟级降采样 + 聚合查询（1h/24h/7d）
-- [x] 服务监控：HTTP / TCP / Ping 探测，今日可用率 + 30 天色块
-- [x] 网页终端：xterm.js + WebSocket 隧道
+- [x] 服务监控：HTTP / TCP / Ping / Command 探测，今日可用率 + 30 天色块
+- [x] 网页终端：xterm.js + WebSocket 隧道（PTY 会话，支持窗口尺寸调整）
+- [x] 网络测试：路由追踪（ICMP/TCP/UDP）、多源 mesh 追踪、Agent 间带宽测速
 
 **运维**
 - [x] 定时任务：cron 表达式向指定服务器下发命令，手动触发
 - [x] 文件管理器：远端目录浏览 / 上传 / 预览 / 删除
-- [x] 远程执行：管理台直接执行命令并查看输出
+- [x] 远程执行：管理台直接执行命令并查看输出（启用 2FA 时需二次验证）
 - [x] Agent 批量升级：持久化 Job + 受控并发 + 逐机回执 + SHA-256 强制校验 + 失败回滚；Server 重启后自动恢复未完成任务
-- [x] Agent 能力开关与网卡/挂载过滤：按服务器开关 metrics / probe / command / terminal / files / upgrade / nat 采集能力，并按网卡名与挂载点 include/exclude 过滤上报（UI 入口：服务器 → 新建/编辑配置）
+- [x] Agent 能力开关与网卡/挂载过滤：按服务器开关 metrics / probe / command / terminal / files / upgrade / nat / trace 采集能力，并按网卡名与挂载点 include/exclude 过滤上报（UI 入口：服务器 → 新建/编辑配置）
 - [x] 生命周期：服务器过户（密钥轮换 + 状态机 + 取消回滚）
 
 **MCP（默认关闭，`ARGUS_MCP_ENABLED=true` 启用）**
@@ -185,17 +186,24 @@ bash scripts/release-build.sh   # 仅构建（需已存在 webdist）
 - [x] 一次性传输：`fs.download_url` / `fs.upload_url`，带大小上限、有效期、SHA-256 与 `if-match` 条件覆盖
 
 **告警**
-- [x] 报警规则：阈值 + 持续时长状态机，触发/恢复双向提醒
-- [x] 通知渠道：webhook / bark / telegram / email / serverchan
+- [x] 报警规则：阈值 + 持续时长状态机，触发/恢复双向提醒；指标覆盖 CPU/内存/交换/磁盘/负载/连接数/进程数/温度/GPU/延迟/速率/累计流量/周期流量/离线
+- [x] 周期流量：锚点 + 单位（小时/天/周/月/年）步进，可自定义周期
+- [x] 通知渠道：webhook / bark / telegram / email / serverchan / javascript / dingtalk / wecom / feishu / slack / wxpusher / matrix
 
 **权限**
 - [x] 多用户：admin / user / readonly 三级；readonly 只读角色仅可查看公开视图与名下服务器状态、调用只读 MCP 工具（UI 入口：访问控制 → 用户角色）
 - [x] PAT 令牌：argus:{resource}:{verb} scope + 白名单 + 吊销
+- [x] TOTP 2FA：登录与敏感操作（远程执行/网页终端）二次验证，PAT 豁免
+- [x] 私有站点：强制登录 + 临时分享密钥（?temp_key=），通知 IP 打码
+
+**DDNS / NAT**
+- [x] DDNS：Webhook / Cloudflare / 腾讯 DNSPod / Hurricane Electric 四类 provider，A/AAAA 双记录
+- [x] NAT 内网穿透：HTTP Host 隧道 + 连接配额 + 保留域名保护
 
 **前端**
-- [x] 总览：统计卡、状态过滤、9 种排序、搜索分组
-- [x] 服务器 / 报警 / 任务 / 服务监控 / 文件 / 访问控制管理页
-- [x] 主题：light / dark
+- [x] 总览：统计卡、状态过滤、9 种排序、搜索分组、滚动位置恢复
+- [x] 服务器 / 报警 / 任务 / 服务监控 / 文件 / 访问控制 / 网络测试管理页
+- [x] 主题：light / dark / 跟随系统，主题市场
 
 ## 协议
 

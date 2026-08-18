@@ -99,7 +99,7 @@ describe("theme framework", () => {
     expect(document.getElementById("argus-theme-css")).toBeNull();
   });
 
-  it("Provider: toggleMode 切换明暗并持久化 localStorage + <html> class", () => {
+  it("Provider: toggleMode 三态循环 light → dark → system 并持久化 localStorage + <html> class", () => {
     mockPublicSettings("default");
     renderProbe();
     expect(screen.getByTestId("mode").textContent).toBe("light");
@@ -107,6 +107,9 @@ describe("theme framework", () => {
     expect(screen.getByTestId("mode").textContent).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(localStorage.getItem("argus-theme")).toBe("dark");
+    act(() => screen.getByTestId("toggle").click());
+    expect(screen.getByTestId("mode").textContent).toBe("system");
+    expect(localStorage.getItem("argus-theme")).toBe("system");
     act(() => screen.getByTestId("toggle").click());
     expect(screen.getByTestId("mode").textContent).toBe("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);

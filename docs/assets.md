@@ -18,7 +18,7 @@
 | 内存热降采样 | komari | raw 存内存 + 逐级物化 | 借鉴，Argus 已有 MetricBatcher | ✅ 已实现 |
 | VictoriaMetrics 封装 | nezha | pkg/tsdb 客户端 + 保留期 + 磁盘水位 | 单二进制可不迁（嵌入太重） | — |
 | GPU/温度采集 | nezha | State_SensorTemperature/GPU 字段 | agent hw.go 已采 GPU（nvidia-smi），温度待补 | ✅ GPU / 📋 温度 |
-| Ping/TCP/HTTP 服务监控 | nezha | ServiceSentinel + 探测任务分发 | **核心差异化功能** | ✅ 已实现 |
+| Ping/TCP/HTTP 服务监控 | nezha | ServiceSentinel + 探测任务分发 | **核心差异化功能** | ✅ 已实现（HTTP/TCP/Ping/Command 四类） |
 | Ping 监控 | komari | PingTask + PingRecord（icmp/tcp/http） | 与 nezha 服务监控合并（第4项 服务统计聚合 借鉴 PingRecord 延迟/丢包统计） | ✅ 已融合 |
 | 流量周期统计 | nezha | Transfer 模型 + cycle_transfer_stats | 30s 流量台账落库，详情页提供 24 小时/30 天/12 月周期图表，并接入周期流量告警 | ✅ 已实现 |
 
@@ -30,8 +30,9 @@
 | 触发任务（报警联动） | nezha | 报警失败/恢复时执行命令 | 报警规则可关联定时任务，触发时向任务目标下发命令 | ✅ 已实现 |
 | 手动触发防重放 | nezha | 一次性授权令牌 consume 语义 | cron run 已做登录/PAT 授权 | ✅ 已实现 |
 | 批量命令执行 | komari | admin:exec 批量下发 | 待实现 | 📋 待实现 |
+| 网络测试（trace/mesh/测速） | komari | networkTest nextTrace/iperf3/meshTrace | 路由追踪（icmp/tcp/udp）、多源 mesh、Agent 间带宽测速（纯 Go） | ✅ 已实现 |
 | 任务结果查询 | komari | getTaskResultsByTaskId | run 接口即时返回结果，历史未存 | ⚠️ 部分 |
-| 网页终端 | komari/nezha | WS 隧道 + IOStream 中继 | 单连接复用；当前 Agent 使用 stdin/stdout pipe 启动 shell，并非 PTY，交互式 TTY、窗口尺寸和全屏程序支持有限 | ⚠️ 基础可用（非 PTY） |
+| 网页终端 | komari/nezha | WS 隧道 + IOStream 中继 | 单连接复用；Agent 使用 PTY（creack/pty）启动交互式 shell，支持窗口尺寸调整与全屏程序 | ✅ 已实现（PTY） |
 | 文件管理器 | nezha | FsList/FsRead/FsWrite/FsDelete 任务 | **核心差异化** | ✅ 已实现 |
 | Agent 升级下发 | nezha | TaskTypeUpgrade | 管理页支持批量选择 Agent、制品 URL、版本与 SHA-256，下发后展示逐机结果；任务记录仅保存在当前进程内存 | ⚠️ 基础可用（记录不持久化） |
 | MCP 自动化接入 | nezha | /mcp JSON-RPC 端点 + server.exec/fs.* 工具 | **独特资产**，供 AI 操作服务器 | ✅ 已实现 |
@@ -47,7 +48,7 @@
 | 通知渠道 | komari | bark/telegram/webhook/email/serverchan/javascript | 第3项 JS 渠道已补，共 6 渠道 | ✅ 已实现 |
 | 通知渠道模板 | nezha | JSON/Form body + {{title}}/{{content}} | ✅ 已实现 | ✅ 已实现 |
 | 通知分组扇出 | nezha | NotificationGroup 多对多 | ✅ 已实现 | ✅ 已实现 |
-| 通知脱敏 | nezha | IP 打码开关 | 待实现 | 📋 待实现 |
+| 通知脱敏 | nezha | IP 打码开关 | mask_ip 设置（notifyctx 全局生效） | ✅ 已实现 |
 
 ### 1.4 服务器管理与多租户
 
@@ -68,10 +69,10 @@
 | 资产 | 来源 | 用途 | 改造要点 | Argus 状态 |
 |---|---|---|---|---|
 | OAuth2 登录 | komari/nezha | GitHub/Gitee/QQ/OIDC | 第5项 已实现（多 provider 可配置） | ✅ 已实现 |
-| TOTP 2FA | komari | 敏感操作二次验证 | twofa.go（setup/qrcode/enable/disable） | ✅ 已实现 |
+| TOTP 2FA | komari | 敏感操作二次验证 | twofa.go（setup/qrcode/enable/disable）+ 登录与敏感操作（exec/终端）二次验证，PAT 豁免 | ✅ 已实现 |
 | GeoIP（HTTP provider） | nezha | 服务器国家归属 | 通过 `ARGUS_GEOIP_ENDPOINT` 配置在线 HTTP provider，无内嵌 mmdb；默认不查询。地图依赖国家码，无 provider 或无有效定位点时安全隐藏 | ⚠️ 可选能力（默认关闭） |
 | GeoIP 多 provider | komari | mmdb/ipinfo/ipapi/geojs 可插拔 | 待实现 | 📋 待实现 |
-| DDNS | nezha | libdns cloudflare/tencentcloud/HE/webhook | 仅 webhook/cloudflare；已补 server 归属校验 | ⚠️ 基础可用 |
+| DDNS | nezha | libdns cloudflare/tencentcloud/HE/webhook | webhook/cloudflare/tencent（TC3 签名）/he 四类 provider，已补 server 归属校验 | ✅ 已实现 |
 | NAT 内网穿透 | nezha | 域名→服务器映射 + IOStream 隧道 | 简化的 HTTP Host 反向代理/TCP 隧道；无 TLS 终止、租约、配额或能力协商，且需单独暴露 `ARGUS_NAT_LISTEN`；已补 server 归属校验 | ⚠️ 基础可用（有限制） |
 
 ### 1.6 运维与系统能力
@@ -107,7 +108,7 @@
 | 实时时钟 | dash-v2 | Header AnimatedCount | ✅ 已实现 |
 | 登录用户检测轮询 | dash-v2 | fetchLoginUser 30s 触发重连 | ⚠️ 简化（登录态路由守卫） |
 | 错误边界 | dash-v2 | ErrorBoundary + ErrorPage | ✅ 已实现（应用根级 ErrorBoundary） |
-| 后端不可达提示 | dash-v2 | BackendErrorState | 📋 待实现 |
+| 后端不可达提示 | dash-v2 | BackendErrorState | ✅ 已实现（全局 banner，恢复自动隐藏） |
 | Mock 演示环境 | dash-v2 | mock-server + dev-mock 一键演示 | ✅ 已实现（web/scripts） |
 
 ### 2.2 管理后台
@@ -136,12 +137,12 @@
 | 资产 | 来源 | 用途 | Argus 状态 |
 |---|---|---|---|
 | shadcn/ui 风格组件 | dash-v2 | 自实现基元（卡片/表单/表格/对话框） | ✅ 已实现 |
-| 明暗主题系统 | dash-v2 | ThemeProvider + 防 FOUC + meta theme-color | ✅ 已实现 |
+| 明暗主题系统 | dash-v2 | ThemeProvider + 防 FOUC + meta theme-color | ✅ 已实现（light/dark/system 三态 + OS 跟随） |
 | 格式化工具 | dash-v2 | formatBytes/formatRelativeTime/cn | ✅ 已实现 |
 | API 封装 | dash-v2 | fetch + 统一响应壳 + JWT | ✅ 已实现 |
 | 数据适配层 | dash-v2 | formatNezhaInfo（原始→视图模型） | ✅ 已实现 |
 | 错误处理约定 | dash-v2 | retry + WS 静默容错 | ✅ 已实现基础版 |
-| 滚动位置保存 | dash-v2 | saveMainPageScrollPosition + 恢复 | 📋 待实现 |
+| 滚动位置保存 | dash-v2 | saveMainPageScrollPosition + 恢复 | ✅ 已实现（总览/前台恢复） |
 | 滑动指示器动画 | dash-v2 | use-active-indicator | ✅ 已实现基础版（分组 Tab） |
 | 自定义代码注入 | dash-v2 | InjectContext（白标定制） | ⚠️ 设置键待补全 |
 | 国旗/OS 图标 | dash-v2 | ServerFlag + GetOsName/logo-class | ✅ 已实现基础版 |

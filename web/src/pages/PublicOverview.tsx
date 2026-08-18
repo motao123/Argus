@@ -9,6 +9,7 @@ import { useServers } from "../context/servers";
 import { api } from "../lib/api";
 import { fmtBytes } from "../lib/format";
 import { useI18n, type TKey } from "../lib/i18n";
+import { useScrollRestore } from "../lib/scroll-restore";
 
 type SortKey =
   | "default" | "name" | "cpu" | "mem" | "disk" | "load"
@@ -58,6 +59,7 @@ function ServiceStatusStrip() {
 export default function PublicOverview() {
   const { servers: liveServers, wsStatus } = useServers();
   const { t, fmtNumber } = useI18n();
+  useScrollRestore();
   // 合并 REST 列表（含离线）与 WS 实时值：以 REST 为底，WS 覆盖在线服务器实时字段
   const { data: restData } = useQuery({ queryKey: ["servers-public"], queryFn: api.servers, refetchInterval: 30000 });
   const restServers = restData?.servers ?? [];

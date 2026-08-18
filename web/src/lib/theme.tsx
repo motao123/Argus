@@ -1,7 +1,8 @@
 // 主题框架（里程碑8）：ThemeProvider + useTheme，统一 AdminLayout/PublicLayout/CommandPalette
 // 各自维护的重复主题状态（参照 i18n 的 Provider + hook 模式）。
 //
-// - mode: light/dark（localStorage "argus-theme" 持久化，沿用旧键与 .dark class 语义）
+// - mode: light/dark/system（localStorage "argus-theme" 持久化，沿用旧键与 .dark class 语义；
+//   system 跟随操作系统 prefers-color-scheme，OS 切换时实时生效）
 // - activeTheme: 服务端启用的主题包（来自 /api/v1/public/settings 的 active_theme /
 //   active_theme_entry），以 <link id="argus-theme-css"> 注入入口 CSS；
 //   "default" 或请求失败（Mock 模式）时不注入，回退内置默认主题
@@ -16,7 +17,7 @@ import {
   type ReactNode,
 } from "react";
 
-export type ThemeMode = "light" | "dark";
+export type ThemeMode = "light" | "dark" | "system";
 
 const STORAGE_KEY = "argus-theme";
 const DEFAULT_MODE: ThemeMode = "light";
@@ -42,15 +43,28 @@ export interface ThemeContextValue {
 
 export const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+const MODE_CYCLE: ThemeMode[] = ["light", "dark", "system"];
+
 /** 探测明暗模式：localStorage → <html> class → 默认 light。 */
 export function detectMode(): ThemeMode {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark") return stored;
+    if (stored === "light" || stored === "dark" || stored === "system") return stored;
   } catch {
     // ignore
   }
   return document.documentElement.classList.contains("dark") ? "dark" : DEFAULT_MODE;
+}
+
+/** 操作系统是否偏好深色。 */
+export function prefersDark(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)")?.matches === true;
+}
+
+/** 解析模式为实际明暗（system → 跟随 OS）。 */
+export function resolveMode(mode: ThemeMode): "light" | "dark" {
+  if (mode === "system") return prefersDark() ? "dark" : "light";
+  return mode;
 }
 
 /** 主题入口 CSS 完整 URL（名称与路径均做 URL 编码）。 */
@@ -100,14 +114,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setActive(info);
   }, []);
 
-  // 明暗模式：持久化 + 同步 <html> class
+  // 明暗模式：持久化 + 同步 <html> class（system 跟随 OS，变化时实时生效）
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, mode);
     } catch {
       // ignore
     }
-    document.documentElement.classList.toggle("dark", mode === "dark");
+    const apply = () => document.documentElement.classList.toggle("dark", resolveMode(mode) === "dark");
+    apply();
+    if (mode === "system") {
+      const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+      mq?.addEventListener?.("change", apply);
+      return () => mq?.removeEventListener?.("change", apply);
+    }
+    return undefined;
   }, [mode]);
 
   // 首次挂载拉取服务端启用主题
@@ -124,7 +145,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     () => ({
       mode,
       setMode,
-      toggleMode: () => setMode(mode === "dark" ? "light" : "dark"),
+      toggleMode: () => {
+        const i = MODE_CYCLE.indexOf(mode);
+        setMode(MODE_CYCLE[(i + 1) % MODE_CYCLE.length]);
+      },
       active,
       refresh,
     }),

@@ -751,7 +751,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers.Authorization = `Bearer ${token}`;
   // FormData 让浏览器自动设置 multipart boundary
   if (!(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
-  const res = await fetch(path, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(path, { ...options, headers });
+  } catch (err) {
+    // 网络层失败（后端不可达），广播事件供全局 banner 提示
+    window.dispatchEvent(new CustomEvent("argus:backend-unreachable", { detail: { path } }));
+    throw err;
+  }
+  notifyBackendReachable();
   if (res.status === 401 && !path.includes("/auth/login") && !path.includes("/auth/oauth")) {
     setToken(null);
     window.location.href = "/login";
@@ -762,6 +770,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError(body.error || `HTTP ${res.status}`, body.code, res.status);
   }
   return body.data;
+}
+
+/** 后端恢复：清除不可达标记（供全局 banner 自动隐藏）。 */
+function notifyBackendReachable(): void {
+  window.dispatchEvent(new CustomEvent("argus:backend-reachable"));
 }
 
 // requestBlob 用于二维码 PNG、备份下载等非 JSON 响应。

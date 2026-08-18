@@ -3,29 +3,43 @@
 package task
 
 import (
-	"io"
+	"os"
 	"os/exec"
+
+	"github.com/creack/pty"
 )
 
+// terminalIO 基于 PTY 的终端 I/O：读写、窗口尺寸调整、关闭。
+// PTY 让交互式程序（vim/top 等）获得完整 TTY 语义与颜色控制序列。
 type terminalIO struct {
-	in  io.WriteCloser
-	out io.ReadCloser
+	tty *os.File
 }
 
-func startTerminal(cmd *exec.Cmd, _, _ int) (*terminalIO, error) {
-	in, err := cmd.StdinPipe()
+func startTerminal(cmd *exec.Cmd, cols, rows int) (*terminalIO, error) {
+	// 通过 PTY 启动子进程，stdout/stderr 合并到同一终端
+	t, err := pty.Start(cmd)
 	if err != nil {
 		return nil, err
 	}
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = in.Close()
-		return nil, err
+	if cols > 0 && rows > 0 {
+		_ = pty.Setsize(t, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	}
-	cmd.Stderr = cmd.Stdout
-	return &terminalIO{in: in, out: out}, nil
+	return &terminalIO{tty: t}, nil
 }
-func (t *terminalIO) Read(p []byte) (int, error)  { return t.out.Read(p) }
-func (t *terminalIO) Write(p []byte) (int, error) { return t.in.Write(p) }
-func (t *terminalIO) Resize(_, _ int) error       { return nil }
-func (t *terminalIO) Close() error                { _ = t.in.Close(); return t.out.Close() }
+
+func (t *terminalIO) Read(p []byte) (int, error)  { return t.tty.Read(p) }
+func (t *terminalIO) Write(p []byte) (int, error) { return t.tty.Write(p) }
+
+func (t *terminalIO) Resize(cols, rows int) error {
+	if t.tty == nil {
+		return nil
+	}
+	return pty.Setsize(t.tty, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+}
+
+func (t *terminalIO) Close() error {
+	if t.tty == nil {
+		return nil
+	}
+	return t.tty.Close()
+}

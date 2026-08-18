@@ -3,6 +3,7 @@ module github.com/motao123/Argus/agent
 go 1.26.6
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	github.com/motao123/Argus/protocol v0.0.0
 	github.com/shirou/gopsutil/v4 v4.26.7

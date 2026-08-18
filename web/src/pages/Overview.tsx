@@ -7,6 +7,7 @@ import { useServers } from "../context/servers";
 import { api, type TopMetric, type TopServerEntry } from "../lib/api";
 import { fmtBytes } from "../lib/format";
 import { useI18n, type TKey } from "../lib/i18n";
+import { useScrollRestore } from "../lib/scroll-restore";
 
 type SortKey =
   | "default" | "name" | "cpu" | "mem" | "disk" | "load"
@@ -58,6 +59,7 @@ function TopRow({ entry, value, pct, color }: { entry: TopServerEntry; value: st
 export default function Overview() {
   const { servers, online, total } = useServers();
   const { t, fmtNumber } = useI18n();
+  useScrollRestore();
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("default");

@@ -26,6 +26,7 @@ export default {
     hidden: "Hidden",
     default: "Default",
     onlineOf: "Online {online}/{total}",
+    backendUnreachable: "Backend unreachable, retrying…",
     noMatch: "No matching servers",
     openMenu: "Open menu",
     closeMenu: "Close menu",

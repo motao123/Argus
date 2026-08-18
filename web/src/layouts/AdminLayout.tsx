@@ -1,12 +1,13 @@
-import { Activity, Bell, BellRing, CalendarClock, ChartLine, ClipboardList, DatabaseBackup, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, MonitorSmartphone, Moon, Network as NetworkIcon, Palette, Radar, RadioTower, ScrollText, Settings as SettingsIcon, ShieldAlert, ShieldCheck, Sun, TriangleAlert, Users, Wrench, X, Zap } from "lucide-react";
+import { Activity, Bell, BellRing, CalendarClock, ChartLine, ClipboardList, DatabaseBackup, FolderOpen, Globe, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, MonitorSmartphone, Moon, Network as NetworkIcon, Palette, Radar, RadioTower, ScrollText, Settings as SettingsIcon, ShieldAlert, ShieldCheck, Sun, TriangleAlert, Users, Wrench, X, Zap } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useServers } from "../context/servers";
 import { api, setToken } from "../lib/api";
 import { useI18n, type TKey } from "../lib/i18n";
-import { useTheme } from "../lib/theme";
+import { useTheme, type ThemeMode } from "../lib/theme";
 import CommandPalette from "../components/CommandPalette";
+import BackendErrorBanner from "../components/BackendErrorBanner";
 
 // roles 缺省 = 全部角色；与后端权限矩阵保持一致（前后端菜单收敛）。
 // 菜单按一级分组折叠展示：监控 / 运维 / 通知 / 系统 / 扩展；总览单独置顶。
@@ -74,7 +75,7 @@ function visibleGroups(role: string, pathname: string): { group: NavGroup; items
   return out;
 }
 
-function SidebarContent({ theme, onToggleTheme, onToggleLang, onNavigate }: { theme: "light" | "dark"; onToggleTheme: () => void; onToggleLang: () => void; onNavigate?: () => void }) {
+function SidebarContent({ theme, onToggleTheme, onToggleLang, onNavigate }: { theme: ThemeMode; onToggleTheme: () => void; onToggleLang: () => void; onNavigate?: () => void }) {
   const { online, total } = useServers();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
@@ -170,7 +171,7 @@ function SidebarContent({ theme, onToggleTheme, onToggleLang, onNavigate }: { th
               {lang === "zh-CN" ? "EN" : "中文"}
             </button>
             <button onClick={onToggleTheme} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5" title={t("common.theme")}>
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "system" ? <Monitor className="h-4 w-4" /> : theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
           </span>
         </div>
@@ -197,6 +198,7 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen">
+      <BackendErrorBanner />
       {/* 桌面端固定侧栏 */}
       <aside className="fixed inset-y-0 left-0 z-10 hidden w-52 flex-col border-r border-border bg-panel lg:flex">
         <SidebarContent theme={theme} onToggleTheme={toggleMode} onToggleLang={toggleLang} />
@@ -211,7 +213,7 @@ export default function Layout() {
           <Activity className="h-5 w-5 text-accent" /> Argus
         </div>
         <button onClick={toggleMode} className="rounded-lg p-2 hover:bg-black/5 dark:hover:bg-white/5" aria-label={t("common.theme")}>
-          {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          {theme === "system" ? <Monitor className="h-5 w-5" /> : theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </button>
       </header>
       {drawerOpen && (

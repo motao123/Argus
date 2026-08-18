@@ -21,7 +21,7 @@ nezha 新版（master）配置为 `listen_port`/`listen_host` + `oauth2` map 结
 | Agent 上报协议 | ✅ JSON-RPC 2.0 over WS/HTTP | ✅ gRPC 双向流 | — | 两套协议，komari 轻量免 protobuf |
 | 实时监控指标 | ✅ CPU/内存/磁盘/网络/GPU | ✅ 同左 + 温度 | ✅ 展示 | 采集项基本对齐 |
 | 历史指标存储 | ✅ 分层 rollup + t-digest 百分比 | ✅ TSDB（VM 嵌入，可关闭回退 SQLite） | ✅ 图表消费 | komari 存储工程更完整，nezha 依赖外部 TSDB |
-| 服务监控 HTTP/TCP/Ping | ❌（仅 Ping 任务） | ✅ ServiceSentinel 完整 | ✅ 展示 + 可用率条 | **nezha 独占** |
+| 服务监控 HTTP/TCP/Ping | ❌（仅 Ping 任务） | ✅ ServiceSentinel 完整 | ✅ 展示 + 可用率条 | **nezha 独占**（Argus 已实现 HTTP/TCP/Ping/Command） |
 | 报警规则 | ✅ 离线/负载/流量三类通知 | ✅ 阈值状态机 + 周期流量 + 触发任务 | — | 两套规则引擎，nezha 更严谨 |
 | 通知渠道 | ✅ bark/telegram/webhook/email/serverchan/JS 脚本 | ✅ Webhook（JSON/Form 模板） | — | **komari 渠道更多** |
 | 定时任务 | ✅ cron 下发 | ✅ cron + 触发任务 + 手动授权 | — | nezha 多触发任务 |
@@ -30,7 +30,7 @@ nezha 新版（master）配置为 `listen_port`/`listen_host` + `oauth2` map 结
 | 多用户 | ⚠️ 用户 + 会话管理 | ✅ admin/user 两级 + 过户 | — | **nezha 多租户完整** |
 | PAT 细粒度权限 | ⚠️ API Key（Bearer） | ✅ scope + 白名单 + 吊销 | — | **nezha 独占** |
 | OAuth2/2FA | ✅ GitHub/QQ/OIDC + TOTP 2FA | ✅ 多 provider + 会话 | — | komari 多 2FA |
-| DDNS | ❌ | ✅ Cloudflare/腾讯/HE/webhook | — | **nezha 独占** |
+| DDNS | ❌ | ✅ Cloudflare/腾讯/HE/webhook | — | **nezha 独占**（Argus 已实现四类 provider） |
 | NAT 内网穿透 | ❌ | ✅ 域名→内网隧道 | — | **nezha 独占** |
 | GeoIP | ✅ mmdb + 3 在线 provider | ✅ 内嵌 mmdb | ✅ 地图聚合 | komari provider 可插拔 |
 | 插件系统 | ✅ goja JS 沙箱 + 市场 | ❌ | — | **komari 独占** |
@@ -55,10 +55,10 @@ nezha 新版（master）配置为 `listen_port`/`listen_host` + `oauth2` map 结
 | 图表 | 实时+历史拼接、Realtime/1D/7D/30D、削峰 | 1h/24h/7d + 实时拼接（B3） | ✅ 已对齐 |
 | 地图 | d3-geo 全球地图 + 国家聚合 | 世界地图（国家筛选/折叠） | ✅ 已对齐 |
 | 服务可用率 | 30 天色块条 + 阈值着色 | 30 天色块（B3） | ✅ 已对齐 |
-| 主题 | light/dark/system 三态 + 防 FOUC | light/dark + 防 FOUC | ⚠️ 缺 system 跟随 |
+| 主题 | light/dark/system 三态 + 防 FOUC | light/dark + 防 FOUC | ⚠️ 缺 system 跟随（P5 已补 system 三态） |
 | 语言 | 14 语言 i18n | 中/英（EN 按钮） | ⚠️ 未全量 i18n |
 | 时钟 | 实时时钟 AnimatedCount | 实时时钟 | ✅ 已对齐 |
-| 空态/错误态 | 空态插画 + 后端不可达提示 | 空态文本 | ⚠️ 缺插画 |
+| 空态/错误态 | 空态插画 + 后端不可达提示 | 空态文本 | ⚠️ 缺插画（后端不可达 banner 已补） |
 | 移动端 | 响应式网格 | 响应式网格 | ✅ 基本对齐 |
 
 ## 四、技术栈架构对比
