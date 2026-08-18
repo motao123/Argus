@@ -229,6 +229,7 @@ export default {
     period24h: "24h",
     period7d: "7d",
     chartCpu: "CPU Usage",
+    chartCpuP95: "CPU P95",
     chartLoad: "Load (1min)",
     chartDiskRead: "Disk Read Speed",
     chartDiskWrite: "Disk Write Speed",

@@ -499,6 +499,9 @@ export interface NATListResponse {
 export interface MetricPoint {
   ts: number;
   cpu: number;
+  cpu_p50?: number;
+  cpu_p95?: number;
+  cpu_p99?: number;
   net_in: number;
   net_out: number;
   load1: number;

@@ -11,6 +11,7 @@ import (
 
 	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/tdigest"
 )
 
 // State 单台服务器的运行时状态（内存态）。
@@ -149,6 +150,8 @@ type bucket struct {
 	gpuSum                                                                 float64
 	processSum, tcpEstablishedSum, tcpListenSum, udpSum                    float64
 	diskReadSpeedSum, diskWriteSpeedSum, diskReadIOPSSum, diskWriteIOPSSum float64
+	// cpuDigest 本分钟 CPU 样本的 t-digest（百分位 p50/p95/p99 计算）。
+	cpuDigest *tdigest.TDigest
 }
 
 // MetricBatcher 聚合 Agent 上报为分钟级指标并批量落库。
@@ -192,6 +195,10 @@ func (m *MetricBatcher) Feed(serverID int64, r *protocol.ReportParams) {
 	}
 	b.count++
 	b.cpuSum += r.CPU
+	if b.cpuDigest == nil {
+		b.cpuDigest = tdigest.New(0)
+	}
+	b.cpuDigest.Add(r.CPU)
 	b.memUsed = r.MemUsed
 	b.memTotal = r.MemTotal
 	b.diskUsed = r.DiskUsed
@@ -233,7 +240,7 @@ func (b *bucket) toRow() *metricRow {
 	if n == 0 {
 		n = 1
 	}
-	return &metricRow{
+	row := &metricRow{
 		ServerID:     b.serverID,
 		TS:           b.ts,
 		Granularity:  60,
@@ -252,6 +259,11 @@ func (b *bucket) toRow() *metricRow {
 		DiskReadSpeed: b.diskReadSpeedSum / n, DiskWriteSpeed: b.diskWriteSpeedSum / n,
 		DiskReadIOPS: b.diskReadIOPSSum / n, DiskWriteIOPS: b.diskWriteIOPSSum / n,
 	}
+	if b.cpuDigest != nil && b.cpuDigest.Count() > 0 {
+		row.Samples = int(b.cpuDigest.Count())
+		row.Digest = b.cpuDigest.Encode()
+	}
+	return row
 }
 
 // Flush 将 pending 中已完成的分钟桶写入 DB。

@@ -16,6 +16,7 @@ import (
 	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/tdigest"
 	trafficquota "github.com/motao123/Argus/server/internal/traffic"
 )
 
@@ -397,12 +398,14 @@ func metricPeriodConfig(period string) (seconds, step int64, gran int) {
 
 // aggregateMetrics 把原始指标行按 step 秒降采样为聚合点
 // （与单机 serverMetrics 口径完全一致，多机对比可复用）。
+// 若原始行携带 CPU t-digest，合并后输出 cpu_p50/cpu_p95/cpu_p99（历史数据无 digest 时省略）。
 func aggregateMetrics(rows []model.Metric, step int64) []gin.H {
 	type agg struct {
 		count                                                                         int
 		cpu, netIn, netOut, load1, temp, gpu, process, tcpEstablished, tcpListen, udp float64
 		diskReadSpeed, diskWriteSpeed, diskReadIOPS, diskWriteIOPS                    float64
 		memUsed, memTotal, diskUsed, diskTotal                                        uint64
+		cpuDigest                                                                     *tdigest.TDigest
 	}
 	buckets := map[int64]*agg{}
 	var order []int64
@@ -433,13 +436,21 @@ func aggregateMetrics(rows []model.Metric, step int64) []gin.H {
 		a.memTotal = r.MemTotal
 		a.diskUsed = r.DiskUsed
 		a.diskTotal = r.DiskTotal
+		if len(r.Digest) > 0 {
+			if child, err := tdigest.Decode(r.Digest); err == nil {
+				if a.cpuDigest == nil {
+					a.cpuDigest = tdigest.New(0)
+				}
+				a.cpuDigest.Merge(child)
+			}
+		}
 	}
 
 	out := make([]gin.H, 0, len(order))
 	for _, bts := range order {
 		a := buckets[bts]
 		n := float64(a.count)
-		out = append(out, gin.H{
+		point := gin.H{
 			"ts":            bts,
 			"cpu":           round2(a.cpu / n),
 			"net_in":        round2(a.netIn / n),
@@ -453,7 +464,14 @@ func aggregateMetrics(rows []model.Metric, step int64) []gin.H {
 			"mem_total":  a.memTotal,
 			"disk_used":  a.diskUsed,
 			"disk_total": a.diskTotal,
-		})
+		}
+		// CPU 分位数（合并 digest 后计算；历史数据无 digest 时省略字段）
+		if a.cpuDigest != nil && a.cpuDigest.Count() > 0 {
+			point["cpu_p50"] = round2(a.cpuDigest.Percentile(50))
+			point["cpu_p95"] = round2(a.cpuDigest.Percentile(95))
+			point["cpu_p99"] = round2(a.cpuDigest.Percentile(99))
+		}
+		out = append(out, point)
 	}
 	return out
 }

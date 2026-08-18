@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/motao123/Argus/server/internal/model"
+	"github.com/motao123/Argus/server/internal/tdigest"
 )
 
 // Granularity 常量。
@@ -29,10 +30,13 @@ type agg struct {
 	process, tcpEstablished, tcpListen, udp                    float64
 	diskReadSpeed, diskWriteSpeed, diskReadIOPS, diskWriteIOPS float64
 	memUsed, memTotal, diskUsed, diskTotal                     uint64
+	cpuDigest                                                  *tdigest.TDigest
+	samples                                                    int
 }
 
 // aggregate 把 srcGran 数据聚合成 dstGran。
 // 只聚合已完成的桶（ts <= now-dstGran），且幂等覆盖，避免不完整桶被固化或重复累计。
+// CPU 分位数：合并子桶的 t-digest（无损合成），父桶携带合并后的 digest 与样本数。
 func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 	rows := []model.Metric{}
 	r.db.Where("granularity = ? AND ts >= ?", srcGran, cutoff.Unix()).Find(&rows)
@@ -69,6 +73,15 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 		a.diskWriteSpeed += row.DiskWriteSpeed
 		a.diskReadIOPS += row.DiskReadIOPS
 		a.diskWriteIOPS += row.DiskWriteIOPS
+		a.samples += row.Samples
+		if len(row.Digest) > 0 {
+			if child, err := tdigest.Decode(row.Digest); err == nil {
+				if a.cpuDigest == nil {
+					a.cpuDigest = tdigest.New(0)
+				}
+				a.cpuDigest.Merge(child)
+			}
+		}
 	}
 
 	now := time.Now()
@@ -99,7 +112,14 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 				GPUUtil:      a.gpu / n,
 				ProcessCount: a.process / n, TCPEstablished: a.tcpEstablished / n, TCPListen: a.tcpListen / n, UDPCount: a.udp / n,
 				DiskReadSpeed: a.diskReadSpeed / n, DiskWriteSpeed: a.diskWriteSpeed / n, DiskReadIOPS: a.diskReadIOPS / n, DiskWriteIOPS: a.diskWriteIOPS / n,
+				Samples:   a.samples,
 				CreatedAt: now,
+			}
+			if a.cpuDigest != nil && a.cpuDigest.Count() > 0 {
+				row.Digest = a.cpuDigest.Encode()
+				if row.Samples == 0 {
+					row.Samples = int(a.cpuDigest.Count())
+				}
 			}
 			// 幂等覆盖：已存在则更新（原始分钟数据不变，重算结果一致）
 			res := r.db.Model(&model.Metric{}).
@@ -111,6 +131,7 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 					"load1": row.Load1, "temperature": row.Temperature, "gpu_util": row.GPUUtil,
 					"process_count": row.ProcessCount, "tcp_established": row.TCPEstablished, "tcp_listen": row.TCPListen, "udp_count": row.UDPCount,
 					"disk_read_speed": row.DiskReadSpeed, "disk_write_speed": row.DiskWriteSpeed, "disk_read_iops": row.DiskReadIOPS, "disk_write_iops": row.DiskWriteIOPS,
+					"samples": row.Samples, "digest": row.Digest,
 				})
 			if res.RowsAffected == 0 {
 				r.db.Create(&row)

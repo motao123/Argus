@@ -272,29 +272,33 @@ type TaskRunResult struct {
 
 // Metric 降采样指标（granularity: 60=分钟 / 300=5分钟 / 3600=小时）。
 type Metric struct {
-	ID             int64     `gorm:"primaryKey" json:"-"`
-	ServerID       int64     `gorm:"index:idx_metric_server_ts" json:"server_id"`
-	TS             int64     `gorm:"index:idx_metric_server_ts" json:"ts"` // unix 秒（整周期）
-	Granularity    int       `gorm:"index:idx_metric_gran" json:"-"`       // 60/300/3600
-	CPU            float64   `json:"cpu"`
-	MemUsed        uint64    `json:"mem_used"`
-	MemTotal       uint64    `json:"mem_total"`
-	DiskUsed       uint64    `json:"disk_used"`
-	DiskTotal      uint64    `json:"disk_total"`
-	NetInSpeed     float64   `json:"net_in_speed"`
-	NetOutSpeed    float64   `json:"net_out_speed"`
-	Load1          float64   `json:"load1"`
-	Temperature    float64   `json:"temperature,omitempty"`
-	GPUUtil        float64   `json:"gpu_util,omitempty"`
-	ProcessCount   float64   `json:"process_count,omitempty"`
-	TCPEstablished float64   `json:"tcp_established,omitempty"`
-	TCPListen      float64   `json:"tcp_listen,omitempty"`
-	UDPCount       float64   `json:"udp_count,omitempty"`
-	DiskReadSpeed  float64   `json:"disk_read_speed,omitempty"`
-	DiskWriteSpeed float64   `json:"disk_write_speed,omitempty"`
-	DiskReadIOPS   float64   `json:"disk_read_iops,omitempty"`
-	DiskWriteIOPS  float64   `json:"disk_write_iops,omitempty"`
-	CreatedAt      time.Time `json:"-"`
+	ID             int64   `gorm:"primaryKey" json:"-"`
+	ServerID       int64   `gorm:"index:idx_metric_server_ts" json:"server_id"`
+	TS             int64   `gorm:"index:idx_metric_server_ts" json:"ts"` // unix 秒（整周期）
+	Granularity    int     `gorm:"index:idx_metric_gran" json:"-"`       // 60/300/3600
+	CPU            float64 `json:"cpu"`
+	MemUsed        uint64  `json:"mem_used"`
+	MemTotal       uint64  `json:"mem_total"`
+	DiskUsed       uint64  `json:"disk_used"`
+	DiskTotal      uint64  `json:"disk_total"`
+	NetInSpeed     float64 `json:"net_in_speed"`
+	NetOutSpeed    float64 `json:"net_out_speed"`
+	Load1          float64 `json:"load1"`
+	Temperature    float64 `json:"temperature,omitempty"`
+	GPUUtil        float64 `json:"gpu_util,omitempty"`
+	ProcessCount   float64 `json:"process_count,omitempty"`
+	TCPEstablished float64 `json:"tcp_established,omitempty"`
+	TCPListen      float64 `json:"tcp_listen,omitempty"`
+	UDPCount       float64 `json:"udp_count,omitempty"`
+	DiskReadSpeed  float64 `json:"disk_read_speed,omitempty"`
+	DiskWriteSpeed float64 `json:"disk_write_speed,omitempty"`
+	DiskReadIOPS   float64 `json:"disk_read_iops,omitempty"`
+	DiskWriteIOPS  float64 `json:"disk_write_iops,omitempty"`
+	// Samples CPU 样本数（digest 覆盖的样本量）；Digest 为 CPU 样本的
+	// t-digest 二进制 blob，查询时解码计算 p50/p95/p99。历史数据为空。
+	Samples   int       `gorm:"default:0" json:"samples,omitempty"`
+	Digest    []byte    `gorm:"type:blob" json:"-"`
+	CreatedAt time.Time `json:"-"`
 }
 
 // APIToken 个人访问令牌（PAT），借鉴 nezha 的 scope + 白名单设计。

@@ -86,12 +86,18 @@ function MetricChart({
   name,
   color,
   unit,
+  secondaryDataKey,
+  secondaryName,
+  secondaryColor,
 }: {
   points: MetricPoint[];
   dataKey: keyof MetricPoint;
   name: string;
   color: string;
   unit: (v: number) => string;
+  secondaryDataKey?: keyof MetricPoint;
+  secondaryName?: string;
+  secondaryColor?: string;
 }) {
   const { fmtDateTime } = useI18n();
   return (
@@ -105,10 +111,13 @@ function MetricChart({
             <YAxis tick={{ fontSize: 11, fill: "var(--muted)" }} tickFormatter={(v: number) => unit(v)} width={64} />
             <Tooltip
               labelFormatter={(v: number) => fmtDateTime(v)}
-              formatter={(v) => [unit(Number(v)), name]}
+              formatter={(v, k) => [unit(Number(v)), String(k)]}
               contentStyle={{ background: "var(--panel)", border: "1px solid var(--border-c)", borderRadius: 8 }}
             />
-            <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.8} dot={false} isAnimationActive={false} />
+            <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.8} dot={false} isAnimationActive={false} name={name} />
+            {secondaryDataKey && (
+              <Line type="monotone" dataKey={secondaryDataKey} stroke={secondaryColor} strokeWidth={1.4} strokeDasharray="4 3" dot={false} isAnimationActive={false} name={secondaryName} />
+            )}
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -271,7 +280,16 @@ export default function ServerDetail() {
         ))}
       </div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <MetricChart points={points} dataKey="cpu" name={t("serverDetail.chartCpu")} color="#6366f1" unit={(v) => `${v.toFixed(0)}%`} />
+        <MetricChart
+          points={points}
+          dataKey="cpu"
+          name={t("serverDetail.chartCpu")}
+          color="#6366f1"
+          unit={(v) => `${v.toFixed(0)}%`}
+          secondaryDataKey="cpu_p95"
+          secondaryName={t("serverDetail.chartCpuP95")}
+          secondaryColor="#f59e0b"
+        />
         <MetricChart points={points} dataKey="load1" name={t("serverDetail.chartLoad")} color="#f59e0b" unit={(v) => v.toFixed(1)} />
         <MetricChart points={points} dataKey="net_in" name={t("serverDetail.netIn")} color="#22c55e" unit={fmtSpeed} />
         <MetricChart points={points} dataKey="net_out" name={t("serverDetail.netOut")} color="#ef4444" unit={fmtSpeed} />

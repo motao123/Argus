@@ -228,6 +228,7 @@ export default {
     period24h: "24 小时",
     period7d: "7 天",
     chartCpu: "CPU 使用率",
+    chartCpuP95: "CPU P95",
     chartLoad: "负载 (1min)",
     chartDiskRead: "磁盘读取速率",
     chartDiskWrite: "磁盘写入速率",
