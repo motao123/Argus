@@ -127,15 +127,42 @@ func TestRateBanPersistsAndAutoRecovers(t *testing.T) {
 	if code := get(); code != http.StatusTooManyRequests {
 		t.Fatalf("still blocked: got %d want 429", code)
 	}
-	// 封禁到期自动解封，记录被清理
+	// 封禁到期自动解封；持久化记录保留（Count 跨周期累计，支撑指数封禁；unban 才删除）
 	clk.advance(11 * time.Minute)
 	if code := get(); code != http.StatusOK {
 		t.Fatalf("after expiry: got %d want 200", code)
 	}
-	var cnt int64
-	gdb.Model(&model.WAFBan{}).Where("ip = ?", "192.0.2.1").Count(&cnt)
-	if cnt != 0 {
-		t.Fatalf("expired ban row not cleaned: %d rows", cnt)
+	var ban2 model.WAFBan
+	if err := gdb.Where("ip = ?", "192.0.2.1").First(&ban2).Error; err != nil {
+		t.Fatalf("expired ban row should be retained for count accumulation: %v", err)
+	}
+	if ban2.Count != 1 {
+		t.Fatalf("count: got %d want 1", ban2.Count)
+	}
+	// 再次触发（同一 IP）：Count 递增且封禁时长指数增长（base=10m, count=2 → 40m）
+	if code := get(); code != http.StatusOK {
+		t.Fatalf("request after expiry: got %d want 200", code)
+	}
+	var got429 bool
+	for i := 0; i < 3; i++ {
+		code := get()
+		if code == http.StatusTooManyRequests {
+			got429 = true
+			break
+		}
+	}
+	if !got429 {
+		t.Fatal("expected second rate ban after refill")
+	}
+	var ban3 model.WAFBan
+	if err := gdb.Where("ip = ?", "192.0.2.1").First(&ban3).Error; err != nil {
+		t.Fatalf("second ban row missing: %v", err)
+	}
+	if ban3.Count != 2 {
+		t.Fatalf("count: got %d want 2", ban3.Count)
+	}
+	if got, want := ban3.ExpireAt.Sub(ban3.BannedAt), 40*time.Minute; got != want {
+		t.Fatalf("second ban duration: got %v want %v (escalated)", got, want)
 	}
 }
 
@@ -363,5 +390,50 @@ func TestAdminBanAPIAndAudit(t *testing.T) {
 	s.DB.Model(&model.AuditLog{}).Where("action = ?", "waf.unban").Count(&auditCount)
 	if auditCount < 1 {
 		t.Fatal("audit log for waf.unban missing")
+	}
+}
+
+func TestBanDurationEscalation(t *testing.T) {
+	cases := []struct {
+		base  time.Duration
+		count int
+		want  time.Duration
+	}{
+		{5 * time.Minute, 1, 5 * time.Minute},   // 首次封禁：基准时长
+		{5 * time.Minute, 2, 20 * time.Minute},  // 第 2 次：×4
+		{5 * time.Minute, 3, 45 * time.Minute},  // 第 3 次：×9
+		{5 * time.Minute, 5, 125 * time.Minute}, // 第 5 次：×25
+		{5 * time.Minute, 30, 72 * time.Hour},   // 上限截断
+		{5 * time.Minute, 99, 72 * time.Hour},   // 超上限截断
+	}
+	for _, c := range cases {
+		if got := banDuration(c.base, c.count); got != c.want {
+			t.Fatalf("banDuration(%v, %d) = %v, want %v", c.base, c.count, got, c.want)
+		}
+	}
+}
+
+// TestRepeatedAutoBanEscalatesDuration 验证同一 IP 重复自动封禁时 ExpireAt 指数增长。
+func TestRepeatedAutoBanEscalatesDuration(t *testing.T) {
+	s, _, _ := newWAFAdminTestServer(t)
+	ip := "203.0.113.77"
+	// 第 1 次封禁：基准 5 分钟
+	m := newWAFManager(s.DB, time.Now)
+	row := m.ban(ip, "5 failed login attempts", model.BanSourceLogin, 5*time.Minute)
+	if got := row.ExpireAt.Sub(row.BannedAt); got != 5*time.Minute {
+		t.Fatalf("1st ban duration = %v, want 5m", got)
+	}
+	// 模拟到期后再次触发（同一 IP，Count 已递增）
+	row = m.ban(ip, "5 failed login attempts", model.BanSourceLogin, 5*time.Minute)
+	if row.Count != 2 {
+		t.Fatalf("count = %d, want 2", row.Count)
+	}
+	if got := row.ExpireAt.Sub(row.BannedAt); got != 20*time.Minute {
+		t.Fatalf("2nd ban duration = %v, want 20m (escalated)", got)
+	}
+	// 手动封禁不指数化：始终用指定时长
+	row = m.ban(ip, "manual", model.BanSourceManual, 1*time.Hour)
+	if got := row.ExpireAt.Sub(row.BannedAt); got != 1*time.Hour {
+		t.Fatalf("manual ban duration = %v, want 1h", got)
 	}
 }

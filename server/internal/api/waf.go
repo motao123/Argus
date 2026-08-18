@@ -107,6 +107,20 @@ type wafBanManager struct {
 	clock func() time.Time
 }
 
+// banDuration 按累计封禁次数指数化基础时长（对齐 nezha WAF count^4 语义）：
+// 第 n 次自动封禁时长 = base × n²，上限 72h。手动封禁不调用本函数（保持精确时长）。
+func banDuration(base time.Duration, count int) time.Duration {
+	if count <= 1 {
+		return base
+	}
+	d := base * time.Duration(count*count)
+	const maxAutoBan = 72 * time.Hour
+	if d > maxAutoBan {
+		return maxAutoBan
+	}
+	return d
+}
+
 func newWAFManager(db *gorm.DB, clock func() time.Time) *wafBanManager {
 	m := &wafBanManager{db: db, clock: clock, bans: make(map[string]*model.WAFBan)}
 	if db == nil {
@@ -139,10 +153,8 @@ func (m *wafBanManager) check(ip string) bool {
 		return false
 	}
 	if b.ExpireAt != nil && !m.clock().Before(*b.ExpireAt) {
-		// 到期自动解封：删除持久化记录并清除缓存（永久封禁不受影响）
-		if m.db != nil {
-			m.db.Delete(&model.WAFBan{}, b.ID)
-		}
+		// 到期自动解封：仅解除内存封禁，保留持久化记录供 Count 累计
+		// （指数封禁需要跨周期保留触发次数，nezha nz_waf 同理；手动 unban 才删除）。
 		delete(m.bans, ip)
 		return false
 	}
@@ -157,7 +169,11 @@ func (m *wafBanManager) ban(ip, reason, source string, dur time.Duration) *model
 	now := m.clock()
 	row := model.WAFBan{IP: ip, Reason: reason, Count: 1, Source: source, BannedAt: now}
 	if dur > 0 {
-		e := now.Add(dur)
+		d := dur
+		if source != model.BanSourceManual {
+			d = banDuration(dur, row.Count)
+		}
+		e := now.Add(d)
 		row.ExpireAt = &e
 	}
 	if m.db != nil {
@@ -173,7 +189,11 @@ func (m *wafBanManager) ban(ip, reason, source string, dur time.Duration) *model
 			}
 			row.BannedAt = now
 			if dur > 0 {
-				e := now.Add(dur)
+				d := dur
+				if source != model.BanSourceManual {
+					d = banDuration(dur, row.Count)
+				}
+				e := now.Add(d)
 				row.ExpireAt = &e
 			} else {
 				row.ExpireAt = nil
@@ -181,7 +201,11 @@ func (m *wafBanManager) ban(ip, reason, source string, dur time.Duration) *model
 			if err := m.db.Save(&row).Error; err != nil {
 				row = model.WAFBan{IP: ip, Reason: reason, Count: 1, Source: source, BannedAt: now}
 				if dur > 0 {
-					e := now.Add(dur)
+					d := dur
+					if source != model.BanSourceManual {
+						d = banDuration(dur, row.Count)
+					}
+					e := now.Add(d)
 					row.ExpireAt = &e
 				}
 				m.db.Create(&row)

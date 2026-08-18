@@ -53,6 +53,7 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.ServerTransfer{},
 		&model.UpgradeJob{}, &model.UpgradeResult{},
 		&model.AuditLog{},
+		&model.MCPAuditLog{},
 		&model.Clipboard{},
 		&model.Setting{},
 		&model.ServerGroup{},

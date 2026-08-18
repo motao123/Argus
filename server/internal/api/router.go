@@ -184,6 +184,8 @@ func New(s *Server) *gin.Engine {
 
 			// 审计日志（admin）
 			authed.GET("/admin/logs", s.listAuditLogs)
+			authed.GET("/admin/logs/export", s.exportAuditLogs)
+			authed.GET("/admin/logs/mcp", s.listMCPAudits)
 
 			// 插件（admin；插件可执行任意代码并访问网络）
 			authed.GET("/plugins/market", requireAdmin(), s.listPluginMarket)

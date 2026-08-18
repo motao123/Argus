@@ -209,11 +209,105 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		s.Audit(principal, "mcp.call", detail, r.RemoteAddr)
 	}
+	// MCP 详细审计（对齐 nezha mcp_audit_logs）：仅 tools/call 记录
+	// tool/args_hash/args_peek/outcome/error/ip。
+	s.auditToolCall(msg, rpcErr, result, principal, r)
 	if len(msg.ID) == 0 || string(msg.ID) == "null" {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 	writeJSON(w, http.StatusOK, &rpcMsg{ID: msg.ID, Result: result, Error: rpcErr})
+}
+
+// auditToolCall 将一次 tools/call 调用写入 mcp_audit_logs 表。
+func (s *Server) auditToolCall(msg rpcMsg, rpcErr *rpcErr, result any, p *Principal, r *http.Request) {
+	if msg.Method != "tools/call" || s.DB == nil {
+		return
+	}
+	var params struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	_ = json.Unmarshal(msg.Params, &params)
+	entry := &model.MCPAuditLog{
+		UserID: p.UserID,
+		Tool:   params.Name,
+		IP:     r.RemoteAddr,
+	}
+	// 参数指纹：sha256(JSON) + 截断预览（≤512 字符）
+	if params.Arguments != nil {
+		if b, err := json.Marshal(params.Arguments); err == nil {
+			sum := sha256.Sum256(b)
+			entry.ArgsHash = hex.EncodeToString(sum[:])
+			peek := string(b)
+			if len(peek) > 512 {
+				peek = peek[:512]
+			}
+			entry.ArgsPeek = peek
+			// 服务器级工具提取 server id
+			if v, ok := params.Arguments["id"]; ok {
+				switch x := v.(type) {
+				case float64:
+					entry.ServerID = int64(x)
+				case int64:
+					entry.ServerID = x
+				case string:
+					if n, err := strconv.ParseInt(x, 10, 64); err == nil {
+						entry.ServerID = n
+					}
+				}
+			}
+		}
+	}
+	// outcome 分类：优先 rpcErr；tools/call 层把工具错误包装为
+	// result.isError=true（text 携带错误信息），需要一并解析。
+	isErrResult := false
+	errText := ""
+	if m, ok := result.(map[string]any); ok {
+		if flag, ok := m["isError"].(bool); ok && flag {
+			isErrResult = true
+			switch content := m["content"].(type) {
+			case []any:
+				if len(content) > 0 {
+					if first, ok := content[0].(map[string]any); ok {
+						if text, ok := first["text"].(string); ok {
+							errText = text
+						}
+					}
+				}
+			case []map[string]any:
+				if len(content) > 0 {
+					if text, ok := content[0]["text"].(string); ok {
+						errText = text
+					}
+				}
+			}
+		}
+	}
+	switch {
+	case rpcErr == nil && !isErrResult:
+		entry.Outcome = "success"
+	case rpcErr != nil && rpcErr.Code == -32602:
+		entry.Outcome = "tool_not_found"
+		entry.ErrorMsg = rpcErr.Message
+	case rpcErr != nil && (rpcErr.Code == -32001 || rpcErr.Code == -32004):
+		entry.Outcome = "unauthorized"
+		entry.ErrorMsg = rpcErr.Message
+	case rpcErr != nil && rpcErr.Code == -32029:
+		entry.Outcome = "scope_denied"
+		entry.ErrorMsg = rpcErr.Message
+	case rpcErr == nil && isErrResult && strings.HasPrefix(errText, "unknown tool"):
+		entry.Outcome = "tool_not_found"
+		entry.ErrorMsg = errText
+	default:
+		entry.Outcome = "tool_error"
+		if rpcErr != nil {
+			entry.ErrorMsg = rpcErr.Message
+		} else {
+			entry.ErrorMsg = errText
+		}
+	}
+	s.DB.Create(entry)
 }
 
 // readonlyTools readonly 角色可调用的 MCP 只读工具。

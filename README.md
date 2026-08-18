@@ -182,8 +182,13 @@ bash scripts/release-build.sh   # 仅构建（需已存在 webdist）
 **MCP（默认关闭，`ARGUS_MCP_ENABLED=true` 启用）**
 - [x] JSON-RPC 2.0 over Streamable HTTP：`initialize` / `notifications/initialized` / `ping` / `tools/list` / `tools/call` / 会话终止
 - [x] 仅 PAT 认证（`argus_*`），按令牌限流，全部调用写入审计
+- [x] 详细审计表 `mcp_audit_logs`（对齐 nezha）：工具名 / server_id / 参数 sha256 指纹与截断预览 / outcome 分类（success / tool_error / tool_not_found / invalid_request / unauthorized / scope_denied）/ 耗时 / IP；后台「审计」页可查询（`GET /api/v1/admin/logs/mcp`）
 - [x] 工具：`server.list/get/exec`、`fs.list/read/write/delete`、`meta.whoami`
 - [x] 一次性传输：`fs.download_url` / `fs.upload_url`，带大小上限、有效期、SHA-256 与 `if-match` 条件覆盖
+
+**安全 / 审计**
+- [x] WAF 指数封禁（对齐 nezha count^4 语义）：登录失败 / 速率超限自动封禁，第 n 次封禁时长 = 基准 × n²（上限 72h），Count 跨封禁周期累计、手动解封才清零；封禁状态持久化到 `waf_bans` 表，重启不丢
+- [x] 审计日志：全量管理操作落库（`audit_logs`），后台分页查询；CSV / JSON 导出（`GET /api/v1/admin/logs/export?format=csv|json&days=&action=`，上限 10 万行）
 
 **告警**
 - [x] 报警规则：阈值 + 持续时长状态机，触发/恢复双向提醒；指标覆盖 CPU/内存/交换/磁盘/负载/连接数/进程数/温度/GPU/延迟/速率/累计流量/周期流量/离线

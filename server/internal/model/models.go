@@ -595,6 +595,23 @@ type AuditLog struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// MCPAuditLog 记录 MCP 工具调用明细（对齐 nezha mcp_audit_logs）。
+// Outcome 取值：success | tool_error | tool_not_found | invalid_request |
+// unauthorized | scope_denied。
+type MCPAuditLog struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	UserID     int64     `json:"user_id"`
+	Tool       string    `gorm:"size:64;index" json:"tool"`
+	ServerID   int64     `json:"server_id"` // 0 = 非服务器级工具
+	ArgsHash   string    `gorm:"size:64" json:"args_hash"`   // sha256(arguments JSON)
+	ArgsPeek   string    `gorm:"size:512" json:"args_peek"`  // 截断的参数预览（≤512）
+	Outcome    string    `gorm:"size:32;index" json:"outcome"`
+	ErrorMsg   string    `gorm:"size:512" json:"error_msg"`
+	DurationMs int64     `json:"duration_ms"`
+	IP         string    `gorm:"size:64" json:"ip"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 // ServerGroup 服务器分组（借鉴 nezha server-group）。
 type ServerGroup struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
