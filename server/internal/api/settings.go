@@ -26,10 +26,10 @@ const (
 	SettingCustomFooter     = "custom_footer"      // 前台页脚自定义 HTML
 	SettingExpireNotifyDays = "expire_notify_days" // 到期提前提醒天数（默认 3，范围 1-30）
 	// 通知/分享
-	SettingMaskIP              = "mask_ip"                // 1 = 通知中隐藏服务器 IP（借鉴 nezha EnablePlainIPInNotification）
-	SettingLoginNotifyWebhook  = "login_notify_webhook_id" // 登录成功通知渠道（0 = 不通知）
-	SettingTempShareKey        = "temp_share_key"          // 临时分享密钥（SHA-256；私有站点模式下可凭 ?temp_key= 访问公开接口）
-	SettingTempShareExpiresAt  = "temp_share_expires_at"   // 临时分享密钥过期时间（RFC3339；空 = 永久）
+	SettingMaskIP             = "mask_ip"                 // 1 = 通知中隐藏服务器 IP（借鉴 nezha EnablePlainIPInNotification）
+	SettingLoginNotifyWebhook = "login_notify_webhook_id" // 登录成功通知渠道（0 = 不通知）
+	SettingTempShareKey       = "temp_share_key"          // 临时分享密钥（SHA-256；私有站点模式下可凭 ?temp_key= 访问公开接口）
+	SettingTempShareExpiresAt = "temp_share_expires_at"   // 临时分享密钥过期时间（RFC3339；空 = 永久）
 )
 
 // GetSetting 读设置（默认值兜底）。

@@ -42,4 +42,3 @@ func runTrace(ctx context.Context, p protocol.TraceParams) *protocol.TraceResult
 	res.Hops = parseTraceHops(text)
 	return res
 }
-

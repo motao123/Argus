@@ -15,10 +15,10 @@ import (
 
 // traceMaxHops 路由追踪的最大跳数与单跳超时上限（防滥用与过长时间占用）。
 const (
-	traceMaxHops     = 64
-	tracePerHopMaxS  = 10
-	traceGlobalMaxS  = 120
-	bandwidthMaxSec  = 60
+	traceMaxHops      = 64
+	tracePerHopMaxS   = 10
+	traceGlobalMaxS   = 120
+	bandwidthMaxSec   = 60
 	meshMaxConcurrent = 4
 )
 
@@ -32,9 +32,9 @@ type traceRequest struct {
 
 // traceResultItem 一次 trace 的完整结果（含来源标注）。
 type traceResultItem struct {
-	SourceID   int64              `json:"source_id"`
-	SourceName string             `json:"source_name"`
-	Target     string             `json:"target"`
+	SourceID   int64                 `json:"source_id"`
+	SourceName string                `json:"source_name"`
+	Target     string                `json:"target"`
 	Trace      *protocol.TraceResult `json:"trace"`
 }
 
@@ -110,11 +110,11 @@ func (s *Server) serverTrace(c *gin.Context) {
 // traceMeshRequest 多源路由追踪请求体。
 // mode: all_to_all（每个源追踪每个目标）/ one_to_all（仅第一个源追踪全部目标）。
 type traceMeshRequest struct {
-	SourceIDs []int64 `json:"source_ids"`           // 源服务器 ID 列表
-	Targets   []string `json:"targets"`             // 目标 host 列表
-	Mode      string  `json:"mode,omitempty"`       // all_to_all / one_to_all
-	Protocol  string  `json:"protocol,omitempty"`   // icmp/tcp/udp
-	MaxHops   int     `json:"max_hops,omitempty"`
+	SourceIDs []int64  `json:"source_ids"`         // 源服务器 ID 列表
+	Targets   []string `json:"targets"`            // 目标 host 列表
+	Mode      string   `json:"mode,omitempty"`     // all_to_all / one_to_all
+	Protocol  string   `json:"protocol,omitempty"` // icmp/tcp/udp
+	MaxHops   int      `json:"max_hops,omitempty"`
 }
 
 // targetSrvIP 取目标服务器的上报 IP（优先 IPv4，回退 IPv6）；
@@ -243,7 +243,7 @@ func (s *Server) traceOne(sourceID int64, sourceName, target, proto string, maxH
 // target 可为 "host:port"（源 agent 直接测速）或服务器 ID（源 agent → 目标 agent）。
 type bandwidthRequest struct {
 	SourceID int64  `json:"source_id"`
-	Target   string `json:"target"`            // host:port 或服务器 ID
+	Target   string `json:"target"`             // host:port 或服务器 ID
 	Duration int    `json:"duration,omitempty"` // 秒；默认 5，上限 60
 	Parallel int    `json:"parallel,omitempty"` // 并发；默认 1，上限 8
 }

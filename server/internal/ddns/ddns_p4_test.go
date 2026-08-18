@@ -74,9 +74,9 @@ func TestHEProviderBadAuthAndErrors(t *testing.T) {
 // TestTencentSplitZone 验证域名拆分为 zone + subdomain。
 func TestTencentSplitZone(t *testing.T) {
 	cases := map[string][2]string{
-		"example.com":          {"example.com", "@"},
-		"host.example.com":     {"example.com", "host"},
-		"a.b.example.co.uk":    {"example.co.uk", "a.b"},
+		"example.com":           {"example.com", "@"},
+		"host.example.com":      {"example.com", "host"},
+		"a.b.example.co.uk":     {"example.co.uk", "a.b"},
 		"deep.host.example.org": {"example.org", "deep.host"},
 	}
 	for domain, want := range cases {

@@ -138,8 +138,8 @@ type Alert struct {
 	// 首次发送 event=escalated 并切换渠道，此后重复通知（event=repeat）改发该渠道；
 	// 需校验渠道存在且 owner 匹配。EscalateToChannelID = 0 表示不升级；
 	// EscalateAfterMinutes = 0 表示触发后立即升级。
-	EscalateToChannelID  int64     `json:"escalate_to_channel_id"`
-	EscalateAfterMinutes int       `json:"escalate_after_minutes"`
+	EscalateToChannelID  int64 `json:"escalate_to_channel_id"`
+	EscalateAfterMinutes int   `json:"escalate_after_minutes"`
 	// 周期流量规则的周期（借鉴 nezha CycleStart/CycleUnit/CycleInterval）：
 	// CycleStart 为空（或 CycleUnit 为空）时回退服务器配置的月度周期
 	// （TrafficCycleDay/TrafficTimezone）。
@@ -390,9 +390,9 @@ type DDNSProfile struct {
 	Name           string            `gorm:"size:64;not null" json:"name"`
 	Provider       string            `gorm:"size:32;default:'webhook'" json:"provider"`
 	RecordType     string            `gorm:"size:8;default:'A'" json:"record_type"`
-	AccessKey      string            `gorm:"size:256;default:''" json:"-"`  // cloudflare token / HE key
-	SecretID       string            `gorm:"size:256;default:''" json:"-"`  // tencent SecretId
-	SecretKey      string            `gorm:"size:256;default:''" json:"-"`  // tencent SecretKey
+	AccessKey      string            `gorm:"size:256;default:''" json:"-"` // cloudflare token / HE key
+	SecretID       string            `gorm:"size:256;default:''" json:"-"` // tencent SecretId
+	SecretKey      string            `gorm:"size:256;default:''" json:"-"` // tencent SecretKey
 	Domains        string            `gorm:"size:2048;not null" json:"domains"`
 	WebhookURL     string            `gorm:"size:1024;default:''" json:"webhook_url"`
 	WebhookMethod  string            `gorm:"size:8;default:'GET'" json:"webhook_method"`

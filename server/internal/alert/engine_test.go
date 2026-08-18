@@ -90,8 +90,8 @@ func TestMetricValueExtended(t *testing.T) {
 	}{
 		{"swap", 50},
 		{"temperature", 71.5},
-		{"gpu", 95},        // 多卡取最大
-		{"gpu_max", 95},    // 别名
+		{"gpu", 95},     // 多卡取最大
+		{"gpu_max", 95}, // 别名
 		{"net_all_speed", 30},
 		{"load5", 1.5},
 		{"load15", 2.5},

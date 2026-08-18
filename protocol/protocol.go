@@ -517,29 +517,29 @@ const (
 
 // TraceParams 路由追踪参数（server → agent）。
 type TraceParams struct {
-	Target    string        `json:"target"`
-	Protocol  TraceProtocol `json:"protocol,omitempty"` // icmp/tcp/udp；空 = icmp
-	MaxHops   int           `json:"max_hops,omitempty"` // 默认 30
-	TimeoutSec int          `json:"timeout_sec,omitempty"` // 单跳探测超时；默认 3
+	Target     string        `json:"target"`
+	Protocol   TraceProtocol `json:"protocol,omitempty"`    // icmp/tcp/udp；空 = icmp
+	MaxHops    int           `json:"max_hops,omitempty"`    // 默认 30
+	TimeoutSec int           `json:"timeout_sec,omitempty"` // 单跳探测超时；默认 3
 }
 
 // TraceHop 一跳的结果。
 type TraceHop struct {
 	Hop     int     `json:"hop"`
 	IP      string  `json:"ip"`
-	RTTMs   float64 `json:"rtt_ms"` // 平均往返毫秒；0 = 无响应
-	Loss    float64 `json:"loss"`   // 丢包率 0-100；0 = 未知
+	RTTMs   float64 `json:"rtt_ms"`  // 平均往返毫秒；0 = 无响应
+	Loss    float64 `json:"loss"`    // 丢包率 0-100；0 = 未知
 	Reached bool    `json:"reached"` // 目标节点
 }
 
 // TraceResult 路由追踪结果（agent → server）。
 type TraceResult struct {
-	OK       bool       `json:"ok"`
-	Error    string     `json:"error,omitempty"`
-	Hops     []TraceHop `json:"hops,omitempty"`
-	RawText  string     `json:"raw_text,omitempty"` // 原始输出（截断后）
-	ExitCode int        `json:"exit_code,omitempty"`
-	Truncated bool      `json:"truncated,omitempty"`
+	OK        bool       `json:"ok"`
+	Error     string     `json:"error,omitempty"`
+	Hops      []TraceHop `json:"hops,omitempty"`
+	RawText   string     `json:"raw_text,omitempty"` // 原始输出（截断后）
+	ExitCode  int        `json:"exit_code,omitempty"`
+	Truncated bool       `json:"truncated,omitempty"`
 }
 
 // BandwidthParams 带宽测速参数。
@@ -549,17 +549,17 @@ type BandwidthParams struct {
 	// Serve
 	ListenAddr string `json:"listen_addr,omitempty"` // 监听地址（如 127.0.0.1:0）；空 = 0.0.0.0:0
 	// Probe
-	Target   string `json:"target,omitempty"` // host:port
+	Target   string `json:"target,omitempty"`   // host:port
 	Duration int    `json:"duration,omitempty"` // 测速秒数；默认 5，上限 60
 	Parallel int    `json:"parallel,omitempty"` // 并发连接数；默认 1，上限 8
 }
 
 // BandwidthResult 带宽测速结果（agent → server）。
 type BandwidthResult struct {
-	OK          bool   `json:"ok"`
-	Error       string `json:"error,omitempty"`
-	Port        int    `json:"port,omitempty"`         // Serve 模式：监听端口
-	BitsPerSec  float64 `json:"bits_per_sec,omitempty"` // Probe 模式：吞吐（bit/s）
-	BytesSent   uint64 `json:"bytes_sent,omitempty"`
-	DurationMs  int64  `json:"duration_ms,omitempty"`
+	OK         bool    `json:"ok"`
+	Error      string  `json:"error,omitempty"`
+	Port       int     `json:"port,omitempty"`         // Serve 模式：监听端口
+	BitsPerSec float64 `json:"bits_per_sec,omitempty"` // Probe 模式：吞吐（bit/s）
+	BytesSent  uint64  `json:"bytes_sent,omitempty"`
+	DurationMs int64   `json:"duration_ms,omitempty"`
 }
