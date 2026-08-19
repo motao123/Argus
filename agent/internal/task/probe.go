@@ -229,7 +229,11 @@ func applyRequestHeaders(req *http.Request, headers []protocol.KeyValue, hasBody
 func probeTCP(ctx context.Context, target string) *protocol.ServiceCheckResult {
 	start := time.Now()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", target)
-	result := &protocol.ServiceCheckResult{DelayMs: durationMS(time.Since(start)), Sent: 1}
+	delay := durationMS(time.Since(start))
+	if err == nil && delay == 0 {
+		delay = 1
+	}
+	result := &protocol.ServiceCheckResult{DelayMs: delay, Sent: 1}
 	if err != nil {
 		result.Error = err.Error()
 		result.LossPercent = 100

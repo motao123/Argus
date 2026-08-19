@@ -42,7 +42,7 @@ func newAuthzEnv(t *testing.T) *authzTestEnv {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	if err := gdb.AutoMigrate(
-		&model.User{}, &model.Server{}, &model.Service{}, &model.ServiceHistory{},
+		&model.User{}, &model.Server{}, &model.Service{}, &model.ServiceProbe{}, &model.ServiceHistory{},
 		&model.APIToken{}, &model.Setting{}, &model.DDNSProfile{}, &model.DDNSRecordState{}, &model.NAT{}, &model.Metric{},
 		&model.AuditLog{}, &model.ServerTransfer{}, &model.Notification{}, &model.Alert{}, &model.Cron{}, &model.TaskRun{}, &model.TaskRunResult{},
 		&model.UpgradeJob{}, &model.UpgradeResult{},
@@ -73,6 +73,9 @@ func newAuthzEnv(t *testing.T) *authzTestEnv {
 	}
 	svc := model.Service{OwnerID: alice.ID, ServerID: aliceS.ID, Name: "alice-svc", Type: "http", Target: "http://127.0.0.1:1"}
 	if err := gdb.Create(&svc).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.ServiceProbe{ServiceID: svc.ID, ServerID: aliceS.ID}).Error; err != nil {
 		t.Fatal(err)
 	}
 	st := store.NewHub()

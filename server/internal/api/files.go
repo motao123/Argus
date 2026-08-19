@@ -3,7 +3,11 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -125,6 +129,107 @@ func (s *Server) writeFile(c *gin.Context) {
 		return
 	}
 	ok(c, result)
+}
+
+// uploadFile 流式上传文件。保留原有 JSON write 接口，避免旧客户端行为变化。
+func (s *Server) uploadFile(c *gin.Context) {
+	serverID := mustIDParam(c, "serverId")
+	if !s.canAccessServer(serverID, c) {
+		fail(c, http.StatusForbidden, "not in token whitelist")
+		return
+	}
+	path := strings.TrimSpace(c.Query("path"))
+	if path == "" {
+		fail(c, http.StatusBadRequest, "path required")
+		return
+	}
+	reader, err := c.Request.MultipartReader()
+	if err != nil {
+		fail(c, http.StatusBadRequest, "multipart upload required")
+		return
+	}
+	const chunkSize = 256 * 1024
+	buf := make([]byte, chunkSize)
+	var written int64
+	filename := ""
+	foundFile := false
+	for {
+		part, nextErr := reader.NextPart()
+		if nextErr == io.EOF {
+			break
+		}
+		if nextErr != nil {
+			fail(c, http.StatusBadRequest, "failed to read multipart upload")
+			return
+		}
+		if part.FormName() != "file" || part.FileName() == "" {
+			part.Close()
+			continue
+		}
+		foundFile = true
+		filename = part.FileName()
+		written, err = streamFileChunks(part, buf, func(data []byte, appendChunk bool) error {
+			resp, callErr := s.Agents.Call(serverID, protocol.MethodFsWrite, protocol.FsWriteParams{
+				Path: path, Data: data, Append: appendChunk,
+			})
+			if callErr != nil {
+				return callErr
+			}
+			if resp.Error != nil {
+				return errors.New(resp.Error.Message)
+			}
+			var result protocol.FsWriteResult
+			if err := decodeRPCResult(resp.Result, &result); err != nil {
+				return err
+			}
+			if result.Error != "" {
+				return errors.New(result.Error)
+			}
+			return nil
+		})
+		part.Close()
+		if err != nil {
+			fail(c, http.StatusBadGateway, err.Error())
+			return
+		}
+		break
+	}
+	if !foundFile {
+		fail(c, http.StatusBadRequest, "file required")
+		return
+	}
+	s.auditLog(c, "file.upload", filepath.Base(path))
+	ok(c, gin.H{"bytes": written, "name": filename})
+}
+
+func streamFileChunks(reader io.Reader, buf []byte, write func(data []byte, appendChunk bool) error) (int64, error) {
+	if len(buf) == 0 {
+		return 0, errors.New("empty upload buffer")
+	}
+	appendChunk := false
+	var written int64
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			if writeErr := write(append([]byte(nil), buf[:n]...), appendChunk); writeErr != nil {
+				return written, writeErr
+			}
+			written += int64(n)
+			appendChunk = true
+		}
+		if err != nil {
+			if err != io.EOF {
+				return written, err
+			}
+			break
+		}
+	}
+	if written == 0 {
+		if err := write([]byte{}, false); err != nil {
+			return 0, err
+		}
+	}
+	return written, nil
 }
 
 // deleteFile 删除文件/目录。

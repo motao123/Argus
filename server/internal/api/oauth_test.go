@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/motao123/Argus/server/internal/config"
 )
 
 func TestOAuthCodeExchange(t *testing.T) {
@@ -58,19 +60,54 @@ func TestOAuthCodeExchange(t *testing.T) {
 	}
 }
 
+func TestOAuthRedirectURIUsesPublicURLWhenConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cases := []struct {
+		name, publicURL, requestURL, provider, want string
+	}{
+		{
+			name: "public https with path", publicURL: "https://argus.example.com/panel/", requestURL: "http://internal:8080/oauth", provider: "github",
+			want: "https://argus.example.com/panel/api/v1/auth/oauth/github/callback",
+		},
+		{
+			name: "fallback tls", requestURL: "https://argus.example.com/oauth", provider: "oidc/provider",
+			want: "https://argus.example.com/api/v1/auth/oauth/oidc%2Fprovider/callback",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{Cfg: &config.Config{PublicURL: tc.publicURL}}
+			r := gin.New()
+			r.GET("/oauth", func(c *gin.Context) {
+				if got := s.oauthRedirectURI(c, tc.provider); got != tc.want {
+					t.Fatalf("redirect URI = %q, want %q", got, tc.want)
+				}
+			})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.requestURL, nil)
+			if strings.HasPrefix(tc.requestURL, "https://") {
+				req.TLS = &tls.ConnectionState{}
+			}
+			r.ServeHTTP(w, req)
+		})
+	}
+}
+
 func TestOAuthStateCookieSecureByScheme(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
-		name, target string
-		tls, secure  bool
+		name, target, publicURL string
+		tls, secure             bool
 	}{
 		{name: "http", target: "http://localhost/oauth"},
 		{name: "https", target: "https://example.com/oauth", tls: true, secure: true},
+		{name: "proxy tls termination", target: "http://internal:8080/oauth", publicURL: "https://argus.example.com", secure: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{Cfg: &config.Config{PublicURL: tc.publicURL}}
 			r := gin.New()
 			r.GET("/oauth", func(c *gin.Context) {
-				c.SetCookie("oauth_state", "state", 600, "/", "", c.Request.TLS != nil, true)
+				c.SetCookie("oauth_state", "state", 600, "/", "", s.oauthCookieSecure(c), true)
 			})
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, tc.target, nil)

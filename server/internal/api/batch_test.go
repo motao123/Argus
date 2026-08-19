@@ -73,6 +73,10 @@ func TestBatchConfigAdminOnlyAndValidation(t *testing.T) {
 	if w := batchDo(t, e, http.MethodPost, "/batch-config/servers", adminTok, `{"ids":[]}`); w.Code != http.StatusBadRequest {
 		t.Fatalf("empty ids: got %d want 400", w.Code)
 	}
+	// 与单机配置一致：未知能力名必须拒绝，不能被 JSON 解码静默忽略。
+	if w := batchDo(t, e, http.MethodPost, "/batch-config/servers", adminTok, `{"ids":[1],"capabilities":{"bogus":true}}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown capability: got %d want 400", w.Code)
+	}
 	// 合法请求：aliceS 在库但离线 → offline；不存在的 ID → not_found
 	w := batchDo(t, e, http.MethodPost, "/batch-config/servers", adminTok, `{"ids":[`+itoa(e.aliceS.ID)+`,99999],"interval":5,"interface_include":["eth0"]}`)
 	if w.Code != http.StatusOK {
@@ -163,7 +167,7 @@ func TestBatchConfigOnlineAppliesFields(t *testing.T) {
 	fa := connectFakeAgent(t, e, e.aliceS.Secret)
 
 	capabilities := protocol.Capabilities{Metrics: true, Command: true}
-	body := `{"ids":[` + itoa(e.aliceS.ID) + `],"server_url":"wss://example.com/ws","interval":10,"capabilities":{"metrics":true,"command":true},"interface_include":["eth0","eth1"],"interface_exclude":["lo"],"mount_include":["/data"]}`
+	body := `{"ids":[` + itoa(e.aliceS.ID) + `],"server_url":"wss://example.com/ws","interval":10,"auto_update":false,"capabilities":{"metrics":true,"command":true,"trace":true},"interface_include":["eth0","eth1"],"interface_exclude":["lo"],"mount_include":["/data"]}`
 	w := batchDo(t, e, http.MethodPost, "/batch-config/servers", adminTok, body)
 	if w.Code != http.StatusOK {
 		t.Fatalf("batch-config online: got %d %s", w.Code, w.Body.String())
@@ -179,8 +183,11 @@ func TestBatchConfigOnlineAppliesFields(t *testing.T) {
 	if got.ServerURL != "wss://example.com/ws" || got.Interval != 10 {
 		t.Fatalf("cfg server_url/interval: %+v", got)
 	}
-	if got.Capabilities == nil || got.Capabilities.Metrics != capabilities.Metrics || got.Capabilities.Command != capabilities.Command {
+	if got.Capabilities == nil || got.Capabilities.Metrics != capabilities.Metrics || got.Capabilities.Command != capabilities.Command || !got.Capabilities.Trace {
 		t.Fatalf("cfg capabilities: %+v", got.Capabilities)
+	}
+	if got.AutoUpdate == nil || *got.AutoUpdate {
+		t.Fatalf("cfg auto_update: %+v, want false", got.AutoUpdate)
 	}
 	if len(got.InterfaceInclude) != 2 || got.InterfaceInclude[0] != "eth0" || got.InterfaceInclude[1] != "eth1" {
 		t.Fatalf("cfg interface_include: %+v", got.InterfaceInclude)

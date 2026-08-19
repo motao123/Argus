@@ -119,6 +119,70 @@ func TestUpdateServiceGetWithBodyRejected(t *testing.T) {
 	}
 }
 
+func TestServiceProbeIDsCreateAndUpdate(t *testing.T) {
+	e := newAuthzEnv(t)
+	token := e.token(t, e.alice)
+	extra := model.Server{Name: "alice-srv-2", Secret: "extra-secret", OwnerID: e.alice.ID}
+	if err := e.srv.DB.Create(&extra).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	w := svcDo(e, t, http.MethodPost, "/services", token,
+		`{"server_ids":[`+itoa(extra.ID)+`,`+itoa(e.aliceS.ID)+`,`+itoa(extra.ID)+`],"name":"multi","type":"http","target":"http://x"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create multi-probe service = %d %s", w.Code, w.Body.String())
+	}
+	var svc model.Service
+	if err := e.srv.DB.First(&svc, "name = ?", "multi").Error; err != nil {
+		t.Fatal(err)
+	}
+	if svc.ServerID != extra.ID {
+		t.Fatalf("default server_id = %d, want %d", svc.ServerID, extra.ID)
+	}
+	var probes []model.ServiceProbe
+	if err := e.srv.DB.Where("service_id = ?", svc.ID).Order("server_id").Find(&probes).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(probes) != 2 || probes[0].ServerID != e.aliceS.ID || probes[1].ServerID != extra.ID {
+		t.Fatalf("created probes = %+v", probes)
+	}
+
+	w = svcDo(e, t, http.MethodPut, "/services/"+itoa(svc.ID), token,
+		`{"server_ids":[`+itoa(e.aliceS.ID)+`]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("replace probes = %d %s", w.Code, w.Body.String())
+	}
+	if err := e.srv.DB.Where("service_id = ?", svc.ID).Find(&probes).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(probes) != 1 || probes[0].ServerID != e.aliceS.ID {
+		t.Fatalf("replaced probes = %+v", probes)
+	}
+	if err := e.srv.DB.First(&svc, svc.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if svc.ServerID != e.aliceS.ID {
+		t.Fatalf("replaced default server_id = %d", svc.ServerID)
+	}
+
+	w = svcDo(e, t, http.MethodPut, "/services/"+itoa(svc.ID), token,
+		`{"server_ids":[`+itoa(e.bobS.ID)+`]}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("cross-owner probe update = %d %s", w.Code, w.Body.String())
+	}
+	w = svcDo(e, t, http.MethodPut, "/services/"+itoa(svc.ID), token,
+		`{"server_id":`+itoa(extra.ID)+`}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("legacy single-server update = %d %s", w.Code, w.Body.String())
+	}
+	if err := e.srv.DB.Where("service_id = ?", svc.ID).Find(&probes).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(probes) != 1 || probes[0].ServerID != extra.ID {
+		t.Fatalf("legacy update probes = %+v", probes)
+	}
+}
+
 func TestCreateServiceLegacyDefaults(t *testing.T) {
 	e := newAuthzEnv(t)
 	token := e.token(t, e.alice)

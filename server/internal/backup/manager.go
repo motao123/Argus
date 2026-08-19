@@ -37,11 +37,12 @@ type Manager struct {
 	// Client HTTP PUT 上传客户端（测试可注入）。
 	Client *http.Client
 
-	mu      sync.Mutex
-	cron    *cron.Cron
-	ids     map[int64]cron.EntryID
-	running map[int64]bool
-	workDir string
+	mu        sync.Mutex
+	operation sync.RWMutex
+	cron      *cron.Cron
+	ids       map[int64]cron.EntryID
+	running   map[int64]bool
+	workDir   string
 }
 
 func NewManager(db *gorm.DB, dbPath string, keyFor KeyProvider) *Manager {
@@ -122,6 +123,9 @@ func (m *Manager) RunAsync(sch *model.BackupSchedule, trigger string) {
 // RunOnce 同步执行一次备份：VACUUM INTO 快照 → AES-GCM 加密 → PUT/本地写入 → 保留清理。
 // 任何一步失败都记录失败历史并回写计划状态，不产生半成品密文文件。
 func (m *Manager) RunOnce(sch *model.BackupSchedule, trigger string) error {
+	m.operation.RLock()
+	defer m.operation.RUnlock()
+
 	m.mu.Lock()
 	if m.running[sch.ID] {
 		m.mu.Unlock()
@@ -162,6 +166,14 @@ func (m *Manager) RunOnce(sch *model.BackupSchedule, trigger string) error {
 	return runErr
 }
 
+// WithRestoreLock blocks new backup runs while a restore is being validated and switched.
+// Existing runs finish before fn starts, so no snapshot can race with database replacement.
+func (m *Manager) WithRestoreLock(fn func() error) error {
+	m.operation.Lock()
+	defer m.operation.Unlock()
+	return fn()
+}
+
 // ScheduleKey 派生计划当前密钥（运行与恢复演练共用）。盐缺失时生成并持久化。
 func (m *Manager) ScheduleKey(sch *model.BackupSchedule) ([]byte, string, error) {
 	material, source, err := m.KeyFor()
@@ -198,6 +210,62 @@ func (m *Manager) LatestLocalBackup(sch *model.BackupSchedule) (string, error) {
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(files)))
 	return files[0], nil
+}
+
+// InstanceBackupResult describes a complete encrypted instance archive.
+type InstanceBackupResult struct {
+	Path            string
+	Size            int64
+	SHA256          string
+	KeyID           string
+	ManifestVersion int
+	ManifestSHA256  string
+	Components      string
+}
+
+// CreateInstanceBackup creates an encrypted, versioned instance archive without
+// replacing the existing single-database backup format.
+func (m *Manager) CreateInstanceBackup(sch *model.BackupSchedule) (InstanceBackupResult, error) {
+	m.operation.RLock()
+	defer m.operation.RUnlock()
+	key, keyID, err := m.ScheduleKey(sch)
+	if err != nil {
+		return InstanceBackupResult{}, err
+	}
+	if err := os.MkdirAll(m.workDir, 0o700); err != nil {
+		return InstanceBackupResult{}, err
+	}
+	sqlDB, err := m.db.DB()
+	if err != nil {
+		return InstanceBackupResult{}, err
+	}
+	stamp := time.Now().UnixNano()
+	snap := filepath.Join(m.workDir, fmt.Sprintf("instance-snap-%d-%d.db", sch.ID, stamp))
+	zipPath := filepath.Join(m.workDir, fmt.Sprintf("instance-%d-%d.zip", sch.ID, stamp))
+	encPath := filepath.Join(m.workDir, fmt.Sprintf("instance-%d-%d.argusenc", sch.ID, stamp))
+	defer os.Remove(snap)
+	defer os.Remove(zipPath)
+	escaped := strings.ReplaceAll(snap, "'", "''")
+	if _, err := sqlDB.Exec("VACUUM INTO '" + escaped + "'"); err != nil {
+		return InstanceBackupResult{}, fmt.Errorf("snapshot: %w", err)
+	}
+	scriptsRoot := os.Getenv("ARGUS_DATA_DIR")
+	if scriptsRoot == "" {
+		wd, _ := os.Getwd()
+		scriptsRoot = filepath.Join(wd, "data")
+	}
+	manifest, err := CreateInstanceArchive(zipPath, snap, filepath.Dir(m.dbPath), filepath.Join(scriptsRoot, "scripts"))
+	if err != nil {
+		return InstanceBackupResult{}, err
+	}
+	kid, sha, size, err := EncryptFile(zipPath, encPath, key)
+	if err != nil {
+		return InstanceBackupResult{}, fmt.Errorf("encrypt: %w", err)
+	}
+	if kid != keyID {
+		return InstanceBackupResult{}, errors.New("internal key fingerprint mismatch")
+	}
+	return InstanceBackupResult{Path: encPath, Size: size, SHA256: sha, KeyID: kid, ManifestVersion: manifest.Version, ManifestSHA256: manifest.ManifestSHA256, Components: "db,themes,plugins,scripts"}, nil
 }
 
 func (m *Manager) executeBackup(sch *model.BackupSchedule, size *int64, sha *string, target *string) error {

@@ -17,7 +17,15 @@ vi.mock("../lib/api", () => ({
 }));
 
 vi.mock("../context/servers", () => ({
-  useServers: () => ({ servers: [{ id: 7, name: "node-1" }], online: 1, total: 1, wsStatus: "connected" as const }),
+  useServers: () => ({
+    servers: [
+      { id: 7, name: "node-1" },
+      { id: 8, name: "node-2" },
+    ],
+    online: 2,
+    total: 2,
+    wsStatus: "connected" as const,
+  }),
 }));
 
 import { api } from "../lib/api";
@@ -26,6 +34,7 @@ const mockService = {
   id: 1,
   owner_id: 0,
   server_id: 7,
+  server_ids: [7],
   name: "api",
   type: "http",
   target: "https://example.com/health",
@@ -140,6 +149,53 @@ describe("Services page", () => {
         id: 1,
         http_method: "POST",
         request_headers: '[{"key":"Authorization","value":"Bearer t"}]',
+      }));
+    });
+  });
+
+  it("creates a service with multiple probe servers and submits the default server", async () => {
+    renderPage();
+    await screen.findByText("api");
+    fireEvent.click(screen.getByText("新建服务"));
+
+    const node1 = screen.getByRole("checkbox", { name: "node-1" }) as HTMLInputElement;
+    const node2 = screen.getByRole("checkbox", { name: "node-2" }) as HTMLInputElement;
+    expect(node1.checked).toBe(true);
+    expect(node2.checked).toBe(false);
+
+    fireEvent.click(node2);
+    fireEvent.change(screen.getByPlaceholderText("名称"), { target: { value: "multi-probe" } });
+    fireEvent.change(screen.getByPlaceholderText("目标（URL / host:port / host）"), { target: { value: "https://example.com" } });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() => {
+      expect(api.saveService).toHaveBeenCalledWith(expect.objectContaining({
+        server_id: 7,
+        server_ids: [7, 8],
+      }));
+    });
+  });
+
+  it("pre-fills all probe servers and updates the default after removing one", async () => {
+    vi.mocked(api.services).mockResolvedValue({
+      services: [{ ...mockService, server_ids: [7, 8] }],
+    } as never);
+    renderPage();
+    await screen.findByText("api");
+    fireEvent.click(screen.getByTitle("编辑"));
+
+    const node1 = screen.getByRole("checkbox", { name: "node-1" }) as HTMLInputElement;
+    const node2 = screen.getByRole("checkbox", { name: "node-2" }) as HTMLInputElement;
+    expect(node1.checked).toBe(true);
+    expect(node2.checked).toBe(true);
+
+    fireEvent.click(node1);
+    fireEvent.click(screen.getByText("保存"));
+    await waitFor(() => {
+      expect(api.saveService).toHaveBeenCalledWith(expect.objectContaining({
+        id: 1,
+        server_id: 8,
+        server_ids: [8],
       }));
     });
   });

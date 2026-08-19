@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -400,12 +401,23 @@ func metricPeriodConfig(period string) (seconds, step int64, gran int) {
 // （与单机 serverMetrics 口径完全一致，多机对比可复用）。
 // 若原始行携带 CPU t-digest，合并后输出 cpu_p50/cpu_p95/cpu_p99（历史数据无 digest 时省略）。
 func aggregateMetrics(rows []model.Metric, step int64) []gin.H {
+	rows = append([]model.Metric(nil), rows...)
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].TS != rows[j].TS {
+			return rows[i].TS < rows[j].TS
+		}
+		return rows[i].ID < rows[j].ID
+	})
 	type agg struct {
-		count                                                                         int
-		cpu, netIn, netOut, load1, temp, gpu, process, tcpEstablished, tcpListen, udp float64
-		diskReadSpeed, diskWriteSpeed, diskReadIOPS, diskWriteIOPS                    float64
-		memUsed, memTotal, diskUsed, diskTotal                                        uint64
-		cpuDigest                                                                     *tdigest.TDigest
+		count                                                                                                 int
+		cpu, netIn, netOut, load1, load5, load15, latency, temp, gpu, process, tcpEstablished, tcpListen, udp float64
+		latencyCount                                                                                          int
+		diskReadSpeed, diskWriteSpeed, diskReadIOPS, diskWriteIOPS                                            float64
+		memUsed, memTotal, swapUsed, swapTotal, diskUsed, diskTotal                                           uint64
+		netInTransfer, netOutTransfer, uptime                                                                 uint64
+		gpuMemUsed, gpuMemTotal                                                                               uint64
+		gpuDevices                                                                                            string
+		cpuDigest                                                                                             *tdigest.TDigest
 	}
 	buckets := map[int64]*agg{}
 	var order []int64
@@ -422,6 +434,12 @@ func aggregateMetrics(rows []model.Metric, step int64) []gin.H {
 		a.netIn += r.NetInSpeed
 		a.netOut += r.NetOutSpeed
 		a.load1 += r.Load1
+		a.load5 += r.Load5
+		a.load15 += r.Load15
+		if r.LatencyMs > 0 {
+			a.latency += r.LatencyMs
+			a.latencyCount++
+		}
 		a.temp += r.Temperature
 		a.gpu += r.GPUUtil
 		a.process += r.ProcessCount
@@ -434,8 +452,18 @@ func aggregateMetrics(rows []model.Metric, step int64) []gin.H {
 		a.diskWriteIOPS += r.DiskWriteIOPS
 		a.memUsed = r.MemUsed
 		a.memTotal = r.MemTotal
+		a.swapUsed = r.SwapUsed
+		a.swapTotal = r.SwapTotal
 		a.diskUsed = r.DiskUsed
 		a.diskTotal = r.DiskTotal
+		a.netInTransfer = r.NetInTransfer
+		a.netOutTransfer = r.NetOutTransfer
+		a.uptime = r.Uptime
+		a.gpuMemUsed = r.GPUMemUsed
+		a.gpuMemTotal = r.GPUMemTotal
+		if r.GPUDevices != "" {
+			a.gpuDevices = r.GPUDevices
+		}
 		if len(r.Digest) > 0 {
 			if child, err := tdigest.Decode(r.Digest); err == nil {
 				if a.cpuDigest == nil {
@@ -451,19 +479,32 @@ func aggregateMetrics(rows []model.Metric, step int64) []gin.H {
 		a := buckets[bts]
 		n := float64(a.count)
 		point := gin.H{
-			"ts":            bts,
-			"cpu":           round2(a.cpu / n),
-			"net_in":        round2(a.netIn / n),
-			"net_out":       round2(a.netOut / n),
-			"load1":         round2(a.load1 / n),
-			"temperature":   round2(a.temp / n),
-			"gpu_util":      round2(a.gpu / n),
-			"process_count": round2(a.process / n), "tcp_established": round2(a.tcpEstablished / n), "tcp_listen": round2(a.tcpListen / n), "udp_count": round2(a.udp / n),
+			"ts":               bts,
+			"cpu":              round2(a.cpu / n),
+			"net_in":           round2(a.netIn / n),
+			"net_out":          round2(a.netOut / n),
+			"net_in_transfer":  a.netInTransfer,
+			"net_out_transfer": a.netOutTransfer,
+			"load1":            round2(a.load1 / n),
+			"load5":            round2(a.load5 / n),
+			"load15":           round2(a.load15 / n),
+			"uptime":           a.uptime,
+			"temperature":      round2(a.temp / n),
+			"gpu_util":         round2(a.gpu / n),
+			"process_count":    round2(a.process / n), "tcp_established": round2(a.tcpEstablished / n), "tcp_listen": round2(a.tcpListen / n), "udp_count": round2(a.udp / n),
 			"disk_read_speed": round2(a.diskReadSpeed / n), "disk_write_speed": round2(a.diskWriteSpeed / n), "disk_read_iops": round2(a.diskReadIOPS / n), "disk_write_iops": round2(a.diskWriteIOPS / n),
-			"mem_used":   a.memUsed,
-			"mem_total":  a.memTotal,
-			"disk_used":  a.diskUsed,
-			"disk_total": a.diskTotal,
+			"mem_used":      a.memUsed,
+			"mem_total":     a.memTotal,
+			"swap_used":     a.swapUsed,
+			"swap_total":    a.swapTotal,
+			"disk_used":     a.diskUsed,
+			"disk_total":    a.diskTotal,
+			"gpu_mem_used":  a.gpuMemUsed,
+			"gpu_mem_total": a.gpuMemTotal,
+			"gpu_devices":   a.gpuDevices,
+		}
+		if a.latencyCount > 0 {
+			point["latency_ms"] = round2(a.latency / float64(a.latencyCount))
 		}
 		// CPU 分位数（合并 digest 后计算；历史数据无 digest 时省略字段）
 		if a.cpuDigest != nil && a.cpuDigest.Count() > 0 {
@@ -573,6 +614,7 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 		Interval         int             `json:"interval"`
 		Secret           string          `json:"secret"`
 		Capabilities     json.RawMessage `json:"capabilities"`
+		AutoUpdate       *bool           `json:"auto_update"`
 		InterfaceInclude []string        `json:"interface_include"`
 		InterfaceExclude []string        `json:"interface_exclude"`
 		MountInclude     []string        `json:"mount_include"`
@@ -594,7 +636,7 @@ func (s *Server) serverApplyConfig(c *gin.Context) {
 		return
 	}
 	resp, err := peer.Call(protocol.MethodApplyConfig, protocol.AgentConfig{
-		ServerURL: req.ServerURL, Interval: req.Interval, Secret: req.Secret, Capabilities: caps,
+		ServerURL: req.ServerURL, Interval: req.Interval, Secret: req.Secret, Capabilities: caps, AutoUpdate: req.AutoUpdate,
 		InterfaceInclude: req.InterfaceInclude, InterfaceExclude: req.InterfaceExclude, MountInclude: req.MountInclude, MountExclude: req.MountExclude,
 	}, 15*time.Second)
 	if err != nil {

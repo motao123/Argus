@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -82,14 +83,15 @@ func (s *Server) batchConfigServers(c *gin.Context) {
 		return
 	}
 	var req struct {
-		IDs              []int64                `json:"ids"`
-		ServerURL        string                 `json:"server_url"`
-		Interval         int                    `json:"interval"`
-		Capabilities     *protocol.Capabilities `json:"capabilities"`
-		InterfaceInclude []string               `json:"interface_include"`
-		InterfaceExclude []string               `json:"interface_exclude"`
-		MountInclude     []string               `json:"mount_include"`
-		MountExclude     []string               `json:"mount_exclude"`
+		IDs              []int64         `json:"ids"`
+		ServerURL        string          `json:"server_url"`
+		Interval         int             `json:"interval"`
+		Capabilities     json.RawMessage `json:"capabilities"`
+		AutoUpdate       *bool           `json:"auto_update"`
+		InterfaceInclude []string        `json:"interface_include"`
+		InterfaceExclude []string        `json:"interface_exclude"`
+		MountInclude     []string        `json:"mount_include"`
+		MountExclude     []string        `json:"mount_exclude"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.IDs) == 0 {
 		fail(c, http.StatusBadRequest, "ids required")
@@ -100,9 +102,14 @@ func (s *Server) batchConfigServers(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "valid ids required")
 		return
 	}
+	caps, err := protocol.ParseCapabilities(req.Capabilities)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	names := s.serverNames(ids)
 	cfg := protocol.AgentConfig{
-		ServerURL: req.ServerURL, Interval: req.Interval, Capabilities: req.Capabilities,
+		ServerURL: req.ServerURL, Interval: req.Interval, Capabilities: caps, AutoUpdate: req.AutoUpdate,
 		InterfaceInclude: req.InterfaceInclude, InterfaceExclude: req.InterfaceExclude,
 		MountInclude: req.MountInclude, MountExclude: req.MountExclude,
 	}

@@ -279,13 +279,24 @@ type Metric struct {
 	CPU            float64 `json:"cpu"`
 	MemUsed        uint64  `json:"mem_used"`
 	MemTotal       uint64  `json:"mem_total"`
+	SwapUsed       uint64  `json:"swap_used"`
+	SwapTotal      uint64  `json:"swap_total"`
 	DiskUsed       uint64  `json:"disk_used"`
 	DiskTotal      uint64  `json:"disk_total"`
 	NetInSpeed     float64 `json:"net_in_speed"`
 	NetOutSpeed    float64 `json:"net_out_speed"`
+	NetInTransfer  uint64  `json:"net_in_transfer"`
+	NetOutTransfer uint64  `json:"net_out_transfer"`
 	Load1          float64 `json:"load1"`
+	Load5          float64 `json:"load5"`
+	Load15         float64 `json:"load15"`
+	Uptime         uint64  `json:"uptime"`
+	LatencyMs      float64 `json:"latency_ms,omitempty"`
 	Temperature    float64 `json:"temperature,omitempty"`
 	GPUUtil        float64 `json:"gpu_util,omitempty"`
+	GPUMemUsed     uint64  `json:"gpu_mem_used,omitempty"`
+	GPUMemTotal    uint64  `json:"gpu_mem_total,omitempty"`
+	GPUDevices     string  `gorm:"type:text" json:"gpu_devices,omitempty"`
 	ProcessCount   float64 `json:"process_count,omitempty"`
 	TCPEstablished float64 `json:"tcp_established,omitempty"`
 	TCPListen      float64 `json:"tcp_listen,omitempty"`
@@ -353,14 +364,25 @@ type Service struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 }
 
+// ServiceProbe 是服务与执行探测的 Agent 服务器关联。Service.ServerID 保留为
+// 默认探测点以兼容旧客户端；新调度以本表为准。
+type ServiceProbe struct {
+	ServiceID        int64     `gorm:"primaryKey" json:"service_id"`
+	ServerID         int64     `gorm:"primaryKey;index" json:"server_id"`
+	LastCertIdentity string    `gorm:"size:768;default:''" json:"-"`
+	LastCertWarnDays int       `gorm:"default:0" json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 // ServiceHistory 探测历史（分钟级聚合，保留 30 天）。
 // 延迟分位数（P50/P95/P99/标准差/抖动）为哨兵内存滑动窗口的快照：
 // 窗口保存每服务最近 DelayWindowSize 次成功探测的延迟（跨分钟），
 // 分钟桶落库时写入当前窗口值；DelaySamples < DelayMinSamples（30）时无意义，API 输出 null。
 type ServiceHistory struct {
 	ID            int64   `gorm:"primaryKey" json:"-"`
-	ServiceID     int64   `gorm:"index:idx_svc_hist" json:"service_id"`
-	Ts            int64   `gorm:"index:idx_svc_hist" json:"ts"`
+	ServiceID     int64   `gorm:"uniqueIndex:idx_svc_probe_bucket;index:idx_svc_hist" json:"service_id"`
+	ServerID      int64   `gorm:"uniqueIndex:idx_svc_probe_bucket;index:idx_svc_hist" json:"server_id"`
+	Ts            int64   `gorm:"uniqueIndex:idx_svc_probe_bucket;index:idx_svc_hist" json:"ts"`
 	UpCount       int     `json:"up_count"`
 	Total         int     `json:"total"`
 	DelaySum      int64   `json:"delay_sum"`
@@ -586,13 +608,19 @@ type UpgradeResult struct {
 
 // AuditLog 审计日志（管理操作记录，借鉴 komari Log）。
 type AuditLog struct {
-	ID        int64     `gorm:"primaryKey" json:"id"`
-	UserID    int64     `json:"user_id"`
-	Username  string    `gorm:"size:32" json:"username"`
-	Action    string    `gorm:"size:64" json:"action"` // 如 server.create / alert.delete
-	Detail    string    `gorm:"size:512" json:"detail"`
-	IP        string    `gorm:"size:64" json:"ip"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           int64     `gorm:"primaryKey" json:"id"`
+	UserID       int64     `json:"user_id"`
+	Username     string    `gorm:"size:32" json:"username"`
+	Action       string    `gorm:"size:64;index" json:"action"` // 如 server.create / alert.delete
+	ResourceType string    `gorm:"size:64;index;default:''" json:"resource_type"`
+	ResourceID   string    `gorm:"size:128;index;default:''" json:"resource_id"`
+	Outcome      string    `gorm:"size:16;index;default:'success'" json:"outcome"`
+	ErrorCode    string    `gorm:"size:64;default:''" json:"error_code"`
+	DurationMS   int64     `gorm:"default:0" json:"duration_ms"`
+	RequestID    string    `gorm:"size:64;index;default:''" json:"request_id"`
+	Detail       string    `gorm:"size:512" json:"detail"`
+	IP           string    `gorm:"size:64" json:"ip"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // MCPAuditLog 记录 MCP 工具调用明细（对齐 nezha mcp_audit_logs）。
@@ -602,9 +630,9 @@ type MCPAuditLog struct {
 	ID         int64     `gorm:"primaryKey" json:"id"`
 	UserID     int64     `json:"user_id"`
 	Tool       string    `gorm:"size:64;index" json:"tool"`
-	ServerID   int64     `json:"server_id"` // 0 = 非服务器级工具
-	ArgsHash   string    `gorm:"size:64" json:"args_hash"`   // sha256(arguments JSON)
-	ArgsPeek   string    `gorm:"size:512" json:"args_peek"`  // 截断的参数预览（≤512）
+	ServerID   int64     `json:"server_id"`                 // 0 = 非服务器级工具
+	ArgsHash   string    `gorm:"size:64" json:"args_hash"`  // sha256(arguments JSON)
+	ArgsPeek   string    `gorm:"size:512" json:"args_peek"` // 截断的参数预览（≤512）
 	Outcome    string    `gorm:"size:32;index" json:"outcome"`
 	ErrorMsg   string    `gorm:"size:512" json:"error_msg"`
 	DurationMs int64     `json:"duration_ms"`
@@ -686,14 +714,18 @@ type BackupSchedule struct {
 
 // BackupRun 一次备份执行记录（审计与保留清理依据）。
 type BackupRun struct {
-	ID         int64     `gorm:"primaryKey" json:"id"`
-	ScheduleID int64     `gorm:"index;not null" json:"schedule_id"`
-	Trigger    string    `gorm:"size:16;default:'cron'" json:"trigger"` // cron / manual
-	Status     string    `gorm:"size:16;not null" json:"status"`        // success / failed
-	Target     string    `gorm:"size:1024;default:''" json:"target"`
-	Size       int64     `json:"size"`
-	SHA256     string    `gorm:"size:64;default:''" json:"sha256"` // 密文 SHA-256
-	Error      string    `gorm:"size:1024;default:''" json:"error"`
-	DurationMS int64     `json:"duration_ms"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID              int64     `gorm:"primaryKey" json:"id"`
+	ScheduleID      int64     `gorm:"index;not null" json:"schedule_id"`
+	Trigger         string    `gorm:"size:16;default:'cron'" json:"trigger"` // cron / manual
+	Status          string    `gorm:"size:16;not null" json:"status"`        // success / failed
+	Target          string    `gorm:"size:1024;default:''" json:"target"`
+	Size            int64     `json:"size"`
+	SHA256          string    `gorm:"size:64;default:''" json:"sha256"` // 密文 SHA-256
+	Error           string    `gorm:"size:1024;default:''" json:"error"`
+	DurationMS      int64     `json:"duration_ms"`
+	Format          string    `gorm:"size:64;default:''" json:"format"`
+	ManifestVersion int       `gorm:"default:0" json:"manifest_version"`
+	ManifestSHA256  string    `gorm:"size:64;default:''" json:"manifest_sha256"`
+	Components      string    `gorm:"size:512;default:''" json:"components"`
+	CreatedAt       time.Time `json:"created_at"`
 }

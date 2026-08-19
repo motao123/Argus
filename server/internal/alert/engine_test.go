@@ -4,6 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
 	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/model"
 	"github.com/motao123/Argus/server/internal/store"
@@ -132,6 +135,40 @@ func TestMetricValueExtended(t *testing.T) {
 	e.resetBaseline(&model.Alert{Metric: "transfer_all"}, *st)
 	if v, ok := e.metricValue(&model.Alert{Metric: "transfer_all"}, *st); !ok || v != 0 {
 		t.Errorf("transfer_all after baseline reset = %v,%v, want 0,true", v, ok)
+	}
+}
+
+func TestMetricValueTrafficAllCycle(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:traffic-all-cycle?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Transfer{}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := parseAt(t, "2024-02-20T12:00:00Z")
+	cycleStart := parseAt(t, "2024-02-01T00:00:00Z")
+	server := &model.Server{ID: 2}
+	rows := []model.Transfer{
+		{ServerID: server.ID, Ts: parseAt(t, "2024-02-10T00:00:00Z").Unix(), In: 100, Out: 200},
+		{ServerID: server.ID, Ts: parseAt(t, "2024-02-15T00:00:00Z").Unix(), In: 300, Out: 400},
+		{ServerID: server.ID, Ts: parseAt(t, "2024-01-15T00:00:00Z").Unix(), In: 900, Out: 900},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	e := &Engine{db: db, nowFn: func() time.Time { return now }}
+	state := store.State{Server: server, Online: true}
+	value, ok := e.metricValue(&model.Alert{
+		Metric:        "traffic_all_cycle",
+		CycleStart:    &cycleStart,
+		CycleUnit:     "month",
+		CycleInterval: 1,
+	}, state)
+	if !ok || value != 1000 {
+		t.Fatalf("traffic_all_cycle = %v,%v, want 1000,true", value, ok)
 	}
 }
 

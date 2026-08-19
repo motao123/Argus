@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -100,6 +101,81 @@ func TestTransferLifecycle(t *testing.T) {
 	}
 	if tr2.Status != "cancelled" {
 		t.Fatalf("transfer should be cancelled, got %s", tr2.Status)
+	}
+}
+
+func TestTransferSweepAndRetry(t *testing.T) {
+	e := newAuthzEnv(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	authed := r.Group("", e.srv.authMiddleware())
+	authed.POST("/server-transfers", e.srv.createTransfer)
+	authed.POST("/server-transfers/:id/retry", e.srv.retryTransfer)
+
+	create := httptest.NewRequest(http.MethodPost, "/server-transfers", strings.NewReader(`{"server_id":`+itoa(e.aliceS.ID)+`,"to_user_id":`+itoa(e.bob.ID)+`}`))
+	create.Header.Set("Authorization", "Bearer "+e.token(t, e.admin))
+	create.Header.Set("Content-Type", "application/json")
+	created := httptest.NewRecorder()
+	r.ServeHTTP(created, create)
+	if created.Code != http.StatusOK {
+		t.Fatalf("create transfer: got %d body %s", created.Code, created.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Transfer  model.ServerTransfer `json:"transfer"`
+			NewSecret string               `json:"new_secret"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	first := response.Data.Transfer
+	firstSecret := response.Data.NewSecret
+	if err := e.srv.DB.Model(&model.ServerTransfer{}).Where("id = ?", first.ID).
+		Update("updated_at", time.Now().Add(-transferTTL-time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	e.srv.SweepTransfers()
+	var failed model.ServerTransfer
+	if err := e.srv.DB.First(&failed, first.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != "failed" {
+		t.Fatalf("swept transfer status = %q, want failed", failed.Status)
+	}
+	var srv model.Server
+	if err := e.srv.DB.First(&srv, e.aliceS.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if srv.Secret != e.aliceS.Secret {
+		t.Fatalf("sweep did not restore original secret: got %q want %q", srv.Secret, e.aliceS.Secret)
+	}
+
+	retry := httptest.NewRequest(http.MethodPost, "/server-transfers/"+itoa(first.ID)+"/retry", nil)
+	retry.Header.Set("Authorization", "Bearer "+e.token(t, e.admin))
+	retried := httptest.NewRecorder()
+	r.ServeHTTP(retried, retry)
+	if retried.Code != http.StatusOK {
+		t.Fatalf("retry transfer: got %d body %s", retried.Code, retried.Body.String())
+	}
+	var retryResponse struct {
+		Data struct {
+			Transfer  model.ServerTransfer `json:"transfer"`
+			NewSecret string               `json:"new_secret"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(retried.Body.Bytes(), &retryResponse); err != nil {
+		t.Fatal(err)
+	}
+	if retryResponse.Data.Transfer.ID == first.ID || retryResponse.Data.Transfer.Status != "pending" {
+		t.Fatalf("retry should create a new pending record: %+v", retryResponse.Data.Transfer)
+	}
+	if retryResponse.Data.NewSecret == "" || retryResponse.Data.NewSecret == firstSecret {
+		t.Fatal("retry should issue a different non-empty secret")
+	}
+	if err := e.srv.DB.First(&failed, first.ID).Error; err != nil || failed.Status != "failed" {
+		t.Fatalf("original failed record was modified: status=%q err=%v", failed.Status, err)
 	}
 }
 

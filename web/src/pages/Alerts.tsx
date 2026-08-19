@@ -26,6 +26,7 @@ const metrics: { key: string; label: TKey }[] = [
   { key: "transfer_all", label: "alerts.metricTransferAll" },
   { key: "traffic_in_cycle", label: "alerts.metricTrafficIn" },
   { key: "traffic_out_cycle", label: "alerts.metricTrafficOut" },
+  { key: "traffic_all_cycle", label: "alerts.metricTrafficAll" },
   { key: "offline", label: "alerts.metricOffline" },
 ];
 
@@ -39,7 +40,7 @@ const cycleUnits: { key: string; label: TKey }[] = [
   { key: "year", label: "alerts.cycleYear" },
 ];
 
-const isCycleMetric = (m: string) => m === "traffic_in_cycle" || m === "traffic_out_cycle";
+const isCycleMetric = (m: string) => m === "traffic_in_cycle" || m === "traffic_out_cycle" || m === "traffic_all_cycle";
 
 const notifTypes = ["webhook", "bark", "telegram", "email", "serverchan", "javascript", "dingtalk", "wecom", "feishu", "slack", "wxpusher", "matrix"];
 

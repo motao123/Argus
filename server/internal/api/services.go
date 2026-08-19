@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/server/internal/model"
@@ -18,6 +19,7 @@ import (
 // serviceView 服务监控视图：配置 + 最近状态 + 今日可用率。
 type serviceView struct {
 	model.Service
+	ServerIDs    []int64  `json:"server_ids"`
 	LastUp       *bool    `json:"last_up"`
 	LastDelay    *int     `json:"last_delay"`
 	LastCheckAt  int64    `json:"last_check_at"`
@@ -75,7 +77,7 @@ func (s *Server) listServices(c *gin.Context) {
 	todayStart := time.Now().Truncate(24 * time.Hour).Unix()
 	out := make([]serviceView, 0, len(services))
 	for i := range services {
-		v := serviceView{Service: services[i]}
+		v := serviceView{Service: services[i], ServerIDs: s.serviceProbeIDs(services[i])}
 		// 最近一条
 		var last model.ServiceHistory
 		if err := s.DB.Where("service_id = ?", services[i].ID).Order("ts DESC, id DESC").First(&last).Error; err == nil {
@@ -123,6 +125,37 @@ func (s *Server) listServices(c *gin.Context) {
 	okPage(c, gin.H{"services": out}, total, offset, limit)
 }
 
+func (s *Server) serviceProbeIDs(svc model.Service) []int64 {
+	var probes []model.ServiceProbe
+	if err := s.DB.Where("service_id = ?", svc.ID).Order("server_id").Find(&probes).Error; err == nil && len(probes) > 0 {
+		ids := make([]int64, 0, len(probes))
+		for _, probe := range probes {
+			ids = append(ids, probe.ServerID)
+		}
+		return ids
+	}
+	if svc.ServerID > 0 {
+		return []int64{svc.ServerID}
+	}
+	return []int64{}
+}
+
+func normalizeServiceServerIDs(serverID int64, serverIDs []int64) []int64 {
+	out := make([]int64, 0, len(serverIDs)+1)
+	seen := make(map[int64]struct{}, len(serverIDs)+1)
+	for _, id := range append([]int64{serverID}, serverIDs...) {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
 func optionalDuration(v int) *int {
 	if v <= 0 {
 		return nil
@@ -140,41 +173,45 @@ func max64(a, b int64) int64 {
 func (s *Server) createService(c *gin.Context) {
 	p := principalFromContext(c)
 	var req struct {
-		ServerID              int64  `json:"server_id"`
-		Name                  string `json:"name"`
-		Type                  string `json:"type"`
-		Target                string `json:"target"`
-		Interval              int    `json:"interval"`
-		Notify                bool   `json:"notify"`
-		NotifyWebhookID       int64  `json:"notify_webhook_id"`
-		NotificationGroupID   int64  `json:"notification_group_id"`
-		HTTPMethod            string `json:"http_method"`
-		VerifyTLS             *bool  `json:"verify_tls"`
-		Timeout               int    `json:"timeout"`
-		ExpectedStatusMin     int    `json:"expected_status_min"`
-		ExpectedStatusMax     int    `json:"expected_status_max"`
-		ExpectedStatuses      string `json:"expected_statuses"` // 逗号分隔状态码列表；空 = 按区间判定（列表优先）
-		MaxRedirects          int    `json:"max_redirects"`
-		PingCount             int    `json:"ping_count"`
-		RequestHeaders        string `json:"request_headers"` // JSON: [{"key","value"}]
-		RequestBody           string `json:"request_body"`
-		AssertContains        string `json:"assert_contains"`
-		CertWarn              bool   `json:"cert_warn"`
-		Hidden                bool   `json:"hidden"`
-		FailureTriggerCronID  int64  `json:"failure_trigger_cron_id"`
-		RecoveryTriggerCronID int64  `json:"recovery_trigger_cron_id"`
+		ServerID              int64   `json:"server_id"`
+		ServerIDs             []int64 `json:"server_ids"`
+		Name                  string  `json:"name"`
+		Type                  string  `json:"type"`
+		Target                string  `json:"target"`
+		Interval              int     `json:"interval"`
+		Notify                bool    `json:"notify"`
+		NotifyWebhookID       int64   `json:"notify_webhook_id"`
+		NotificationGroupID   int64   `json:"notification_group_id"`
+		HTTPMethod            string  `json:"http_method"`
+		VerifyTLS             *bool   `json:"verify_tls"`
+		Timeout               int     `json:"timeout"`
+		ExpectedStatusMin     int     `json:"expected_status_min"`
+		ExpectedStatusMax     int     `json:"expected_status_max"`
+		ExpectedStatuses      string  `json:"expected_statuses"` // 逗号分隔状态码列表；空 = 按区间判定（列表优先）
+		MaxRedirects          int     `json:"max_redirects"`
+		PingCount             int     `json:"ping_count"`
+		RequestHeaders        string  `json:"request_headers"` // JSON: [{"key","value"}]
+		RequestBody           string  `json:"request_body"`
+		AssertContains        string  `json:"assert_contains"`
+		CertWarn              bool    `json:"cert_warn"`
+		Hidden                bool    `json:"hidden"`
+		FailureTriggerCronID  int64   `json:"failure_trigger_cron_id"`
+		RecoveryTriggerCronID int64   `json:"recovery_trigger_cron_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
-	if req.ServerID <= 0 || req.Name == "" || req.Target == "" {
-		fail(c, http.StatusBadRequest, "server_id/name/target required")
+	ids := normalizeServiceServerIDs(req.ServerID, req.ServerIDs)
+	if len(ids) == 0 || req.Name == "" || req.Target == "" {
+		fail(c, http.StatusBadRequest, "server_id/server_ids/name/target required")
 		return
 	}
-	if _, ok := s.authorizeServer(c, req.ServerID, ScopeServiceWrite); !ok {
-		fail(c, http.StatusForbidden, "server access denied")
-		return
+	for _, serverID := range ids {
+		if _, ok := s.authorizeServer(c, serverID, ScopeServiceWrite); !ok {
+			fail(c, http.StatusForbidden, "server access denied")
+			return
+		}
 	}
 	switch req.Type {
 	case "http", "tcp", "ping", "command":
@@ -243,7 +280,7 @@ func (s *Server) createService(c *gin.Context) {
 	}
 	svc := model.Service{
 		OwnerID:               p.UserID,
-		ServerID:              req.ServerID,
+		ServerID:              ids[0],
 		Name:                  req.Name,
 		Type:                  req.Type,
 		Target:                req.Target,
@@ -259,6 +296,7 @@ func (s *Server) createService(c *gin.Context) {
 		ExpectedStatusMin:     req.ExpectedStatusMin,
 		ExpectedStatusMax:     req.ExpectedStatusMax,
 		ExpectedStatuses:      expectedStatuses,
+		MaxRedirects:          req.MaxRedirects,
 		PingCount:             req.PingCount,
 		RequestHeaders:        headers,
 		RequestBody:           req.RequestBody,
@@ -267,11 +305,20 @@ func (s *Server) createService(c *gin.Context) {
 		FailureTriggerCronID:  req.FailureTriggerCronID,
 		RecoveryTriggerCronID: req.RecoveryTriggerCronID,
 	}
-	if err := s.DB.Create(&svc).Error; err != nil {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&svc).Error; err != nil {
+			return err
+		}
+		probes := make([]model.ServiceProbe, 0, len(ids))
+		for _, serverID := range ids {
+			probes = append(probes, model.ServiceProbe{ServiceID: svc.ID, ServerID: serverID})
+		}
+		return tx.Create(&probes).Error
+	}); err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok(c, svc)
+	ok(c, serviceView{Service: svc, ServerIDs: ids})
 }
 
 func (s *Server) updateService(c *gin.Context) {
@@ -286,44 +333,59 @@ func (s *Server) updateService(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ServerID              *int64  `json:"server_id"`
-		Name                  *string `json:"name"`
-		Type                  *string `json:"type"`
-		Target                *string `json:"target"`
-		Interval              *int    `json:"interval"`
-		Timeout               *int    `json:"timeout"`
-		HTTPMethod            *string `json:"http_method"`
-		VerifyTLS             *bool   `json:"verify_tls"`
-		ExpectedStatusMin     *int    `json:"expected_status_min"`
-		ExpectedStatusMax     *int    `json:"expected_status_max"`
-		ExpectedStatuses      *string `json:"expected_statuses"` // 逗号分隔状态码列表；空串 = 清空列表回到区间判定
-		MaxRedirects          *int    `json:"max_redirects"`
-		PingCount             *int    `json:"ping_count"`
-		RequestHeaders        *string `json:"request_headers"`
-		RequestBody           *string `json:"request_body"`
-		AssertContains        *string `json:"assert_contains"`
-		Enabled               *bool   `json:"enabled"`
-		Hidden                *bool   `json:"hidden"`
-		Notify                *bool   `json:"notify"`
-		NotifyWebhookID       *int64  `json:"notify_webhook_id"`
-		NotificationGroupID   *int64  `json:"notification_group_id"`
-		CertWarn              *bool   `json:"cert_warn"`
-		FailureTriggerCronID  *int64  `json:"failure_trigger_cron_id"`
-		RecoveryTriggerCronID *int64  `json:"recovery_trigger_cron_id"`
+		ServerID              *int64   `json:"server_id"`
+		ServerIDs             *[]int64 `json:"server_ids"`
+		Name                  *string  `json:"name"`
+		Type                  *string  `json:"type"`
+		Target                *string  `json:"target"`
+		Interval              *int     `json:"interval"`
+		Timeout               *int     `json:"timeout"`
+		HTTPMethod            *string  `json:"http_method"`
+		VerifyTLS             *bool    `json:"verify_tls"`
+		ExpectedStatusMin     *int     `json:"expected_status_min"`
+		ExpectedStatusMax     *int     `json:"expected_status_max"`
+		ExpectedStatuses      *string  `json:"expected_statuses"` // 逗号分隔状态码列表；空串 = 清空列表回到区间判定
+		MaxRedirects          *int     `json:"max_redirects"`
+		PingCount             *int     `json:"ping_count"`
+		RequestHeaders        *string  `json:"request_headers"`
+		RequestBody           *string  `json:"request_body"`
+		AssertContains        *string  `json:"assert_contains"`
+		Enabled               *bool    `json:"enabled"`
+		Hidden                *bool    `json:"hidden"`
+		Notify                *bool    `json:"notify"`
+		NotifyWebhookID       *int64   `json:"notify_webhook_id"`
+		NotificationGroupID   *int64   `json:"notification_group_id"`
+		CertWarn              *bool    `json:"cert_warn"`
+		FailureTriggerCronID  *int64   `json:"failure_trigger_cron_id"`
+		RecoveryTriggerCronID *int64   `json:"recovery_trigger_cron_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "bad request")
 		return
 	}
-	if req.ServerID != nil {
-		if _, ok := s.authorizeServer(c, *req.ServerID, ScopeServiceWrite); !ok {
+	var probeIDs []int64
+	if req.ServerIDs != nil {
+		defaultID := int64(0)
+		if req.ServerID != nil {
+			defaultID = *req.ServerID
+		}
+		probeIDs = normalizeServiceServerIDs(defaultID, *req.ServerIDs)
+	} else if req.ServerID != nil {
+		probeIDs = normalizeServiceServerIDs(*req.ServerID, nil)
+	}
+	for _, serverID := range probeIDs {
+		if _, ok := s.authorizeServer(c, serverID, ScopeServiceWrite); !ok {
 			fail(c, http.StatusForbidden, "server access denied")
 			return
 		}
 	}
+	if (req.ServerIDs != nil || req.ServerID != nil) && len(probeIDs) == 0 {
+		fail(c, http.StatusBadRequest, "at least one probe server required")
+		return
+	}
 	updates := map[string]any{}
-	if req.ServerID != nil {
-		updates["server_id"] = *req.ServerID
+	if len(probeIDs) > 0 {
+		updates["server_id"] = probeIDs[0]
 	}
 	if req.Name != nil {
 		updates["name"] = *req.Name
@@ -460,7 +522,22 @@ func (s *Server) updateService(c *gin.Context) {
 		}
 		updates["assert_contains"] = *req.AssertContains
 	}
-	if err := s.DB.Model(&svc).Updates(updates).Error; err != nil {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&svc).Updates(updates).Error; err != nil {
+			return err
+		}
+		if req.ServerIDs == nil && req.ServerID == nil {
+			return nil
+		}
+		if err := tx.Where("service_id = ?", svc.ID).Delete(&model.ServiceProbe{}).Error; err != nil {
+			return err
+		}
+		probes := make([]model.ServiceProbe, 0, len(probeIDs))
+		for _, serverID := range probeIDs {
+			probes = append(probes, model.ServiceProbe{ServiceID: svc.ID, ServerID: serverID})
+		}
+		return tx.Create(&probes).Error
+	}); err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -479,6 +556,7 @@ func (s *Server) deleteService(c *gin.Context) {
 		return
 	}
 	s.DB.Delete(&model.ServiceHistory{}, "service_id = ?", id)
+	s.DB.Delete(&model.ServiceProbe{}, "service_id = ?", id)
 	s.DB.Delete(&model.Service{}, id)
 	ok(c, gin.H{"ok": true})
 }
@@ -498,8 +576,12 @@ func (s *Server) canViewService(c *gin.Context, svc *model.Service) bool {
 	if p.IsPAT && !p.hasScope(ScopeServiceRead) {
 		return false
 	}
-	_, ok := s.authorizeServer(c, svc.ServerID, ScopeServiceRead)
-	return ok
+	for _, serverID := range s.serviceProbeIDs(*svc) {
+		if _, ok := s.authorizeServer(c, serverID, ScopeServiceRead); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // serviceHistory 服务历史（1d 分钟级 / 7d 按小时聚合）。

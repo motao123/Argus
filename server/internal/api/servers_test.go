@@ -84,11 +84,12 @@ func TestServerApplyConfigValidation(t *testing.T) {
 }
 
 func TestParseCapabilitiesWireFormat(t *testing.T) {
-	// 与前端提交结构一致：7 个布尔能力 + include/exclude 数组
-	body := `{"capabilities":{"metrics":true,"probe":true,"command":true,"terminal":true,"files":true,"upgrade":true,"nat":false},
+	// 与前端提交结构一致：8 个布尔能力、auto_update 三态字段 + include/exclude 数组
+	body := `{"capabilities":{"metrics":true,"probe":true,"command":true,"terminal":true,"files":true,"upgrade":true,"nat":false,"trace":true},"auto_update":false,
 	"interface_include":["eth0","eth1"],"interface_exclude":[],"mount_include":null,"mount_exclude":["/tmp"]}`
 	var req struct {
 		Capabilities     json.RawMessage `json:"capabilities"`
+		AutoUpdate       *bool           `json:"auto_update"`
 		InterfaceInclude []string        `json:"interface_include"`
 		InterfaceExclude []string        `json:"interface_exclude"`
 		MountInclude     []string        `json:"mount_include"`
@@ -101,8 +102,11 @@ func TestParseCapabilitiesWireFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !caps.Metrics || !caps.Command || caps.NAT {
+	if !caps.Metrics || !caps.Command || caps.NAT || !caps.Trace {
 		t.Fatalf("wire caps = %+v", caps)
+	}
+	if req.AutoUpdate == nil || *req.AutoUpdate {
+		t.Fatalf("auto_update = %+v, want false", req.AutoUpdate)
 	}
 	if len(req.InterfaceInclude) != 2 || req.InterfaceInclude[0] != "eth0" {
 		t.Fatalf("interface_include = %v", req.InterfaceInclude)

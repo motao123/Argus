@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,7 +28,7 @@ func (s *Server) oauthRedirect(c *gin.Context) {
 		return
 	}
 	state := randomHex(16)
-	c.SetCookie("oauth_state", state, 600, "/", "", c.Request.TLS != nil, true)
+	c.SetCookie("oauth_state", state, 600, "/", "", s.oauthCookieSecure(c), true)
 
 	redirectURI := s.oauthRedirectURI(c, provider)
 	authURL, err := s.OAuth.BuildAuthURL(provider, redirectURI, state)
@@ -84,7 +86,7 @@ func (s *Server) oauthCallback(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "issue token")
 		return
 	}
-	c.SetCookie("oauth_state", "", -1, "/", "", c.Request.TLS != nil, true)
+	c.SetCookie("oauth_state", "", -1, "/", "", s.oauthCookieSecure(c), true)
 	// 安全交换：JWT 不出现在 URL。发放一次性短期 code，由前端交换。
 	oneTimeCode := issueOAuthCode(token, 60*time.Second)
 	c.Redirect(http.StatusFound, "/login?oauth_code="+oneTimeCode)
@@ -314,12 +316,28 @@ func (s *Server) reloadOAuth() {
 }
 
 // oauthRedirectURI 回调地址（同源 /api/v1/auth/oauth/:provider/callback）。
+// ARGUS_PUBLIC_URL 已配置时优先使用，避免 TLS 终止在反向代理时推导出错误的 http 回调。
 func (s *Server) oauthRedirectURI(c *gin.Context, provider string) string {
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
+	base := ""
+	if s.Cfg != nil {
+		base = strings.TrimRight(strings.TrimSpace(s.Cfg.PublicURL), "/")
 	}
-	return scheme + "://" + c.Request.Host + "/api/v1/auth/oauth/" + provider + "/callback"
+	if base == "" {
+		scheme := "http"
+		if c.Request.TLS != nil {
+			scheme = "https"
+		}
+		base = scheme + "://" + c.Request.Host
+	}
+	return base + "/api/v1/auth/oauth/" + url.PathEscape(provider) + "/callback"
+}
+
+func (s *Server) oauthCookieSecure(c *gin.Context) bool {
+	if s.Cfg != nil && s.Cfg.PublicURL != "" {
+		u, err := url.Parse(s.Cfg.PublicURL)
+		return err == nil && strings.EqualFold(u.Scheme, "https")
+	}
+	return c.Request.TLS != nil
 }
 
 func randomHex(n int) string {

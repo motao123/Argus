@@ -3,6 +3,7 @@
 package store
 
 import (
+	"encoding/json"
 	"log"
 	"sync"
 	"time"
@@ -141,13 +142,25 @@ type bucket struct {
 	cpuSum                                                                 float64
 	memUsed                                                                uint64
 	memTotal                                                               uint64
+	swapUsed                                                               uint64
+	swapTotal                                                              uint64
 	diskUsed                                                               uint64
 	diskTotal                                                              uint64
 	netInSum                                                               float64
 	netOutSum                                                              float64
+	netInTransfer                                                          uint64
+	netOutTransfer                                                         uint64
 	load1Sum                                                               float64
+	load5Sum                                                               float64
+	load15Sum                                                              float64
+	uptime                                                                 uint64
+	latencySum                                                             float64
+	latencyCount                                                           int
 	tempSum                                                                float64
 	gpuSum                                                                 float64
+	gpuMemUsed                                                             uint64
+	gpuMemTotal                                                            uint64
+	gpuDevices                                                             string
 	processSum, tcpEstablishedSum, tcpListenSum, udpSum                    float64
 	diskReadSpeedSum, diskWriteSpeedSum, diskReadIOPSSum, diskWriteIOPSSum float64
 	// cpuDigest 本分钟 CPU 样本的 t-digest（百分位 p50/p95/p99 计算）。
@@ -155,8 +168,18 @@ type bucket struct {
 }
 
 // MetricBatcher 聚合 Agent 上报为分钟级指标并批量落库。
+type metricWriter interface {
+	WriteMetrics(rows []*model.Metric) error
+}
+
+type gormMetricWriter struct{ db *gorm.DB }
+
+func (w gormMetricWriter) WriteMetrics(rows []*model.Metric) error {
+	return w.db.CreateInBatches(rows, 200).Error
+}
+
 type MetricBatcher struct {
-	db *gorm.DB
+	writer metricWriter
 
 	mu      sync.Mutex
 	buckets map[int64]*bucket // key: serverID
@@ -166,8 +189,12 @@ type MetricBatcher struct {
 }
 
 func NewMetricBatcher(db *gorm.DB) *MetricBatcher {
+	return newMetricBatcher(gormMetricWriter{db: db})
+}
+
+func newMetricBatcher(writer metricWriter) *MetricBatcher {
 	return &MetricBatcher{
-		db:      db,
+		writer:  writer,
 		buckets: make(map[int64]*bucket),
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
@@ -201,13 +228,29 @@ func (m *MetricBatcher) Feed(serverID int64, r *protocol.ReportParams) {
 	b.cpuDigest.Add(r.CPU)
 	b.memUsed = r.MemUsed
 	b.memTotal = r.MemTotal
+	b.swapUsed = r.SwapUsed
+	b.swapTotal = r.SwapTotal
 	b.diskUsed = r.DiskUsed
 	b.diskTotal = r.DiskTotal
 	b.netInSum += r.NetInSpeed
 	b.netOutSum += r.NetOutSpeed
+	b.netInTransfer = r.NetInTransfer
+	b.netOutTransfer = r.NetOutTransfer
 	b.load1Sum += r.Load1
+	b.load5Sum += r.Load5
+	b.load15Sum += r.Load15
+	b.uptime = r.Uptime
+	if r.LatencyMs > 0 {
+		b.latencySum += float64(r.LatencyMs)
+		b.latencyCount++
+	}
 	b.tempSum += r.Temperature
 	b.gpuSum += r.GPUUtil
+	b.gpuMemUsed = r.GPUMemUsed
+	b.gpuMemTotal = r.GPUMemTotal
+	if data, err := json.Marshal(r.GPU.Devices); err == nil {
+		b.gpuDevices = string(data)
+	}
 	b.processSum += float64(r.ProcessCount)
 	b.tcpEstablishedSum += float64(r.TCPEstablished)
 	b.tcpListenSum += float64(r.TCPListen)
@@ -241,23 +284,36 @@ func (b *bucket) toRow() *metricRow {
 		n = 1
 	}
 	row := &metricRow{
-		ServerID:     b.serverID,
-		TS:           b.ts,
-		Granularity:  60,
-		CPU:          b.cpuSum / n,
-		MemUsed:      b.memUsed,
-		MemTotal:     b.memTotal,
-		DiskUsed:     b.diskUsed,
-		DiskTotal:    b.diskTotal,
-		NetInSpeed:   b.netInSum / n,
-		NetOutSpeed:  b.netOutSum / n,
-		Load1:        b.load1Sum / n,
-		Temperature:  b.tempSum / n,
-		GPUUtil:      b.gpuSum / n,
-		ProcessCount: b.processSum / n, TCPEstablished: b.tcpEstablishedSum / n,
+		ServerID:       b.serverID,
+		TS:             b.ts,
+		Granularity:    60,
+		CPU:            b.cpuSum / n,
+		MemUsed:        b.memUsed,
+		MemTotal:       b.memTotal,
+		SwapUsed:       b.swapUsed,
+		SwapTotal:      b.swapTotal,
+		DiskUsed:       b.diskUsed,
+		DiskTotal:      b.diskTotal,
+		NetInSpeed:     b.netInSum / n,
+		NetOutSpeed:    b.netOutSum / n,
+		NetInTransfer:  b.netInTransfer,
+		NetOutTransfer: b.netOutTransfer,
+		Load1:          b.load1Sum / n,
+		Load5:          b.load5Sum / n,
+		Load15:         b.load15Sum / n,
+		Uptime:         b.uptime,
+		Temperature:    b.tempSum / n,
+		GPUUtil:        b.gpuSum / n,
+		GPUMemUsed:     b.gpuMemUsed,
+		GPUMemTotal:    b.gpuMemTotal,
+		GPUDevices:     b.gpuDevices,
+		ProcessCount:   b.processSum / n, TCPEstablished: b.tcpEstablishedSum / n,
 		TCPListen: b.tcpListenSum / n, UDPCount: b.udpSum / n,
 		DiskReadSpeed: b.diskReadSpeedSum / n, DiskWriteSpeed: b.diskWriteSpeedSum / n,
 		DiskReadIOPS: b.diskReadIOPSSum / n, DiskWriteIOPS: b.diskWriteIOPSSum / n,
+	}
+	if b.latencyCount > 0 {
+		row.LatencyMs = b.latencySum / float64(b.latencyCount)
 	}
 	if b.cpuDigest != nil && b.cpuDigest.Count() > 0 {
 		row.Samples = int(b.cpuDigest.Count())
@@ -282,7 +338,7 @@ func (m *MetricBatcher) Flush() {
 	}
 	m.mu.Unlock()
 	if len(rows) > 0 {
-		if err := m.db.CreateInBatches(rows, 200).Error; err != nil {
+		if err := m.writer.WriteMetrics(rows); err != nil {
 			log.Printf("metric flush failed: %v", err)
 		}
 	}

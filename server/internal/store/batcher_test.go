@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,15 +21,26 @@ func TestBatcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gdb.AutoMigrate(&model.Metric{})
+	if err := gdb.AutoMigrate(&model.Metric{}); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
 
 	old := time.Now().Add(-2 * time.Minute).Unix()
 	now := time.Now().Unix()
 	b := NewMetricBatcher(gdb)
 
 	// 1) 旧分钟数据 → 新分钟首报触发 rollover，flush 后旧分钟落库
-	b.Feed(1, &protocol.ReportParams{Timestamp: old, CPU: 42.5, ProcessCount: 10, TCPEstablished: 4, DiskReadSpeed: 100})
-	b.Feed(1, &protocol.ReportParams{Timestamp: old, CPU: 43.5, ProcessCount: 20, TCPEstablished: 8, DiskReadSpeed: 300})
+	b.Feed(1, &protocol.ReportParams{Timestamp: old, CPU: 42.5, ProcessCount: 10, TCPEstablished: 4, DiskReadSpeed: 100,
+		SwapUsed: 10, SwapTotal: 100, Load5: 2, Load15: 4, Uptime: 100, LatencyMs: 10, NetInTransfer: 1000, NetOutTransfer: 2000,
+		GPUMemUsed: 256, GPUMemTotal: 1024, GPU: protocol.GPUReport{Devices: []protocol.GPUDevice{{Index: 0, Name: "GPU-A", Util: 20}}}})
+	b.Feed(1, &protocol.ReportParams{Timestamp: old, CPU: 43.5, ProcessCount: 20, TCPEstablished: 8, DiskReadSpeed: 300,
+		SwapUsed: 20, SwapTotal: 100, Load5: 4, Load15: 8, Uptime: 102, LatencyMs: 30, NetInTransfer: 1200, NetOutTransfer: 2400,
+		GPUMemUsed: 512, GPUMemTotal: 1024, GPU: protocol.GPUReport{Devices: []protocol.GPUDevice{{Index: 0, Name: "GPU-A", Util: 40}}}})
 	b.Feed(1, &protocol.ReportParams{Timestamp: now, CPU: 99})
 	b.Flush()
 
@@ -40,6 +52,15 @@ func TestBatcher(t *testing.T) {
 	}
 	if rows[0].ProcessCount != 15 || rows[0].TCPEstablished != 6 || rows[0].DiskReadSpeed != 200 {
 		t.Fatalf("extended metrics not aggregated: %+v", rows[0])
+	}
+	if rows[0].SwapUsed != 20 || rows[0].Load5 != 3 || rows[0].Load15 != 6 || rows[0].LatencyMs != 20 {
+		t.Fatalf("historical averages/latest values wrong: %+v", rows[0])
+	}
+	if rows[0].Uptime != 102 || rows[0].NetInTransfer != 1200 || rows[0].NetOutTransfer != 2400 || rows[0].GPUMemUsed != 512 {
+		t.Fatalf("historical latest counters wrong: %+v", rows[0])
+	}
+	if !strings.Contains(rows[0].GPUDevices, `"GPU-A"`) || !strings.Contains(rows[0].GPUDevices, `"util":40`) {
+		t.Fatalf("GPU device snapshot not stored: %s", rows[0].GPUDevices)
 	}
 
 	// 2) 迟到的旧数据并入当前桶（不丢不重）

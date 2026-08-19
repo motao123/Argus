@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/motao123/Argus/protocol"
 	"github.com/motao123/Argus/protocol/rpc"
@@ -24,50 +25,68 @@ type Sentinel struct {
 	stop chan struct{}
 	done chan struct{}
 
-	// 故障状态：serviceID → 连续失败次数
-	failCount map[int64]int
-	// 延迟滑动窗口：serviceID → *DelayWindow（跨分钟，仅记录成功探测的延迟）
+	// 探测状态均按 serviceID/serverID 隔离。
+	failCount   map[probeKey]int
+	lastProbeAt map[probeKey]time.Time
+	// 延迟滑动窗口：probeKey → *DelayWindow（跨分钟，仅记录成功探测的延迟）
 	windows sync.Map
 	// NotifyCb 发送故障/恢复/证书事件；TriggerCb 分别执行故障和恢复任务。
 	NotifyCb  func(svc *model.Service, kind string, detail string)
 	TriggerCb func(svc *model.Service, up bool)
 }
 
+type probeKey struct {
+	serviceID int64
+	serverID  int64
+}
+
 // failNotify 通知故障/恢复（防抖：连续失败计数）。
-func (s *Sentinel) failNotify(svc *model.Service, up bool) {
+func (s *Sentinel) failNotify(svc *model.Service, serverID int64, up bool) {
 	if s.NotifyCb == nil && s.TriggerCb == nil {
 		return
 	}
+	key := probeKey{serviceID: svc.ID, serverID: serverID}
 	s.mu.Lock()
 	if up {
-		failed := s.failCount[svc.ID] >= 3
-		s.failCount[svc.ID] = 0
+		failed := s.failCount[key] >= 3
+		s.failCount[key] = 0
 		s.mu.Unlock()
 		if failed {
+			target := serviceForProbe(svc, serverID)
 			if s.NotifyCb != nil && svc.Notify {
-				s.NotifyCb(svc, "recovered", "")
+				s.NotifyCb(target, "recovered", "")
 			}
 			if s.TriggerCb != nil {
-				s.TriggerCb(svc, true)
+				s.TriggerCb(target, true)
 			}
 		}
 		return
 	}
-	s.failCount[svc.ID]++
-	count := s.failCount[svc.ID]
+	s.failCount[key]++
+	count := s.failCount[key]
 	s.mu.Unlock()
 	if count == 3 {
+		target := serviceForProbe(svc, serverID)
 		if s.NotifyCb != nil && svc.Notify {
-			s.NotifyCb(svc, "failure", "")
+			s.NotifyCb(target, "failure", "")
 		}
 		if s.TriggerCb != nil {
-			s.TriggerCb(svc, false)
+			s.TriggerCb(target, false)
 		}
 	}
 }
 
+func serviceForProbe(svc *model.Service, serverID int64) *model.Service {
+	copy := *svc
+	copy.ServerID = serverID
+	return &copy
+}
+
 func New(db *gorm.DB) *Sentinel {
-	return &Sentinel{db: db, stop: make(chan struct{}), done: make(chan struct{}), failCount: make(map[int64]int)}
+	return &Sentinel{
+		db: db, stop: make(chan struct{}), done: make(chan struct{}),
+		failCount: make(map[probeKey]int), lastProbeAt: make(map[probeKey]time.Time),
+	}
 }
 
 // Run 每 5s 扫描一次，到期（距上次探测 >= interval）的服务触发探测。
@@ -90,44 +109,56 @@ func (s *Sentinel) Stop() {
 	<-s.done
 }
 
-// lastProbeAt 内存记录上次探测时间，避免频繁查 DB。
-var lastProbeAt = struct {
-	sync.Mutex
-	m map[int64]time.Time
-}{m: make(map[int64]time.Time)}
-
 func (s *Sentinel) checkDue(peers map[int64]*rpc.Peer) {
 	var services []model.Service
 	if err := s.db.Where("enabled = ?", true).Find(&services).Error; err != nil || len(services) == 0 {
 		return
 	}
+	serviceIDs := make([]int64, 0, len(services))
+	for i := range services {
+		serviceIDs = append(serviceIDs, services[i].ID)
+	}
+	var probes []model.ServiceProbe
+	if err := s.db.Where("service_id IN ?", serviceIDs).Order("service_id, server_id").Find(&probes).Error; err != nil {
+		return
+	}
+	byService := make(map[int64][]int64, len(services))
+	for _, probe := range probes {
+		byService[probe.ServiceID] = append(byService[probe.ServiceID], probe.ServerID)
+	}
 	now := time.Now()
 	for i := range services {
 		svc := &services[i]
-		peer, ok := peers[svc.ServerID]
-		if !ok {
-			continue // 探测 agent 不在线
+		serverIDs := byService[svc.ID]
+		if len(serverIDs) == 0 && svc.ServerID > 0 {
+			serverIDs = []int64{svc.ServerID}
 		}
-		lastProbeAt.Lock()
-		last, seen := lastProbeAt.m[svc.ID]
-		lastProbeAt.Unlock()
-		interval := time.Duration(svc.Interval) * time.Second
-		if interval <= 0 {
-			interval = 60 * time.Second
+		for _, serverID := range serverIDs {
+			peer, ok := peers[serverID]
+			if !ok {
+				continue
+			}
+			key := probeKey{serviceID: svc.ID, serverID: serverID}
+			s.mu.Lock()
+			last, seen := s.lastProbeAt[key]
+			interval := time.Duration(svc.Interval) * time.Second
+			if interval <= 0 {
+				interval = 60 * time.Second
+			}
+			due := !seen || now.Sub(last) >= interval
+			if due {
+				s.lastProbeAt[key] = now
+			}
+			s.mu.Unlock()
+			if due {
+				go s.probe(svc, serverID, peer)
+			}
 		}
-		if seen && now.Sub(last) < interval {
-			continue
-		}
-		lastProbeAt.Lock()
-		lastProbeAt.m[svc.ID] = now
-		lastProbeAt.Unlock()
-
-		go s.probe(svc, peer)
 	}
 }
 
 // probe 下发探测并记录结果（异步，避免阻塞扫描）。
-func (s *Sentinel) probe(svc *model.Service, peer *rpc.Peer) {
+func (s *Sentinel) probe(svc *model.Service, serverID int64, peer *rpc.Peer) {
 	timeout := svc.Timeout
 	if timeout <= 0 {
 		timeout = 10
@@ -142,20 +173,20 @@ func (s *Sentinel) probe(svc *model.Service, peer *rpc.Peer) {
 		Body: svc.RequestBody, AssertContains: svc.AssertContains,
 	}, time.Duration(timeout+5)*time.Second)
 	if err != nil || resp.Error != nil {
-		s.record(svc.ID, protocol.ServiceCheckResult{})
-		s.failNotify(svc, false)
+		s.record(svc.ID, serverID, protocol.ServiceCheckResult{})
+		s.failNotify(svc, serverID, false)
 		return
 	}
 	var result protocol.ServiceCheckResult
 	raw, _ := json.Marshal(resp.Result)
 	if err := json.Unmarshal(raw, &result); err != nil {
-		s.record(svc.ID, protocol.ServiceCheckResult{})
-		s.failNotify(svc, false)
+		s.record(svc.ID, serverID, protocol.ServiceCheckResult{})
+		s.failNotify(svc, serverID, false)
 		return
 	}
-	s.record(svc.ID, result)
-	s.failNotify(svc, result.Up)
-	s.certNotify(svc, result)
+	s.record(svc.ID, serverID, result)
+	s.failNotify(svc, serverID, result.Up)
+	s.certNotify(svc, serverID, result)
 }
 
 // parseRequestHeaders 解析服务配置中的请求头 JSON（非法/空返回 nil，保持旧行为）。
@@ -180,13 +211,18 @@ func parseRequestHeaders(raw string) []protocol.KeyValue {
 	return out
 }
 
-func (s *Sentinel) certNotify(svc *model.Service, result protocol.ServiceCheckResult) {
+func (s *Sentinel) certNotify(svc *model.Service, serverID int64, result protocol.ServiceCheckResult) {
 	if !svc.CertWarn || result.CertNotAfter == 0 || s.NotifyCb == nil {
 		return
 	}
+	var probe model.ServiceProbe
+	if err := s.db.FirstOrCreate(&probe, model.ServiceProbe{ServiceID: svc.ID, ServerID: serverID}).Error; err != nil {
+		return
+	}
 	identity := result.CertIssuer + ":" + time.Unix(result.CertNotAfter, 0).UTC().Format(time.RFC3339)
-	if svc.LastCertIdentity != "" && svc.LastCertIdentity != identity {
-		s.NotifyCb(svc, "certificate_changed", identity)
+	target := serviceForProbe(svc, serverID)
+	if probe.LastCertIdentity != "" && probe.LastCertIdentity != identity {
+		s.NotifyCb(target, "certificate_changed", identity)
 	}
 	warn := 0
 	for _, days := range []int{1, 7, 30} {
@@ -195,21 +231,22 @@ func (s *Sentinel) certNotify(svc *model.Service, result protocol.ServiceCheckRe
 			break
 		}
 	}
-	if warn > 0 && svc.LastCertWarnDays != warn {
-		s.NotifyCb(svc, "certificate_expiring", fmt.Sprintf("%d", result.CertDaysRemaining))
+	if warn > 0 && probe.LastCertWarnDays != warn {
+		s.NotifyCb(target, "certificate_expiring", fmt.Sprintf("%d", result.CertDaysRemaining))
 	}
-	s.db.Model(svc).Updates(map[string]any{"last_cert_identity": identity, "last_cert_warn_days": warn})
+	s.db.Model(&probe).Updates(map[string]any{"last_cert_identity": identity, "last_cert_warn_days": warn})
 }
 
 // window 获取（必要时创建）服务的延迟滑动窗口。
-func (s *Sentinel) window(serviceID int64) *DelayWindow {
-	v, _ := s.windows.LoadOrStore(serviceID, &DelayWindow{})
+func (s *Sentinel) window(key probeKey) *DelayWindow {
+	v, _ := s.windows.LoadOrStore(key, &DelayWindow{})
 	return v.(*DelayWindow)
 }
 
 // record writes and merges one result into its minute bucket. Zero-valued added
 // fields keep results from pre-v2 agents valid (one sent/received probe).
-func (s *Sentinel) record(serviceID int64, r protocol.ServiceCheckResult) {
+func (s *Sentinel) record(serviceID, serverID int64, r protocol.ServiceCheckResult) {
+	key := probeKey{serviceID: serviceID, serverID: serverID}
 	sent, received := r.Sent, r.Received
 	if sent == 0 {
 		sent = 1
@@ -221,14 +258,14 @@ func (s *Sentinel) record(serviceID int64, r protocol.ServiceCheckResult) {
 	// （伴随 delay_samples < 30，API 侧输出 null）。
 	p50, p95, p99, stddev, jitter, samples := 0, 0, 0, 0, 0, 0
 	if r.Up {
-		w := s.window(serviceID)
+		w := s.window(key)
 		w.Add(r.DelayMs)
 		samples = w.Len()
 		if samples >= DelayMinSamples {
 			p50, p95, p99, stddev, jitter, _ = w.Snapshot()
 		}
 	}
-	h := model.ServiceHistory{ServiceID: serviceID, Ts: time.Now().Unix() / 60 * 60,
+	h := model.ServiceHistory{ServiceID: serviceID, ServerID: serverID, Ts: time.Now().Unix() / 60 * 60,
 		Total: 1, DelaySum: int64(r.DelayMs), DelayMin: r.DelayMs, DelayMax: r.DelayMs,
 		DelayP50: p50, DelayP95: p95, DelayP99: p99, DelayStdDevMs: stddev, DelayJitterMs: jitter,
 		DelaySamples: samples,
@@ -242,37 +279,32 @@ func (s *Sentinel) record(serviceID int64, r protocol.ServiceCheckResult) {
 		days := r.CertDaysRemaining
 		h.CertDays = &days
 	}
-	var existing model.ServiceHistory
-	if s.db.Where("service_id = ? AND ts = ?", serviceID, h.Ts).First(&existing).Error == nil {
-		minDelay := existing.DelayMin
-		if existing.Total == 0 || r.DelayMs < minDelay {
-			minDelay = r.DelayMs
-		}
-		maxDelay := existing.DelayMax
-		if r.DelayMs > maxDelay {
-			maxDelay = r.DelayMs
-		}
-		certDays := existing.CertDays
-		if h.CertDays != nil && (certDays == nil || *h.CertDays < *certDays) {
-			certDays = h.CertDays
-		}
-		// 分位数写入当前窗口快照（最新一次探测为准）。
-		updates := map[string]any{"up_count": existing.UpCount + h.UpCount, "total": existing.Total + 1,
-			"delay_sum": existing.DelaySum + h.DelaySum, "delay_min": minDelay, "delay_max": maxDelay,
-			"delay_p50": p50, "delay_p95": p95, "delay_p99": p99,
-			"delay_stddev_ms": stddev, "delay_jitter_ms": jitter, "delay_samples": samples,
-			"sent": existing.Sent + sent, "received": existing.Received + received,
-			"loss_sum": existing.LossSum + r.LossPercent, "status_code": r.StatusCode,
-			"dns_ms": r.DNSMs, "connect_ms": r.ConnectMs, "tls_ms": r.TLSMs, "ttfb_ms": r.TTFBMs}
-		if certDays != nil {
-			updates["cert_days"] = *certDays
-		}
-		if r.CertIssuer != "" {
-			updates["cert_issuer"] = r.CertIssuer
-			updates["cert_expiry"] = r.CertNotAfter
-		}
-		s.db.Model(&existing).Updates(updates)
-		return
+	updates := map[string]any{
+		"up_count":        gorm.Expr("up_count + excluded.up_count"),
+		"total":           gorm.Expr("total + excluded.total"),
+		"delay_sum":       gorm.Expr("delay_sum + excluded.delay_sum"),
+		"delay_min":       gorm.Expr("CASE WHEN total = 0 OR excluded.delay_min < delay_min THEN excluded.delay_min ELSE delay_min END"),
+		"delay_max":       gorm.Expr("CASE WHEN excluded.delay_max > delay_max THEN excluded.delay_max ELSE delay_max END"),
+		"delay_p50":       gorm.Expr("excluded.delay_p50"),
+		"delay_p95":       gorm.Expr("excluded.delay_p95"),
+		"delay_p99":       gorm.Expr("excluded.delay_p99"),
+		"delay_stddev_ms": gorm.Expr("excluded.delay_stddev_ms"),
+		"delay_jitter_ms": gorm.Expr("excluded.delay_jitter_ms"),
+		"delay_samples":   gorm.Expr("excluded.delay_samples"),
+		"sent":            gorm.Expr("sent + excluded.sent"),
+		"received":        gorm.Expr("received + excluded.received"),
+		"loss_sum":        gorm.Expr("loss_sum + excluded.loss_sum"),
+		"status_code":     gorm.Expr("excluded.status_code"),
+		"dns_ms":          gorm.Expr("excluded.dns_ms"),
+		"connect_ms":      gorm.Expr("excluded.connect_ms"),
+		"tls_ms":          gorm.Expr("excluded.tls_ms"),
+		"ttfb_ms":         gorm.Expr("excluded.ttfb_ms"),
+		"cert_days":       gorm.Expr("CASE WHEN excluded.cert_days IS NULL THEN cert_days WHEN cert_days IS NULL OR excluded.cert_days < cert_days THEN excluded.cert_days ELSE cert_days END"),
+		"cert_issuer":     gorm.Expr("CASE WHEN excluded.cert_issuer <> '' THEN excluded.cert_issuer ELSE cert_issuer END"),
+		"cert_expiry":     gorm.Expr("CASE WHEN excluded.cert_expiry <> 0 THEN excluded.cert_expiry ELSE cert_expiry END"),
 	}
-	s.db.Create(&h)
+	_ = s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "service_id"}, {Name: "server_id"}, {Name: "ts"}},
+		DoUpdates: clause.Assignments(updates),
+	}).Create(&h).Error
 }

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/motao123/Argus/server/internal/agent"
 	"github.com/motao123/Argus/server/internal/model"
@@ -21,7 +23,7 @@ func (s *Server) listTransfers(c *gin.Context) {
 		fail(c, http.StatusForbidden, "admin only")
 		return
 	}
-	s.sweepTransfers()
+	s.SweepTransfers()
 	var ts []model.ServerTransfer
 	if err := s.DB.Order("id DESC").Limit(100).Find(&ts).Error; err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
@@ -59,26 +61,24 @@ func (s *Server) createTransfer(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "server already owned by target user")
 		return
 	}
-	// 单服务器只能有一个活跃过户
-	var active int64
-	s.DB.Model(&model.ServerTransfer{}).
-		Where("server_id = ? AND status = 'pending'", req.ServerID).Count(&active)
-	if active > 0 {
-		fail(c, http.StatusConflict, "active transfer already exists for this server")
+	t, newSecret, err := s.startTransfer(&srv, &to)
+	if errors.Is(err, errActiveTransfer) {
+		fail(c, http.StatusConflict, err.Error())
 		return
 	}
-	oldSecret := srv.Secret
-	newSecret := agent.GenSecret()
-	// 轮换密钥：旧密钥保存为回滚密钥；新 owner 用新密钥重连即验证
-	if err := s.DB.Model(&srv).Update("secret", newSecret).Error; err != nil {
+	if err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// 现有连接使用旧密钥，立即断开
-	if peer := s.Agents.Peer(srv.ID); peer != nil {
-		_ = peer.Close()
-	}
-	s.Store.Remove(srv.ID)
+	s.disconnectTransferServer(srv.ID)
+	s.auditLog(c, "transfer.create", srv.Name+" -> "+to.Username)
+	ok(c, gin.H{"transfer": t, "new_secret": newSecret, "note": "将新密钥交给目标用户配置 Agent，重连即完成过户"})
+}
+
+var errActiveTransfer = errors.New("active transfer already exists for this server")
+
+func (s *Server) startTransfer(srv *model.Server, to *model.User) (model.ServerTransfer, string, error) {
+	newSecret := agent.GenSecret()
 	t := model.ServerTransfer{
 		ServerID:       srv.ID,
 		ServerName:     srv.Name,
@@ -87,14 +87,34 @@ func (s *Server) createTransfer(c *gin.Context) {
 		ToUsername:     to.Username,
 		Status:         "pending",
 		NewSecret:      newSecret,
-		RollbackSecret: oldSecret,
+		RollbackSecret: srv.Secret,
 	}
-	if err := s.DB.Create(&t).Error; err != nil {
-		fail(c, http.StatusInternalServerError, err.Error())
-		return
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var active int64
+		if err := tx.Model(&model.ServerTransfer{}).
+			Where("server_id = ? AND status = 'pending'", srv.ID).Count(&active).Error; err != nil {
+			return err
+		}
+		if active > 0 {
+			return errActiveTransfer
+		}
+		if err := tx.Model(&model.Server{}).Where("id = ?", srv.ID).Update("secret", newSecret).Error; err != nil {
+			return err
+		}
+		return tx.Create(&t).Error
+	})
+	return t, newSecret, err
+}
+
+func (s *Server) disconnectTransferServer(serverID int64) {
+	if s.Agents != nil {
+		if peer := s.Agents.Peer(serverID); peer != nil {
+			_ = peer.Close()
+		}
 	}
-	s.auditLog(c, "transfer.create", srv.Name+" -> "+to.Username)
-	ok(c, gin.H{"transfer": t, "new_secret": newSecret, "note": "将新密钥交给目标用户配置 Agent，重连即完成过户"})
+	if s.Store != nil {
+		s.Store.Remove(serverID)
+	}
 }
 
 // cancelTransfer 取消过户：回滚密钥与 owner，关闭待验证记录。
@@ -114,14 +134,82 @@ func (s *Server) cancelTransfer(c *gin.Context) {
 		fail(c, http.StatusConflict, "transfer not pending")
 		return
 	}
-	if err := s.DB.Model(&model.Server{}).Where("id = ?", t.ServerID).
-		Update("secret", t.RollbackSecret).Error; err != nil {
+	if err := s.rollbackTransfer(&t, "cancelled"); err != nil {
 		fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.DB.Model(&t).Updates(map[string]any{"status": "cancelled", "updated_at": time.Now()})
+	s.disconnectTransferServer(t.ServerID)
 	s.auditLog(c, "transfer.cancel", t.ServerName)
 	ok(c, gin.H{"ok": true})
+}
+
+// retryTransfer 对已超时失败的过户创建一次新的待验证尝试。
+func (s *Server) retryTransfer(c *gin.Context) {
+	p := principalFromContext(c)
+	if !p.IsAdmin {
+		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	id := mustID(c)
+	var previous model.ServerTransfer
+	if err := s.DB.First(&previous, id).Error; err != nil {
+		fail(c, http.StatusNotFound, "transfer not found")
+		return
+	}
+	if previous.Status != "failed" {
+		fail(c, http.StatusConflict, "only failed transfers can be retried")
+		return
+	}
+	var srv model.Server
+	if err := s.DB.First(&srv, previous.ServerID).Error; err != nil {
+		fail(c, http.StatusNotFound, "server not found")
+		return
+	}
+	var to model.User
+	if err := s.DB.First(&to, previous.ToUserID).Error; err != nil {
+		fail(c, http.StatusNotFound, "target user not found")
+		return
+	}
+	if srv.OwnerID == to.ID {
+		fail(c, http.StatusConflict, "server already owned by target user")
+		return
+	}
+	t, newSecret, err := s.startTransfer(&srv, &to)
+	if errors.Is(err, errActiveTransfer) {
+		fail(c, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.disconnectTransferServer(srv.ID)
+	s.auditLog(c, "transfer.retry", previous.ServerName+" -> "+previous.ToUsername)
+	ok(c, gin.H{"transfer": t, "new_secret": newSecret, "note": "将新密钥交给目标用户配置 Agent，重连即完成过户"})
+}
+
+func (s *Server) rollbackTransfer(t *model.ServerTransfer, status string) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Server{}).
+			Where("id = ? AND secret = ?", t.ServerID, t.NewSecret).
+			Update("secret", t.RollbackSecret)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("server secret changed since transfer started")
+		}
+		result = tx.Model(&model.ServerTransfer{}).
+			Where("id = ? AND status = 'pending'", t.ID).
+			Updates(map[string]any{"status": status, "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("transfer is no longer pending")
+		}
+		return nil
+	})
 }
 
 // verifyTransfer 由 Agent 重连回调触发：新密钥匹配 → 过户完成。
@@ -140,18 +228,20 @@ func (s *Server) VerifyTransfer(serverID int64) {
 	log.Printf("transfer #%d verified: server %s -> user %s", t.ID, t.ServerName, t.ToUsername)
 }
 
-// sweepTransfers 超时未验证的 pending 过户自动回滚。
-func (s *Server) sweepTransfers() {
+// SweepTransfers 超时未验证的 pending 过户自动回滚。由后台任务与列表读取共同触发。
+func (s *Server) SweepTransfers() {
 	var pending []model.ServerTransfer
-	s.DB.Where("status = 'pending'").Find(&pending)
+	if err := s.DB.Where("status = 'pending' AND updated_at < ?", time.Now().Add(-transferTTL)).Find(&pending).Error; err != nil {
+		log.Printf("transfer sweep: %v", err)
+		return
+	}
 	for i := range pending {
 		t := &pending[i]
-		if time.Since(t.UpdatedAt) < transferTTL {
+		if err := s.rollbackTransfer(t, "failed"); err != nil {
+			log.Printf("transfer #%d timeout rollback skipped: %v", t.ID, err)
 			continue
 		}
-		s.DB.Model(&model.Server{}).Where("id = ?", t.ServerID).
-			Update("secret", t.RollbackSecret)
-		s.DB.Model(t).Updates(map[string]any{"status": "failed", "updated_at": time.Now()})
+		s.disconnectTransferServer(t.ServerID)
 		log.Printf("transfer #%d timed out, rolled back secret", t.ID)
 	}
 }

@@ -10,7 +10,9 @@ package plugin
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1484,6 +1486,39 @@ func (m *Manager) loadLogs(p *Plugin) {
 // MarketDir 市场目录（main 注入，如 ./data/market/plugins）。
 var MarketDir = "./data/market/plugins"
 
+var marketTrustedKeys = map[string]ed25519.PublicKey{}
+
+// SetMarketTrustedKeys 配置插件市场可信 Ed25519 公钥。
+// 格式为 key_id=base64_public_key，多项以逗号分隔；空值表示不信任任何市场签名者。
+func SetMarketTrustedKeys(spec string) error {
+	keys := make(map[string]ed25519.PublicKey)
+	for _, entry := range strings.Split(spec, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		keyID, encoded, ok := strings.Cut(entry, "=")
+		keyID = strings.TrimSpace(keyID)
+		encoded = strings.TrimSpace(encoded)
+		if !ok || keyID == "" || encoded == "" {
+			return fmt.Errorf("invalid trusted key entry %q (want key_id=base64_public_key)", entry)
+		}
+		raw, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return fmt.Errorf("trusted key %s: invalid base64: %w", keyID, err)
+		}
+		if len(raw) != ed25519.PublicKeySize {
+			return fmt.Errorf("trusted key %s: got %d bytes, want %d", keyID, len(raw), ed25519.PublicKeySize)
+		}
+		if _, exists := keys[keyID]; exists {
+			return fmt.Errorf("trusted key %s configured more than once", keyID)
+		}
+		keys[keyID] = ed25519.PublicKey(append([]byte(nil), raw...))
+	}
+	marketTrustedKeys = keys
+	return nil
+}
+
 // MarketEntry 市场插件条目。
 type MarketEntry struct {
 	Name        string `json:"name"`
@@ -1491,7 +1526,8 @@ type MarketEntry struct {
 	Description string `json:"description"`
 	Installed   bool   `json:"installed"`
 	SHA256      string `json:"sha256,omitempty"`    // 目录确定性哈希（安装校验）
-	Signature   string `json:"signature,omitempty"` // 预留：Ed25519 签名（base64），当前不校验
+	KeyID       string `json:"key_id,omitempty"`    // Ed25519 可信公钥标识
+	Signature   string `json:"signature,omitempty"` // Ed25519 签名（base64）
 }
 
 // MarketIndex 远程市场索引（index.json）。
@@ -1500,12 +1536,12 @@ type MarketIndex struct {
 	Plugins []MarketIndexItem `json:"plugins"`
 }
 
-// MarketIndexItem 索引条目。Signature 预留 Ed25519 签名（base64），
-// 当前仅记录与展示，待后续版本实现签名验证。
+// MarketIndexItem 索引条目。签名覆盖 name、version 与规范化 sha256。
 type MarketIndexItem struct {
 	Name      string `json:"name"`
 	Version   string `json:"version"`
 	SHA256    string `json:"sha256"`
+	KeyID     string `json:"key_id,omitempty"`
 	Signature string `json:"signature,omitempty"`
 }
 
@@ -1552,6 +1588,7 @@ func (m *Manager) ListMarket() []MarketEntry {
 				Version:     it.Version,
 				Description: desc,
 				SHA256:      it.SHA256,
+				KeyID:       it.KeyID,
 				Signature:   it.Signature,
 				Installed:   m.Has(it.Name),
 			})
@@ -1584,7 +1621,29 @@ func (m *Manager) ListMarket() []MarketEntry {
 	return out
 }
 
-// InstallFromMarket 从市场安装插件：必须存在 index.json 且 SHA-256 校验通过。
+func marketSignaturePayload(item MarketIndexItem) []byte {
+	return []byte("argus-plugin-market-v1\n" + item.Name + "\n" + item.Version + "\n" + strings.ToLower(item.SHA256) + "\n")
+}
+
+func verifyMarketSignature(item MarketIndexItem) error {
+	if item.KeyID == "" || item.Signature == "" {
+		return errors.New("unsigned market entry; install refused")
+	}
+	publicKey, ok := marketTrustedKeys[item.KeyID]
+	if !ok {
+		return fmt.Errorf("market signing key %s is not trusted; install refused", item.KeyID)
+	}
+	signature, err := base64.StdEncoding.DecodeString(item.Signature)
+	if err != nil {
+		return fmt.Errorf("market signature is not valid base64: %w", err)
+	}
+	if len(signature) != ed25519.SignatureSize || !ed25519.Verify(publicKey, marketSignaturePayload(item), signature) {
+		return errors.New("market signature verification failed; install refused")
+	}
+	return nil
+}
+
+// InstallFromMarket 从市场安装插件：必须存在 index.json，且签名与 SHA-256 均校验通过。
 func (m *Manager) InstallFromMarket(name string) error {
 	idx, err := loadMarketIndex()
 	if err != nil {
@@ -1603,6 +1662,9 @@ func (m *Manager) InstallFromMarket(name string) error {
 	if item.SHA256 == "" {
 		return fmt.Errorf("market index entry %s has no sha256; install refused", name)
 	}
+	if err := verifyMarketSignature(*item); err != nil {
+		return fmt.Errorf("market plugin %s: %w", name, err)
+	}
 	src := filepath.Join(MarketDir, name)
 	if _, err := os.Stat(filepath.Join(src, "manifest.json")); err != nil {
 		return fmt.Errorf("market plugin %s not found", name)
@@ -1613,9 +1675,6 @@ func (m *Manager) InstallFromMarket(name string) error {
 	}
 	if !strings.EqualFold(got, item.SHA256) {
 		return fmt.Errorf("market plugin %s sha256 mismatch (got %s, index %s); install refused", name, got, item.SHA256)
-	}
-	if item.Signature != "" {
-		log.Printf("market %s: Ed25519 signature present; verification reserved for a future release (not enforced)", name)
 	}
 	dst := filepath.Join(m.dir, name)
 	if err := os.RemoveAll(dst); err != nil {

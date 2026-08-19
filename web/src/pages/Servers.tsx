@@ -15,6 +15,7 @@ const CAPABILITY_ITEMS: Array<[keyof CapabilitiesConfig, TKey]> = [
   ["files", "servers.cfgCapFiles"],
   ["upgrade", "servers.cfgCapUpgrade"],
   ["nat", "servers.cfgCapNAT"],
+  ["trace", "servers.cfgCapTrace"],
 ];
 
 const FILTER_ITEMS: Array<["interface_include" | "interface_exclude" | "mount_include" | "mount_exclude", TKey]> = [
@@ -60,6 +61,7 @@ interface BatchConfigForm {
   server_url: string;
   interval: number;
   capabilities: CapabilitiesConfig;
+  auto_update: "keep" | "enabled" | "disabled";
   interface_include: string;
   interface_exclude: string;
   mount_include: string;
@@ -70,6 +72,7 @@ const emptyBatchConfig: BatchConfigForm = {
   server_url: "",
   interval: 2,
   capabilities: { ...DEFAULT_CAPABILITIES },
+  auto_update: "keep",
   interface_include: "",
   interface_exclude: "",
   mount_include: "",
@@ -135,6 +138,7 @@ export default function Servers() {
     interval: 2,
     secret: "",
     capabilities: { ...DEFAULT_CAPABILITIES },
+    auto_update: "keep" as "keep" | "enabled" | "disabled",
     interface_include: "",
     interface_exclude: "",
     mount_include: "",
@@ -219,6 +223,7 @@ export default function Servers() {
         interval: c.interval,
         secret: c.secret || undefined,
         capabilities: c.capabilities,
+        auto_update: c.auto_update === "keep" ? undefined : c.auto_update === "enabled",
         interface_include: parseCommaList(c.interface_include),
         interface_exclude: parseCommaList(c.interface_exclude),
         mount_include: parseCommaList(c.mount_include),
@@ -250,6 +255,7 @@ export default function Servers() {
         server_url: f.server_url || undefined,
         interval: f.interval,
         capabilities: f.capabilities,
+        auto_update: f.auto_update === "keep" ? undefined : f.auto_update === "enabled",
         interface_include: parseCommaList(f.interface_include),
         interface_exclude: parseCommaList(f.interface_exclude),
         mount_include: parseCommaList(f.mount_include),
@@ -486,6 +492,7 @@ export default function Servers() {
                           interval: 2,
                           secret: "",
                           capabilities: { ...DEFAULT_CAPABILITIES },
+                          auto_update: "keep",
                           interface_include: "",
                           interface_exclude: "",
                           mount_include: "",
@@ -614,6 +621,13 @@ export default function Servers() {
               <input placeholder={t("servers.cfgServerUrl")} value={cfg.server_url} onChange={(e) => setCfg({ ...cfg, server_url: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
               <input type="number" placeholder={t("servers.cfgInterval")} value={cfg.interval} onChange={(e) => setCfg({ ...cfg, interval: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
               <input placeholder={t("servers.cfgSecret")} value={cfg.secret} onChange={(e) => setCfg({ ...cfg, secret: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+              <Field label={t("servers.cfgAutoUpdate")} hint={t("servers.cfgAutoUpdateHint")}>
+                <select value={cfg.auto_update} onChange={(e) => setCfg({ ...cfg, auto_update: e.target.value as typeof cfg.auto_update })} className={inputCls}>
+                  <option value="keep">{t("servers.cfgAutoUpdateKeep")}</option>
+                  <option value="enabled">{t("servers.cfgAutoUpdateEnabled")}</option>
+                  <option value="disabled">{t("servers.cfgAutoUpdateDisabled")}</option>
+                </select>
+              </Field>
 
               {/* 能力开关 */}
               <div className="rounded-lg border border-border bg-bg p-3">
@@ -666,6 +680,13 @@ export default function Servers() {
             <div className="grid grid-cols-1 gap-3">
               <input placeholder={t("servers.cfgServerUrl")} value={batchCfg.server_url} onChange={(e) => setBatchCfg({ ...batchCfg, server_url: e.target.value })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
               <input type="number" placeholder={t("servers.cfgInterval")} value={batchCfg.interval} onChange={(e) => setBatchCfg({ ...batchCfg, interval: Number(e.target.value) })} className="rounded-lg border border-border bg-bg px-3 py-2 text-sm" />
+              <Field label={t("servers.cfgAutoUpdate")} hint={t("servers.cfgAutoUpdateHint")}>
+                <select value={batchCfg.auto_update} onChange={(e) => setBatchCfg({ ...batchCfg, auto_update: e.target.value as BatchConfigForm["auto_update"] })} className={inputCls}>
+                  <option value="keep">{t("servers.cfgAutoUpdateKeep")}</option>
+                  <option value="enabled">{t("servers.cfgAutoUpdateEnabled")}</option>
+                  <option value="disabled">{t("servers.cfgAutoUpdateDisabled")}</option>
+                </select>
+              </Field>
 
               <div className="rounded-lg border border-border bg-bg p-3">
                 <p className="mb-2 text-xs font-medium text-muted">{t("servers.cfgCapabilities")}</p>

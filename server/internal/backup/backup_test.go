@@ -30,6 +30,11 @@ func newTestDB(t *testing.T, path string) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := gdb.AutoMigrate(&model.BackupSchedule{}, &model.BackupRun{}); err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +234,54 @@ func TestRetention(t *testing.T) {
 }
 
 // TestRunOnceHTTP PUT 上传目标：服务端收到密文并解密校验。
+func TestCreateInstanceBackupIncludesManifestAndAssets(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ARGUS_DATA_DIR", dir)
+	dbPath := filepath.Join(dir, "argus.db")
+	gdb := newTestDB(t, dbPath)
+	for _, item := range []struct{ rel, body string }{
+		{"themes/night/theme.css", "body{}"},
+		{"plugins/demo/plugin.js", "console.log('ok')"},
+		{"scripts/notify-1.js", "send()"},
+	} {
+		path := filepath.Join(dir, filepath.FromSlash(item.rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(item.body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sch := &model.BackupSchedule{Name: "instance", Target: filepath.Join(dir, "backups"), KeepCount: 1}
+	if err := gdb.Create(sch).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(gdb, dbPath, testKeyFor())
+	result, err := m.CreateInstanceBackup(sch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(result.Path)
+	if result.ManifestVersion != InstanceArchiveVersion || result.ManifestSHA256 == "" || result.Components == "" {
+		t.Fatalf("bad result: %+v", result)
+	}
+	key, _, err := m.ScheduleKey(sch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(dir, "instance.zip")
+	if _, err := DecryptFile(result.Path, zipPath, key); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := InspectInstanceArchive(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Entries) != 4 {
+		t.Fatalf("entries=%d want 4", len(manifest.Entries))
+	}
+}
+
 func TestRunOnceHTTP(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "argus.db")

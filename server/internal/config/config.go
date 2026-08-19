@@ -18,6 +18,7 @@ type Config struct {
 	AdminUser                string   // 初始管理员用户名
 	AdminPass                string   // 初始管理员密码
 	TrustedProxies           []string // 可信反向代理（CIDR/IP），用于 ClientIP
+	PublicURL                string   // 对外访问根地址，用于 OAuth 回调等绝对 URL（例如 https://argus.example.com）
 	NATReservedHosts         []string // dashboard/API 域名，禁止被 NAT Host 路由覆盖
 	NATServerConnectionLimit int      // 每服务器并发 HTTP 隧道数
 	NATUserConnectionLimit   int      // 每用户并发 HTTP 隧道数
@@ -26,6 +27,7 @@ type Config struct {
 	MCPTransferMax           int64    // one-time transfer maximum bytes
 	MCPTransferTTL           time.Duration
 	ThemeMarketIndex         string // 远程主题市场静态索引（HTTPS；空 = 禁用）
+	PluginMarketTrustedKeys  string // 插件市场 Ed25519 公钥映射（key_id=base64，逗号分隔）
 }
 
 // Load 从环境变量/默认值加载配置。
@@ -37,6 +39,7 @@ func Load() *Config {
 		AdminUser:                getenv("ARGUS_ADMIN_USER", "admin"),
 		AdminPass:                getenv("ARGUS_ADMIN_PASS", "argus123"),
 		TrustedProxies:           splitCSV(os.Getenv("ARGUS_TRUSTED_PROXIES")),
+		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("ARGUS_PUBLIC_URL")), "/"),
 		NATReservedHosts:         splitCSV(os.Getenv("ARGUS_NAT_RESERVED_HOSTS")),
 		NATServerConnectionLimit: getenvInt("ARGUS_NAT_SERVER_CONNECTION_LIMIT", 16),
 		NATUserConnectionLimit:   getenvInt("ARGUS_NAT_USER_CONNECTION_LIMIT", 32),
@@ -45,6 +48,7 @@ func Load() *Config {
 		MCPTransferMax:           int64(getenvInt("ARGUS_MCP_TRANSFER_MAX_MB", 64)) << 20,
 		MCPTransferTTL:           time.Duration(getenvInt("ARGUS_MCP_TRANSFER_TTL_SECONDS", 300)) * time.Second,
 		ThemeMarketIndex:         os.Getenv("ARGUS_THEME_MARKET_INDEX"),
+		PluginMarketTrustedKeys:  os.Getenv("ARGUS_PLUGIN_MARKET_TRUSTED_KEYS"),
 	}
 	if c.JWTSecret == "" {
 		c.JWTSecret = loadOrGenerateJWT(c.DBPath)

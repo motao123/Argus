@@ -149,7 +149,8 @@ export default function Services() {
         <button
           onClick={() => {
             setHeaderLines("");
-            setForm({ server_id: servers[0]?.id ?? 0, name: "", type: "http", target: "", interval: 60, enabled: true, hidden: false, notify: false, http_method: "GET", verify_tls: true, timeout: 10, expected_status_min: 200, expected_status_max: 399, expected_statuses: "", ping_count: 4, cert_warn: true });
+            const firstServerID = servers[0]?.id ?? 0;
+            setForm({ server_id: firstServerID, server_ids: firstServerID ? [firstServerID] : [], name: "", type: "http", target: "", interval: 60, enabled: true, hidden: false, notify: false, http_method: "GET", verify_tls: true, timeout: 10, expected_status_min: 200, expected_status_max: 399, expected_statuses: "", ping_count: 4, cert_warn: true });
           }}
           className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm text-white hover:opacity-90"
         >
@@ -164,18 +165,29 @@ export default function Services() {
         <div className="mb-5 rounded-xl border border-border bg-panel p-4">
           <h2 className="mb-3 text-sm font-medium">{t("services.config")}</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
-            <select
-              value={form.server_id ?? 0}
-              onChange={(e) => setForm({ ...form, server_id: Number(e.target.value) })}
-              className="rounded-lg border border-border bg-bg px-3 py-2 text-sm outline-none"
-            >
-              <option value={0}>{t("services.pickServer")}</option>
-              {servers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            <fieldset className="rounded-lg border border-border bg-bg px-3 py-2 text-sm sm:col-span-2">
+              <legend className="px-1 text-xs text-muted">{t("services.probeServers")}</legend>
+              <div className="grid max-h-24 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+                {servers.map((server) => {
+                  const selected = form.server_ids ?? (form.server_id ? [form.server_id] : []);
+                  return (
+                    <label key={server.id} className="flex min-w-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(server.id)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...selected, server.id]
+                            : selected.filter((id) => id !== server.id);
+                          setForm({ ...form, server_ids: next, server_id: next[0] ?? 0 });
+                        }}
+                      />
+                      <span className="truncate">{server.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
             <input
               placeholder={t("services.name")}
               value={form.name ?? ""}
@@ -259,7 +271,7 @@ export default function Services() {
           <div className="mt-3 flex gap-2">
             <button
               onClick={() => save.mutate({ ...form, request_headers: linesToHeaders(headerLines) })}
-              disabled={!form.server_id || !form.name || !form.target}
+              disabled={!(form.server_ids?.length ?? (form.server_id ? 1 : 0)) || !form.name || !form.target}
               className="rounded-lg bg-accent px-4 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-40"
             >
               {t("common.save")}
@@ -280,6 +292,7 @@ export default function Services() {
                   className={`h-2.5 w-2.5 rounded-full ${svc.last_up === null ? "bg-muted" : svc.last_up ? "bg-ok shadow-[0_0_6px] shadow-ok" : "bg-err"}`}
                 />
                 <span className="font-medium">{svc.name}</span>
+                <span className="text-xs text-muted">{t("services.probeCount", { count: svc.server_ids?.length ?? 1 })}</span>
                 <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent">
                   {typeLabels[svc.type] ?? svc.type}
                 </span>
@@ -299,7 +312,7 @@ export default function Services() {
               </div>
             </button>
             <div className="flex justify-end gap-1 pr-1 pt-2">
-              <button title={t("common.edit")} onClick={() => { setHeaderLines(headersToLines(svc.request_headers)); setForm({ ...svc }); }} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
+              <button title={t("common.edit")} onClick={() => { setHeaderLines(headersToLines(svc.request_headers)); setForm({ ...svc, server_ids: svc.server_ids ?? [svc.server_id] }); }} className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5">
                 <Pencil className="h-4 w-4" />
               </button>
               <button

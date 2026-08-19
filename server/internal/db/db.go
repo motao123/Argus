@@ -35,11 +35,21 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		sqlDB.SetConnMaxLifetime(time.Hour)
 	}
 
+	// ServiceHistory 的旧索引不含探测点维度；在 AutoMigrate 创建新唯一索引前先
+	// 移除旧版可能存在的同服务同分钟重复行，保留最新一条。
+	if gdb.Migrator().HasTable(&model.ServiceHistory{}) && !gdb.Migrator().HasColumn(&model.ServiceHistory{}, "server_id") {
+		if err := gdb.Exec(`DELETE FROM service_histories WHERE id NOT IN (
+			SELECT MAX(id) FROM service_histories GROUP BY service_id, ts
+		)`).Error; err != nil {
+			return nil, fmt.Errorf("dedupe legacy service history: %w", err)
+		}
+	}
+
 	if err := gdb.AutoMigrate(
 		&model.Server{}, &model.User{}, &model.Alert{},
 		&model.Notification{}, &model.Cron{}, &model.TaskRun{}, &model.TaskRunResult{}, &model.Metric{},
 		&model.APIToken{},
-		&model.Service{}, &model.ServiceHistory{},
+		&model.Service{}, &model.ServiceProbe{}, &model.ServiceHistory{},
 		&model.DDNSProfile{}, &model.DDNSRecordState{},
 		&model.NAT{},
 		&model.OAuthConfig{},
@@ -68,6 +78,18 @@ func Init(dbPath, adminUser, adminPass string) (*gorm.DB, error) {
 		&model.BackupRun{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	// 旧服务自动建立默认探测点；旧历史归属原 Service.ServerID。两条 SQL 均幂等。
+	if err := gdb.Exec(`INSERT OR IGNORE INTO service_probes
+		(service_id, server_id, last_cert_identity, last_cert_warn_days, created_at)
+		SELECT id, server_id, COALESCE(last_cert_identity, ''), COALESCE(last_cert_warn_days, 0), CURRENT_TIMESTAMP
+		FROM services WHERE server_id > 0`).Error; err != nil {
+		return nil, fmt.Errorf("backfill service probes: %w", err)
+	}
+	if err := gdb.Exec(`UPDATE service_histories
+		SET server_id = COALESCE((SELECT services.server_id FROM services WHERE services.id = service_histories.service_id), 0)
+		WHERE server_id IS NULL OR server_id = 0`).Error; err != nil {
+		return nil, fmt.Errorf("backfill service history probes: %w", err)
 	}
 
 	// 初始管理员（幂等）

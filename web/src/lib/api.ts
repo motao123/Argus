@@ -22,7 +22,7 @@ export interface GPUReport extends Availability { devices?: GPUDevice[] }
 
 // ---- Agent 能力开关与网卡/挂载过滤（配置下发） ----
 
-/** Agent 能力开关：与 protocol.Capabilities 七字段一一对应。 */
+/** Agent 能力开关：与 protocol.Capabilities 八字段一一对应。 */
 export interface CapabilitiesConfig {
   metrics: boolean;
   probe: boolean;
@@ -31,6 +31,7 @@ export interface CapabilitiesConfig {
   files: boolean;
   upgrade: boolean;
   nat: boolean;
+  trace: boolean;
 }
 
 export const DEFAULT_CAPABILITIES: CapabilitiesConfig = {
@@ -41,6 +42,7 @@ export const DEFAULT_CAPABILITIES: CapabilitiesConfig = {
   files: true,
   upgrade: true,
   nat: true,
+  trace: true,
 };
 
 /** 配置下发请求体（服务端 serverApplyConfig 支持的全部字段）。 */
@@ -49,6 +51,7 @@ export interface ApplyServerConfig {
   interval?: number;
   secret?: string;
   capabilities?: CapabilitiesConfig;
+  auto_update?: boolean;
   interface_include?: string[];
   interface_exclude?: string[];
   mount_include?: string[];
@@ -143,7 +146,27 @@ export interface AuditLog {
   user_id: number;
   username: string;
   action: string;
+  resource_type: string;
+  resource_id: string;
+  outcome: "success" | "failure" | string;
+  error_code: string;
+  duration_ms: number;
+  request_id: string;
   detail: string;
+  ip: string;
+  created_at: string;
+}
+
+export interface MCPAuditLog {
+  id: number;
+  user_id: number;
+  tool: string;
+  server_id: number;
+  args_hash: string;
+  args_peek: string;
+  outcome: string;
+  error_msg: string;
+  duration_ms: number;
   ip: string;
   created_at: string;
 }
@@ -319,6 +342,7 @@ export interface ServiceItem {
   id: number;
   owner_id: number;
   server_id: number;
+  server_ids?: number[];
   name: string;
   type: "http" | "tcp" | "ping" | "command";
   target: string;
@@ -504,11 +528,22 @@ export interface MetricPoint {
   cpu_p99?: number;
   net_in: number;
   net_out: number;
+  net_in_transfer?: number;
+  net_out_transfer?: number;
   load1: number;
+  load5?: number;
+  load15?: number;
+  uptime?: number;
+  latency_ms?: number;
   mem_used: number;
   mem_total: number;
+  swap_used?: number;
+  swap_total?: number;
   disk_used: number;
   disk_total: number;
+  gpu_mem_used?: number;
+  gpu_mem_total?: number;
+  gpu_devices?: string;
   process_count: number;
   tcp_established: number;
   tcp_listen: number;
@@ -617,6 +652,25 @@ export interface DrillResult {
   db_size: number;
   integrity: string;
   restore_note: string;
+}
+
+export interface EncryptedRestoreResult {
+  ok: boolean;
+  key_id: string;
+  rollback_path: string;
+  status: "restart_required";
+  restart_required: true;
+  note: string;
+}
+
+export interface InstanceRestoreResult {
+  ok: boolean;
+  format: string;
+  manifest_version: number;
+  manifest_sha256: string;
+  rollback_path: string;
+  status: "restart_required";
+  restart_required: true;
 }
 
 export interface Me {
@@ -808,6 +862,18 @@ async function requestBlob(path: string, options: RequestInit = {}): Promise<Blo
   return res.blob();
 }
 
+async function requestDownload(path: string): Promise<{ blob: Blob; filename: string }> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(path, { headers });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? "argus-audit";
+  return { blob: await res.blob(), filename };
+}
+
 export const api = {
   login: (username: string, password: string, twoFACode = "") =>
     request<{ token: string; username: string }>("/api/v1/auth/login", {
@@ -860,6 +926,25 @@ export const api = {
     const form = new FormData();
     if (file) form.append("file", file);
     return request<DrillResult>(`/api/v1/admin/backup-schedules/${id}/drill`, { method: "POST", body: form });
+  },
+  restoreEncryptedBackup: (id: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("confirm", "RESTORE ENCRYPTED BACKUP");
+    return request<EncryptedRestoreResult>(`/api/v1/admin/backup-schedules/${id}/restore`, { method: "POST", body: form });
+  },
+  downloadInstanceBackup: async (id: number) => {
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const response = await fetch(`/api/v1/admin/backup-schedules/${id}/instance`, { method: "POST", headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  },
+  restoreInstanceBackup: (id: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("confirm", "RESTORE ENCRYPTED BACKUP");
+    return request<InstanceRestoreResult>(`/api/v1/admin/backup-schedules/${id}/instance/restore`, { method: "POST", body: form });
   },
 
   servers: () => request<{ servers: Server[] }>("/api/v1/servers"),
@@ -981,8 +1066,24 @@ export const api = {
       : request<NotificationGroup>("/api/v1/notification-groups", { method: "POST", body: JSON.stringify(g) }),
   deleteNotificationGroup: (id: number) => request(`/api/v1/notification-groups/${id}`, { method: "DELETE" }),
 
-  auditLogs: (offset = 0, limit = 50) =>
-    request<{ logs: AuditLog[]; pagination?: { total: number } }>(`/api/v1/admin/logs?offset=${offset}&limit=${limit}`),
+  auditLogs: (offset = 0, limit = 50, resourceType = "", outcome = "") => {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (resourceType) params.set("resource_type", resourceType);
+    if (outcome) params.set("outcome", outcome);
+    return request<{ logs: AuditLog[]; pagination?: { total: number } }>(`/api/v1/admin/logs?${params}`);
+  },
+  auditExport: (format: "csv" | "json", days = 30, resourceType = "", outcome = "") => {
+    const params = new URLSearchParams({ format, days: String(days) });
+    if (resourceType) params.set("resource_type", resourceType);
+    if (outcome) params.set("outcome", outcome);
+    return requestDownload(`/api/v1/admin/logs/export?${params}`);
+  },
+  mcpAuditLogs: (offset = 0, limit = 50, tool = "", outcome = "") => {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (tool) params.set("tool", tool);
+    if (outcome) params.set("outcome", outcome);
+    return request<{ logs: MCPAuditLog[]; pagination?: { total: number } }>(`/api/v1/admin/logs/mcp?${params}`);
+  },
   offlineNotify: () => request<{ webhook_id: number; offline_after: number; enabled: boolean }>("/api/v1/offline-notify"),
   saveOfflineNotify: (cfg: { webhook_id: number; offline_after: number; enabled: boolean }) =>
     request<{ ok: boolean }>("/api/v1/offline-notify", { method: "POST", body: JSON.stringify(cfg) }),
@@ -995,6 +1096,8 @@ export const api = {
   createTransfer: (server_id: number, to_user_id: number) =>
     request<{ transfer: TransferRecord; new_secret: string; note: string }>("/api/v1/server-transfers", { method: "POST", body: JSON.stringify({ server_id, to_user_id }) }),
   cancelTransfer: (id: number) => request<{ ok: boolean }>(`/api/v1/server-transfers/${id}/cancel`, { method: "POST" }),
+  retryTransfer: (id: number) =>
+    request<{ transfer: TransferRecord; new_secret: string; note: string }>(`/api/v1/server-transfers/${id}/retry`, { method: "POST" }),
   upgradeJobs: () => request<{ jobs: UpgradeJob[] }>("/api/v1/upgrade-jobs"),
   createUpgradeJob: (j: { server_ids: number[]; url: string; sha256: string; version: string; concurrency: number }) =>
     request<UpgradeJob>("/api/v1/upgrade-jobs", { method: "POST", body: JSON.stringify(j) }),
@@ -1020,6 +1123,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path, data: dataBase64, append }),
     }),
+  fileUpload: (serverId: number, path: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ bytes: number; name: string }>(`/api/v1/files/${serverId}/upload?path=${encodeURIComponent(path)}`, {
+      method: "POST",
+      body: form,
+    });
+  },
   fileDelete: (serverId: number, path: string, recursive = false) =>
     request(`/api/v1/files/${serverId}/delete`, {
       method: "POST",

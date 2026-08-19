@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -271,7 +272,7 @@ func (s *Server) backupRestore(c *gin.Context) {
 	}
 
 	// 原子切换：先备份当前库，再替换
-	if err := s.swapDatabase(sess.path); err != nil {
+	if _, err := s.swapDatabase(sess.path); err != nil {
 		_ = os.Remove(sess.path)
 		delete(restoreState.sessions, uploadID)
 		fail(c, http.StatusInternalServerError, "swap failed: "+err.Error())
@@ -314,22 +315,48 @@ func validateSQLiteFile(path string) error {
 	return nil
 }
 
-// swapDatabase 备份当前库后原子替换（staging → live）。
-func (s *Server) swapDatabase(staging string) error {
+// swapDatabase creates a WAL-safe rollback snapshot, closes the active SQLite pool,
+// then replaces the live database. The caller must restart the process after success.
+func (s *Server) swapDatabase(staging string) (string, error) {
 	dbPath := s.Cfg.DBPath
-	// 备份当前库（保留回滚点）
-	if b, err := os.ReadFile(dbPath); err == nil {
-		backup := dbPath + ".pre-restore." + time.Now().Format("20060102-150405")
-		if err := os.WriteFile(backup, b, 0o600); err != nil {
-			return fmt.Errorf("backup current db: %w", err)
-		}
+	if filepath.Clean(staging) == filepath.Clean(dbPath) {
+		return "", errors.New("staging path must differ from live database")
 	}
-	// 原子替换
+	if err := validateSQLiteFile(staging); err != nil {
+		return "", fmt.Errorf("validate staging: %w", err)
+	}
+
+	rollback := dbPath + ".pre-restore." + time.Now().Format("20060102-150405.000000000")
+	sqlDB, err := s.DB.DB()
+	if err != nil {
+		return "", fmt.Errorf("get database pool: %w", err)
+	}
+	escaped := strings.ReplaceAll(rollback, "'", "''")
+	if _, err := sqlDB.Exec("VACUUM INTO '" + escaped + "'"); err != nil {
+		return "", fmt.Errorf("snapshot current database: %w", err)
+	}
+	if err := validateSQLiteFile(rollback); err != nil {
+		_ = os.Remove(rollback)
+		return "", fmt.Errorf("validate rollback snapshot: %w", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		_ = os.Remove(rollback)
+		return "", fmt.Errorf("close current database: %w", err)
+	}
+
+	oldPath := dbPath + ".restore-old"
+	_ = os.Remove(oldPath)
+	if err := os.Rename(dbPath, oldPath); err != nil && !os.IsNotExist(err) {
+		return rollback, fmt.Errorf("move current database aside: %w", err)
+	}
 	if err := os.Rename(staging, dbPath); err != nil {
-		return err
+		if rollbackErr := os.Rename(oldPath, dbPath); rollbackErr != nil {
+			return rollback, fmt.Errorf("install restored database: %w; restore original database: %v", err, rollbackErr)
+		}
+		return rollback, fmt.Errorf("install restored database: %w", err)
 	}
-	// 清除旧 WAL/SHM（与新库不匹配）
+	_ = os.Remove(oldPath)
 	_ = os.Remove(dbPath + "-wal")
 	_ = os.Remove(dbPath + "-shm")
-	return nil
+	return rollback, nil
 }

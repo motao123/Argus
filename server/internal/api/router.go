@@ -59,7 +59,7 @@ func New(s *Server) *gin.Engine {
 	// 根据站点设置刷新通知相关全局开关（IP 打码等）
 	s.refreshNotifySettings()
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery(), s.wafMiddleware())
+	r.Use(gin.Logger(), gin.Recovery(), auditContextMiddleware(), s.wafMiddleware())
 
 	api := r.Group("/api/v1")
 	{
@@ -170,6 +170,9 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/admin/backup-schedules/:id/run", requireAdmin(), s.runBackupSchedule)
 			authed.GET("/admin/backup-schedules/:id/runs", requireAdmin(), s.listBackupRuns)
 			authed.POST("/admin/backup-schedules/:id/drill", requireAdmin(), s.backupDrill)
+			authed.POST("/admin/backup-schedules/:id/restore", requireAdmin(), s.restoreEncryptedBackup)
+			authed.POST("/admin/backup-schedules/:id/instance", requireAdmin(), s.downloadInstanceBackup)
+			authed.POST("/admin/backup-schedules/:id/instance/restore", requireAdmin(), s.restoreInstanceBackup)
 
 			// 服务器分组
 			authed.GET("/groups", s.listGroups)
@@ -244,12 +247,14 @@ func New(s *Server) *gin.Engine {
 			authed.GET("/files/:serverId", requireScope(ScopeServerRead), s.listFiles)
 			authed.POST("/files/:serverId/read", requireScope(ScopeServerRead), s.readFile)
 			authed.POST("/files/:serverId/write", requireScope(ScopeServerWrite), s.writeFile)
+			authed.POST("/files/:serverId/upload", requireScope(ScopeServerWrite), s.uploadFile)
 			authed.POST("/files/:serverId/delete", requireScope(ScopeServerWrite), s.deleteFile)
 
 			// 服务器过户（admin）
 			authed.GET("/server-transfers", s.listTransfers)
 			authed.POST("/server-transfers", s.createTransfer)
 			authed.POST("/server-transfers/:id/cancel", s.cancelTransfer)
+			authed.POST("/server-transfers/:id/retry", s.retryTransfer)
 
 			// Agent 批量升级（admin，逐机回执）
 			authed.GET("/upgrade-jobs", requireAdmin(), s.listUpgradeJobs)

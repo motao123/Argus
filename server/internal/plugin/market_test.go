@@ -1,6 +1,9 @@
 package plugin
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,7 +15,11 @@ import (
 func saveMarketDir(t *testing.T) {
 	t.Helper()
 	old := MarketDir
-	t.Cleanup(func() { MarketDir = old })
+	oldKeys := marketTrustedKeys
+	t.Cleanup(func() {
+		MarketDir = old
+		marketTrustedKeys = oldKeys
+	})
 }
 
 // writeMarketPlugin 在市场目录写入插件。
@@ -45,6 +52,25 @@ func writeMarketIndex(t *testing.T, entries []MarketIndexItem) {
 	}
 }
 
+func signedMarketItem(t *testing.T, name, version, hash, keyID string, privateKey ed25519.PrivateKey) MarketIndexItem {
+	t.Helper()
+	item := MarketIndexItem{Name: name, Version: version, SHA256: hash, KeyID: keyID}
+	item.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, marketSignaturePayload(item)))
+	return item
+}
+
+func configureTestMarketKey(t *testing.T, keyID string) ed25519.PrivateKey {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetMarketTrustedKeys(keyID + "=" + base64.StdEncoding.EncodeToString(publicKey)); err != nil {
+		t.Fatal(err)
+	}
+	return privateKey
+}
+
 // TestMarketInstallChecksum 市场安装：SHA-256 校验通过才能安装；篡改后拒绝。
 func TestMarketInstallChecksum(t *testing.T) {
 	dir := t.TempDir()
@@ -60,7 +86,8 @@ func TestMarketInstallChecksum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeMarketIndex(t, []MarketIndexItem{{Name: "demo", Version: "1.0.0", SHA256: hash, Signature: "c2lnbmF0dXJlLXJlc2VydmVk"}})
+	privateKey := configureTestMarketKey(t, "release-2026")
+	writeMarketIndex(t, []MarketIndexItem{signedMarketItem(t, "demo", "1.0.0", hash, "release-2026", privateKey)})
 
 	m := New(dir)
 	if err := m.InstallFromMarket("demo"); err != nil {
@@ -98,6 +125,50 @@ func TestMarketInstallChecksum(t *testing.T) {
 }
 
 // TestMarketInstallRequiresIndex 无 index.json：安装一律拒绝。
+func TestMarketInstallSignaturePolicy(t *testing.T) {
+	market := t.TempDir()
+	saveMarketDir(t)
+	MarketDir = market
+	writeMarketPlugin(t, "demo", map[string]string{
+		"manifest.json": `{"name":"demo","version":"1.0.0","permissions":{}}`,
+		"plugin.js":     `console.log("demo")`,
+	})
+	hash, err := dirSHA256(filepath.Join(market, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKey := configureTestMarketKey(t, "trusted")
+	m := New(t.TempDir())
+
+	writeMarketIndex(t, []MarketIndexItem{{Name: "demo", Version: "1.0.0", SHA256: hash}})
+	if err := m.InstallFromMarket("demo"); err == nil || !strings.Contains(err.Error(), "unsigned") {
+		t.Fatalf("unsigned entry must be refused, got: %v", err)
+	}
+
+	unknown := signedMarketItem(t, "demo", "1.0.0", hash, "unknown", privateKey)
+	writeMarketIndex(t, []MarketIndexItem{unknown})
+	if err := m.InstallFromMarket("demo"); err == nil || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("unknown signing key must be refused, got: %v", err)
+	}
+
+	invalid := signedMarketItem(t, "demo", "1.0.0", hash, "trusted", privateKey)
+	invalid.Version = "1.0.1"
+	writeMarketIndex(t, []MarketIndexItem{invalid})
+	if err := m.InstallFromMarket("demo"); err == nil || !strings.Contains(err.Error(), "verification failed") {
+		t.Fatalf("metadata tampering must be refused, got: %v", err)
+	}
+}
+
+func TestSetMarketTrustedKeysValidation(t *testing.T) {
+	saveMarketDir(t)
+	if err := SetMarketTrustedKeys("missing-separator"); err == nil {
+		t.Fatal("invalid trusted key syntax must fail")
+	}
+	if err := SetMarketTrustedKeys("release=Zm9v"); err == nil || !strings.Contains(err.Error(), "want 32") {
+		t.Fatalf("invalid Ed25519 key size must fail, got: %v", err)
+	}
+}
+
 func TestMarketInstallRequiresIndex(t *testing.T) {
 	dir := t.TempDir()
 	market := t.TempDir()

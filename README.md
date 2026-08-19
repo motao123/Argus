@@ -72,6 +72,7 @@ docker build -f deploy/Dockerfile -t argus:local .
 | `ARGUS_MCP_TRANSFER_MAX_MB` | `64` | MCP `fs.download_url` / `fs.upload_url` 一次性传输的大小上限（MB）。 |
 | `ARGUS_MCP_TRANSFER_TTL_SECONDS` | `300` | 一次性传输 URL 的有效期（秒），过期或使用后立即失效。 |
 | `ARGUS_TRUSTED_PROXIES` | 空（不信任代理头） | 逗号分隔的代理 IP/CIDR。仅在可信反向代理后部署时填写，否则不得采信客户端传入的转发头。 |
+| `ARGUS_PLUGIN_MARKET_TRUSTED_KEYS` | 空（拒绝市场插件安装） | 插件市场可信 Ed25519 公钥，格式为 `key_id=base64_public_key`，多项以逗号分隔。市场索引条目必须同时提供匹配的 `key_id` 和签名。 |
 | `ARGUS_JWT_SECRET` | 自动生成并持久化到数据库旁的 `.jwt` 文件 | 可选固定 JWT 签名密钥；生产环境设置时请使用高强度随机值，并在多实例间保持一致。不要提交真实密钥。 |
 
 Agent 必须连接 `/ws/agent`，例如 `wss://your-domain/ws/agent`。

@@ -41,6 +41,14 @@ export default function Lifecycle() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["transfers"] }),
     onError: (e) => setMsg(tErr(e)),
   });
+  const retryTransfer = useMutation({
+    mutationFn: api.retryTransfer,
+    onSuccess: (r) => {
+      setNewSecret(t("lifecycle.transferRetried", { id: r.transfer.id, secret: r.new_secret }));
+      qc.invalidateQueries({ queryKey: ["transfers"] });
+    },
+    onError: (e) => setMsg(tErr(e)),
+  });
   const createJob = useMutation({
     mutationFn: api.createUpgradeJob,
     onSuccess: () => {
@@ -132,6 +140,11 @@ export default function Lifecycle() {
                     {tr.status === "pending" && (
                       <button onClick={() => confirm(t("lifecycle.confirmCancel", { id: tr.id })) && cancelTransfer.mutate(tr.id)} className="rounded border border-err/40 px-2 py-1 text-xs text-err hover:bg-err/10">
                         {t("common.cancel")}
+                      </button>
+                    )}
+                    {tr.status === "failed" && (
+                      <button onClick={() => confirm(t("lifecycle.confirmRetry", { id: tr.id })) && retryTransfer.mutate(tr.id)} className="rounded border border-accent/40 px-2 py-1 text-xs text-accent hover:bg-accent/10">
+                        {t("common.retry")}
                       </button>
                     )}
                   </td>

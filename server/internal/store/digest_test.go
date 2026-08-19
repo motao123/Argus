@@ -24,6 +24,11 @@ func openTestDB(t *testing.T) *gorm.DB {
 	if err := gdb.AutoMigrate(&model.Metric{}); err != nil {
 		t.Fatal(err)
 	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	return gdb
 }
 

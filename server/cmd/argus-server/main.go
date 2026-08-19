@@ -107,6 +107,9 @@ func main() {
 
 	// 4. 插件管理器（data/plugins 目录；注入宿主能力与事件 hook 接线）
 	plugin.MarketDir = filepath.Join(filepath.Dir(cfg.DBPath), "market", "plugins")
+	if err := plugin.SetMarketTrustedKeys(cfg.PluginMarketTrustedKeys); err != nil {
+		log.Fatalf("plugin market trusted keys: %v", err)
+	}
 	plugins := plugin.New(filepath.Join(filepath.Dir(cfg.DBPath), "plugins"))
 	// 脱敏只读服务器列表（不含密钥/计费/备注/所有者）
 	plugins.ServerSource = func() []plugin.ServerView {
@@ -348,6 +351,16 @@ func main() {
 		check(time.Now())
 		for range ticker.C {
 			check(time.Now())
+		}
+	}()
+
+	// 过户超时回滚由后台定期任务执行，不依赖管理员打开生命周期页面。
+	go func() {
+		srv.SweepTransfers()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			srv.SweepTransfers()
 		}
 	}()
 

@@ -37,8 +37,8 @@ describe("parseCommaList", () => {
 });
 
 describe("DEFAULT_CAPABILITIES", () => {
-  it("enables all seven capabilities by default", () => {
-    expect(Object.values(DEFAULT_CAPABILITIES)).toEqual([true, true, true, true, true, true, true]);
-    expect(Object.keys(DEFAULT_CAPABILITIES).sort()).toEqual(["command", "files", "metrics", "nat", "probe", "terminal", "upgrade"]);
+  it("enables all eight capabilities by default", () => {
+    expect(Object.values(DEFAULT_CAPABILITIES)).toEqual([true, true, true, true, true, true, true, true]);
+    expect(Object.keys(DEFAULT_CAPABILITIES).sort()).toEqual(["command", "files", "metrics", "nat", "probe", "terminal", "trace", "upgrade"]);
   });
 });

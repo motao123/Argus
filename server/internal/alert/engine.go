@@ -320,6 +320,9 @@ func (e *Engine) metricValue(a *model.Alert, st store.State) (float64, bool) {
 	case "traffic_out_cycle":
 		_, used, ok := e.cycleTraffic(a, st.Server)
 		return float64(used), ok
+	case "traffic_all_cycle":
+		in, out, ok := e.cycleTraffic(a, st.Server)
+		return float64(in + out), ok
 	default:
 		return 0, false
 	}

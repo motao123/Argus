@@ -1,8 +1,10 @@
 package api
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 
 	"github.com/motao123/Argus/server/internal/backup"
 	"github.com/motao123/Argus/server/internal/model"
@@ -217,6 +221,57 @@ func (s *Server) runBackupSchedule(c *gin.Context) {
 }
 
 // listBackupRuns 执行历史（admin）。
+// downloadInstanceBackup creates a complete encrypted instance archive for a schedule.
+// It is a separate format from the legacy single-database .argusenc backup.
+func (s *Server) downloadInstanceBackup(c *gin.Context) {
+	p := principalFromContext(c)
+	if p == nil || !p.IsAdmin {
+		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	id := mustID(c)
+	if s.Backups == nil {
+		fail(c, http.StatusInternalServerError, "backup manager not started", "backup.manager_unavailable")
+		return
+	}
+	var sch model.BackupSchedule
+	if err := s.DB.First(&sch, id).Error; err != nil {
+		fail(c, http.StatusNotFound, "not found", "backup.schedule_not_found")
+		return
+	}
+	result, err := s.Backups.CreateInstanceBackup(&sch)
+	if err != nil {
+		s.auditLogResult(c, "backup_schedule.instance", fmt.Sprintf("schedule_id=%d", id), "failure", "backup.instance_failed")
+		fail(c, http.StatusBadGateway, "instance backup failed: "+err.Error(), "backup.instance_failed")
+		return
+	}
+	defer os.Remove(result.Path)
+	file, err := os.Open(result.Path)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "open archive: "+err.Error(), "backup.instance_read_failed")
+		return
+	}
+	defer file.Close()
+	if err := s.DB.Create(&model.BackupRun{
+		ScheduleID: id, Trigger: "manual", Status: "success", Target: "download",
+		Size: result.Size, SHA256: result.SHA256, Format: backup.InstanceArchiveFormat,
+		ManifestVersion: result.ManifestVersion, ManifestSHA256: result.ManifestSHA256,
+		Components: result.Components, CreatedAt: time.Now(),
+	}).Error; err != nil {
+		fail(c, http.StatusInternalServerError, "record archive run: "+err.Error(), "backup.audit_failed")
+		return
+	}
+	s.auditLogResult(c, "backup_schedule.instance", fmt.Sprintf("schedule_id=%d manifest_sha256=%s", id, result.ManifestSHA256), "success", "")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="argus-instance-%d-%s.argusenc"`, id, time.Now().Format("20060102-150405")))
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("X-Argus-Key-Id", result.KeyID)
+	c.Header("X-Argus-Sha256", result.SHA256)
+	c.Header("X-Argus-Manifest-Version", fmt.Sprintf("%d", result.ManifestVersion))
+	c.Header("X-Argus-Manifest-Sha256", result.ManifestSHA256)
+	c.Header("X-Argus-Components", result.Components)
+	_, _ = io.Copy(c.Writer, file)
+}
+
 func (s *Server) listBackupRuns(c *gin.Context) {
 	p := principalFromContext(c)
 	if !p.IsAdmin {
@@ -243,6 +298,8 @@ func (s *Server) listBackupRuns(c *gin.Context) {
 
 // backupDrill 恢复演练（admin）：校验密文 → 解密到临时库 → integrity_check。
 // 绝不替换当前数据库；可选 multipart file（加密备份），缺省时使用最近的本地备份。
+const encryptedRestoreConfirmation = "RESTORE ENCRYPTED BACKUP"
+
 func (s *Server) backupDrill(c *gin.Context) {
 	p := principalFromContext(c)
 	if !p.IsAdmin {
@@ -338,4 +395,279 @@ func (s *Server) backupDrill(c *gin.Context) {
 		"integrity":    "ok",
 		"restore_note": "演练成功：密文可解密且临时库完整性通过；未替换当前数据库",
 	})
+}
+
+// restoreEncryptedBackup performs a controlled restore of one uploaded .argusenc file.
+// The caller must explicitly confirm the destructive operation. Validation and decryption
+// happen in staging before the live database is switched, and the response always requires
+// an external process restart after a successful switch.
+func appendAuditToSQLite(path string, entry *model.AuditLog) error {
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("open database pool: %w", err)
+	}
+	defer sqlDB.Close()
+	if err := db.AutoMigrate(&model.AuditLog{}); err != nil {
+		return fmt.Errorf("migrate audit log: %w", err)
+	}
+	if err := db.Create(entry).Error; err != nil {
+		return fmt.Errorf("create audit log: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) restoreEncryptedBackup(c *gin.Context) {
+	p := principalFromContext(c)
+	if p == nil || !p.IsAdmin {
+		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	id := mustID(c)
+	auditDetail := fmt.Sprintf("schedule_id=%d", id)
+	failRestore := func(status int, message, code string) {
+		s.auditLogResult(c, "backup_schedule.restore", auditDetail, "failure", code)
+		fail(c, status, message, code)
+	}
+	if subtle.ConstantTimeCompare([]byte(c.PostForm("confirm")), []byte(encryptedRestoreConfirmation)) != 1 {
+		failRestore(http.StatusBadRequest, "explicit restore confirmation required", "backup.confirmation_required")
+		return
+	}
+	if s.Backups == nil {
+		failRestore(http.StatusInternalServerError, "backup manager not started", "backup.manager_unavailable")
+		return
+	}
+
+	var sch model.BackupSchedule
+	if err := s.DB.First(&sch, id).Error; err != nil {
+		failRestore(http.StatusNotFound, "not found", "backup.schedule_not_found")
+		return
+	}
+	auditDetail = fmt.Sprintf("schedule_id=%d name=%s", sch.ID, sch.Name)
+	file, err := c.FormFile("file")
+	if err != nil {
+		failRestore(http.StatusBadRequest, "encrypted backup file required", "backup.file_required")
+		return
+	}
+	if file.Size <= 0 || file.Size > 512<<20 {
+		failRestore(http.StatusBadRequest, "file must be between 1 byte and 512MB", "backup.file_size_invalid")
+		return
+	}
+
+	workDir := filepath.Join(filepath.Dir(s.Cfg.DBPath), "restore-staging")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		failRestore(http.StatusInternalServerError, err.Error(), "backup.staging_failed")
+		return
+	}
+	stamp := time.Now().UnixNano()
+	encPath := filepath.Join(workDir, fmt.Sprintf("encrypted-%d-%d.argusenc", sch.ID, stamp))
+	dbPath := filepath.Join(workDir, fmt.Sprintf("decrypted-%d-%d.db", sch.ID, stamp))
+	defer os.Remove(encPath)
+	defer os.Remove(dbPath)
+	if err := c.SaveUploadedFile(file, encPath); err != nil {
+		failRestore(http.StatusInternalServerError, "save upload: "+err.Error(), "backup.upload_failed")
+		return
+	}
+
+	embeddedKeyID, err := backup.ReadKeyID(encPath)
+	if err != nil {
+		failRestore(http.StatusBadRequest, "not a valid argus encrypted backup", "backup.bad_format")
+		return
+	}
+	key, keyID, err := s.Backups.ScheduleKey(&sch)
+	if err != nil {
+		failRestore(http.StatusInternalServerError, "derive key: "+err.Error(), "backup.key_derivation_failed")
+		return
+	}
+	auditDetail = fmt.Sprintf("schedule_id=%d name=%s key_id=%s", sch.ID, sch.Name, keyID)
+	if subtle.ConstantTimeCompare([]byte(embeddedKeyID), []byte(keyID)) != 1 {
+		failRestore(http.StatusBadRequest,
+			fmt.Sprintf("encryption key mismatch: backup key_id=%s, schedule key_id=%s", embeddedKeyID, keyID),
+			"backup.key_mismatch")
+		return
+	}
+	if _, err := backup.DecryptFile(encPath, dbPath, key); err != nil {
+		failRestore(http.StatusBadRequest, "decrypt failed: "+err.Error(), "backup.decrypt_failed")
+		return
+	}
+	if err := validateSQLiteFile(dbPath); err != nil {
+		failRestore(http.StatusBadRequest, "integrity check failed: "+err.Error(), "backup.integrity_failed")
+		return
+	}
+	entry, auditReady := newAuditEntry(c, "backup_schedule.restore", auditDetail+" validated=true", "success", "")
+	if !auditReady {
+		failRestore(http.StatusInternalServerError, "build restore audit record", "backup.audit_failed")
+		return
+	}
+	if err := appendAuditToSQLite(dbPath, &entry); err != nil {
+		failRestore(http.StatusInternalServerError, "write staging audit log: "+err.Error(), "backup.audit_failed")
+		return
+	}
+	if err := validateSQLiteFile(dbPath); err != nil {
+		failRestore(http.StatusInternalServerError, "post-audit integrity check failed: "+err.Error(), "backup.audit_failed")
+		return
+	}
+
+	var rollbackPath string
+	err = s.Backups.WithRestoreLock(func() error {
+		var swapErr error
+		rollbackPath, swapErr = s.swapDatabase(dbPath)
+		return swapErr
+	})
+	if err != nil {
+		failRestore(http.StatusInternalServerError, "database switch failed: "+err.Error(), "backup.restore_failed")
+		return
+	}
+
+	ok(c, gin.H{
+		"ok":               true,
+		"key_id":           keyID,
+		"rollback_path":    rollbackPath,
+		"status":           "restart_required",
+		"restart_required": true,
+		"note":             "加密备份已校验、解密并切换；请立即通过进程管理器重启 Argus Server",
+	})
+}
+
+// restoreInstanceBackup validates and installs a complete encrypted instance archive.
+// Database replacement remains last; a process restart is required after success.
+func (s *Server) restoreInstanceBackup(c *gin.Context) {
+	p := principalFromContext(c)
+	if p == nil || !p.IsAdmin {
+		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	id := mustID(c)
+	failRestore := func(status int, msg, code string) {
+		s.auditLogResult(c, "backup_schedule.instance_restore", fmt.Sprintf("schedule_id=%d", id), "failure", code)
+		fail(c, status, msg, code)
+	}
+	if subtle.ConstantTimeCompare([]byte(c.PostForm("confirm")), []byte(encryptedRestoreConfirmation)) != 1 {
+		failRestore(http.StatusBadRequest, "explicit restore confirmation required", "backup.confirmation_required")
+		return
+	}
+	if s.Backups == nil {
+		failRestore(http.StatusInternalServerError, "backup manager not started", "backup.manager_unavailable")
+		return
+	}
+	var sch model.BackupSchedule
+	if err := s.DB.First(&sch, id).Error; err != nil {
+		failRestore(http.StatusNotFound, "not found", "backup.schedule_not_found")
+		return
+	}
+	file, err := c.FormFile("file")
+	if err != nil || file.Size <= 0 || file.Size > 512<<20 {
+		failRestore(http.StatusBadRequest, "instance archive file required and must be <= 512MB", "backup.file_size_invalid")
+		return
+	}
+	root := filepath.Dir(s.Cfg.DBPath)
+	stagingRoot := filepath.Join(root, "restore-staging", fmt.Sprintf("instance-%d-%d", id, time.Now().UnixNano()))
+	if err := os.MkdirAll(stagingRoot, 0700); err != nil {
+		failRestore(http.StatusInternalServerError, err.Error(), "backup.staging_failed")
+		return
+	}
+	defer os.RemoveAll(stagingRoot)
+	encPath := filepath.Join(stagingRoot, "archive.argusenc")
+	if err := c.SaveUploadedFile(file, encPath); err != nil {
+		failRestore(http.StatusInternalServerError, err.Error(), "backup.upload_failed")
+		return
+	}
+	embeddedKeyID, err := backup.ReadKeyID(encPath)
+	if err != nil {
+		failRestore(http.StatusBadRequest, "not a valid encrypted archive", "backup.bad_format")
+		return
+	}
+	key, keyID, err := s.Backups.ScheduleKey(&sch)
+	if err != nil {
+		failRestore(http.StatusInternalServerError, err.Error(), "backup.key_derivation_failed")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(embeddedKeyID), []byte(keyID)) != 1 {
+		failRestore(http.StatusBadRequest, "encryption key mismatch", "backup.key_mismatch")
+		return
+	}
+	zipPath := filepath.Join(stagingRoot, "archive.zip")
+	if _, err := backup.DecryptFile(encPath, zipPath, key); err != nil {
+		failRestore(http.StatusBadRequest, "decrypt failed: "+err.Error(), "backup.decrypt_failed")
+		return
+	}
+	archiveRoot := filepath.Join(stagingRoot, "unpacked")
+	manifest, err := backup.ExtractInstanceArchive(zipPath, archiveRoot)
+	if err != nil {
+		failRestore(http.StatusBadRequest, "archive validation failed: "+err.Error(), "backup.archive_invalid")
+		return
+	}
+	stagedDB := filepath.Join(archiveRoot, "db", "argus.db")
+	if err := validateSQLiteFile(stagedDB); err != nil {
+		failRestore(http.StatusBadRequest, "integrity check failed: "+err.Error(), "backup.integrity_failed")
+		return
+	}
+	entry, auditReady := newAuditEntry(c, "backup_schedule.instance_restore", fmt.Sprintf("schedule_id=%d manifest_sha256=%s", id, manifest.ManifestSHA256), "success", "")
+	if !auditReady || appendAuditToSQLite(stagedDB, &entry) != nil {
+		failRestore(http.StatusInternalServerError, "write staging audit record", "backup.audit_failed")
+		return
+	}
+	type movedDir struct {
+		target, old string
+		installed   bool
+	}
+	var rollbackDB string
+	var moved []movedDir
+	scriptsRoot := os.Getenv("ARGUS_DATA_DIR")
+	if scriptsRoot == "" {
+		wd, _ := os.Getwd()
+		scriptsRoot = filepath.Join(wd, "data")
+	}
+	err = s.Backups.WithRestoreLock(func() error {
+		for _, item := range []struct{ name, target string }{
+			{name: "themes", target: filepath.Join(root, "themes")},
+			{name: "plugins", target: filepath.Join(root, "plugins")},
+			{name: "scripts", target: filepath.Join(scriptsRoot, "scripts")},
+		} {
+			name, target := item.name, item.target
+			src := filepath.Join(archiveRoot, name)
+			if _, statErr := os.Stat(src); os.IsNotExist(statErr) {
+				continue
+			}
+			old := target + ".pre-restore." + fmt.Sprint(time.Now().UnixNano())
+			if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+				return err
+			}
+			d := movedDir{target: target, old: old}
+			if _, statErr := os.Stat(target); statErr == nil {
+				if err := os.Rename(target, old); err != nil {
+					return err
+				}
+			}
+			if err := os.Rename(src, target); err != nil {
+				if _, oldErr := os.Stat(old); oldErr == nil {
+					_ = os.Rename(old, target)
+				}
+				return err
+			}
+			d.installed = true
+			moved = append(moved, d)
+		}
+		var swapErr error
+		rollbackDB, swapErr = s.swapDatabase(stagedDB)
+		return swapErr
+	})
+	if err != nil {
+		for i := len(moved) - 1; i >= 0; i-- {
+			d := moved[i]
+			if d.installed {
+				_ = os.RemoveAll(d.target)
+			}
+			if _, oldErr := os.Stat(d.old); oldErr == nil {
+				_ = os.Rename(d.old, d.target)
+			}
+		}
+		failRestore(http.StatusInternalServerError, "instance restore failed: "+err.Error(), "backup.restore_failed")
+		return
+	}
+	s.auditLogResult(c, "backup_schedule.instance_restore", fmt.Sprintf("schedule_id=%d manifest_sha256=%s", id, manifest.ManifestSHA256), "success", "")
+	ok(c, gin.H{"ok": true, "format": manifest.Format, "manifest_version": manifest.Version, "manifest_sha256": manifest.ManifestSHA256, "rollback_path": rollbackDB, "status": "restart_required", "restart_required": true})
 }

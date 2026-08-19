@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, FlaskConical, History, Pencil, Play, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FlaskConical, History, Pencil, Play, Plus, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { api, type BackupRun, type BackupSchedule } from "../lib/api";
 import { useI18n, type TKey } from "../lib/i18n";
 
@@ -52,6 +52,8 @@ function Drill({ schedule }: { schedule: BackupSchedule }) {
   const { t, tErr } = useI18n();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const restoreRef = useRef<HTMLInputElement>(null);
+  const instanceRestoreRef = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
@@ -66,6 +68,55 @@ function Drill({ schedule }: { schedule: BackupSchedule }) {
       setResult(t("backups.drillFailed", { error: tErr(e) }));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const runRestore = async (file: File) => {
+    if (!confirm(t("backups.restoreConfirm", { name: schedule.name }))) return;
+    setBusy(true);
+    setResult("");
+    try {
+      const r = await api.restoreEncryptedBackup(schedule.id, file);
+      setResult(t("backups.restoreResultOk", { path: r.rollback_path }));
+    } catch (e) {
+      setResult(t("backups.restoreFailed", { error: tErr(e) }));
+    } finally {
+      setBusy(false);
+      if (restoreRef.current) restoreRef.current.value = "";
+    }
+  };
+
+  const downloadInstance = async () => {
+    setBusy(true);
+    setResult("");
+    try {
+      const blob = await api.downloadInstanceBackup(schedule.id);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `argus-instance-${schedule.id}.argusenc`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setResult(t("backups.instanceDownloadOk"));
+    } catch (e) {
+      setResult(t("backups.instanceFailed", { error: tErr(e) }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runInstanceRestore = async (file: File) => {
+    if (!confirm(t("backups.instanceRestoreConfirm", { name: schedule.name }))) return;
+    setBusy(true);
+    setResult("");
+    try {
+      const r = await api.restoreInstanceBackup(schedule.id, file);
+      setResult(t("backups.instanceRestoreOk", { path: r.rollback_path, version: r.manifest_version }));
+    } catch (e) {
+      setResult(t("backups.instanceFailed", { error: tErr(e) }));
+    } finally {
+      setBusy(false);
+      if (instanceRestoreRef.current) instanceRestoreRef.current.value = "";
     }
   };
 
@@ -91,7 +142,23 @@ function Drill({ schedule }: { schedule: BackupSchedule }) {
           {t("backups.drillFile")}
         </button>
         <input ref={fileRef} type="file" accept=".argusenc" className="hidden" onChange={(e) => e.target.files?.[0] && runDrill(e.target.files[0])} />
+        <button disabled={busy} onClick={downloadInstance} className="rounded-lg border border-accent/40 px-3 py-1.5 text-xs text-accent disabled:opacity-40">
+          {t("backups.instanceDownload")}
+        </button>
+        <button disabled={busy} onClick={() => instanceRestoreRef.current?.click()} className="rounded-lg border border-err/40 px-3 py-1.5 text-xs text-err disabled:opacity-40">
+          {t("backups.instanceRestore")}
+        </button>
+        <input ref={instanceRestoreRef} type="file" accept=".argusenc" className="hidden" onChange={(e) => e.target.files?.[0] && runInstanceRestore(e.target.files[0])} />
+        <button
+          disabled={busy}
+          onClick={() => restoreRef.current?.click()}
+          className="flex items-center gap-1.5 rounded-lg border border-err/40 px-3 py-1.5 text-xs text-err disabled:opacity-40"
+        >
+          <RotateCcw className="h-3.5 w-3.5" /> {t("backups.restoreEncrypted")}
+        </button>
+        <input ref={restoreRef} type="file" accept=".argusenc" className="hidden" onChange={(e) => e.target.files?.[0] && runRestore(e.target.files[0])} />
       </div>
+      <p className="mt-2 text-xs text-err">{t("backups.restoreWarning")}</p>
       {result && <div className="mt-2 break-all text-xs text-muted">{result}</div>}
     </div>
   );

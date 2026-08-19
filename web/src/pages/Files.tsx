@@ -40,11 +40,7 @@ export default function Files() {
   });
 
   const upload = useMutation({
-    mutationFn: async (file: File) => {
-      const buf = await file.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-      await api.fileWrite(serverId, path === "/" ? "/" + file.name : path + "/" + file.name, b64);
-    },
+    mutationFn: (file: File) => api.fileUpload(serverId, path === "/" ? "/" + file.name : path + "/" + file.name, file),
     onSuccess: () => refetch(),
     onSettled: () => setUploading(false),
   });

@@ -25,13 +25,17 @@ type Rollup struct {
 func New(db *gorm.DB) *Rollup { return &Rollup{db: db} }
 
 type agg struct {
-	count                                                      int
-	cpu, netIn, netOut, load, temp, gpu                        float64
-	process, tcpEstablished, tcpListen, udp                    float64
-	diskReadSpeed, diskWriteSpeed, diskReadIOPS, diskWriteIOPS float64
-	memUsed, memTotal, diskUsed, diskTotal                     uint64
-	cpuDigest                                                  *tdigest.TDigest
-	samples                                                    int
+	count                                                        int
+	cpu, netIn, netOut, load1, load5, load15, latency, temp, gpu float64
+	latencyCount                                                 int
+	process, tcpEstablished, tcpListen, udp                      float64
+	diskReadSpeed, diskWriteSpeed, diskReadIOPS, diskWriteIOPS   float64
+	memUsed, memTotal, swapUsed, swapTotal, diskUsed, diskTotal  uint64
+	netInTransfer, netOutTransfer, uptime                        uint64
+	gpuMemUsed, gpuMemTotal                                      uint64
+	gpuDevices                                                   string
+	cpuDigest                                                    *tdigest.TDigest
+	samples                                                      int
 }
 
 // aggregate 把 srcGran 数据聚合成 dstGran。
@@ -39,7 +43,8 @@ type agg struct {
 // CPU 分位数：合并子桶的 t-digest（无损合成），父桶携带合并后的 digest 与样本数。
 func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 	rows := []model.Metric{}
-	r.db.Where("granularity = ? AND ts >= ?", srcGran, cutoff.Unix()).Find(&rows)
+	r.db.Where("granularity = ? AND ts >= ?", srcGran, cutoff.Unix()).
+		Order("server_id ASC, ts ASC, id ASC").Find(&rows)
 
 	byKey := map[int64]map[int64]*agg{}
 	for _, row := range rows {
@@ -58,13 +63,29 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 		a.cpu += row.CPU
 		a.memUsed = row.MemUsed
 		a.memTotal = row.MemTotal
+		a.swapUsed = row.SwapUsed
+		a.swapTotal = row.SwapTotal
 		a.diskUsed = row.DiskUsed
 		a.diskTotal = row.DiskTotal
 		a.netIn += row.NetInSpeed
 		a.netOut += row.NetOutSpeed
-		a.load += row.Load1
+		a.netInTransfer = row.NetInTransfer
+		a.netOutTransfer = row.NetOutTransfer
+		a.load1 += row.Load1
+		a.load5 += row.Load5
+		a.load15 += row.Load15
+		a.uptime = row.Uptime
+		if row.LatencyMs > 0 {
+			a.latency += row.LatencyMs
+			a.latencyCount++
+		}
 		a.temp += row.Temperature
 		a.gpu += row.GPUUtil
+		a.gpuMemUsed = row.GPUMemUsed
+		a.gpuMemTotal = row.GPUMemTotal
+		if row.GPUDevices != "" {
+			a.gpuDevices = row.GPUDevices
+		}
 		a.process += row.ProcessCount
 		a.tcpEstablished += row.TCPEstablished
 		a.tcpListen += row.TCPListen
@@ -97,23 +118,36 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 				n = 1
 			}
 			row := model.Metric{
-				ServerID:     serverID,
-				TS:           ts,
-				Granularity:  dstGran,
-				CPU:          a.cpu / n,
-				MemUsed:      a.memUsed,
-				MemTotal:     a.memTotal,
-				DiskUsed:     a.diskUsed,
-				DiskTotal:    a.diskTotal,
-				NetInSpeed:   a.netIn / n,
-				NetOutSpeed:  a.netOut / n,
-				Load1:        a.load / n,
-				Temperature:  a.temp / n,
-				GPUUtil:      a.gpu / n,
-				ProcessCount: a.process / n, TCPEstablished: a.tcpEstablished / n, TCPListen: a.tcpListen / n, UDPCount: a.udp / n,
+				ServerID:       serverID,
+				TS:             ts,
+				Granularity:    dstGran,
+				CPU:            a.cpu / n,
+				MemUsed:        a.memUsed,
+				MemTotal:       a.memTotal,
+				SwapUsed:       a.swapUsed,
+				SwapTotal:      a.swapTotal,
+				DiskUsed:       a.diskUsed,
+				DiskTotal:      a.diskTotal,
+				NetInSpeed:     a.netIn / n,
+				NetOutSpeed:    a.netOut / n,
+				NetInTransfer:  a.netInTransfer,
+				NetOutTransfer: a.netOutTransfer,
+				Load1:          a.load1 / n,
+				Load5:          a.load5 / n,
+				Load15:         a.load15 / n,
+				Uptime:         a.uptime,
+				Temperature:    a.temp / n,
+				GPUUtil:        a.gpu / n,
+				GPUMemUsed:     a.gpuMemUsed,
+				GPUMemTotal:    a.gpuMemTotal,
+				GPUDevices:     a.gpuDevices,
+				ProcessCount:   a.process / n, TCPEstablished: a.tcpEstablished / n, TCPListen: a.tcpListen / n, UDPCount: a.udp / n,
 				DiskReadSpeed: a.diskReadSpeed / n, DiskWriteSpeed: a.diskWriteSpeed / n, DiskReadIOPS: a.diskReadIOPS / n, DiskWriteIOPS: a.diskWriteIOPS / n,
 				Samples:   a.samples,
 				CreatedAt: now,
+			}
+			if a.latencyCount > 0 {
+				row.LatencyMs = a.latency / float64(a.latencyCount)
 			}
 			if a.cpuDigest != nil && a.cpuDigest.Count() > 0 {
 				row.Digest = a.cpuDigest.Encode()
@@ -125,10 +159,11 @@ func (r *Rollup) aggregate(srcGran, dstGran int, cutoff time.Time) {
 			res := r.db.Model(&model.Metric{}).
 				Where("server_id = ? AND ts = ? AND granularity = ?", serverID, ts, dstGran).
 				Updates(map[string]any{
-					"cpu": row.CPU, "mem_used": row.MemUsed, "mem_total": row.MemTotal,
+					"cpu": row.CPU, "mem_used": row.MemUsed, "mem_total": row.MemTotal, "swap_used": row.SwapUsed, "swap_total": row.SwapTotal,
 					"disk_used": row.DiskUsed, "disk_total": row.DiskTotal,
-					"net_in_speed": row.NetInSpeed, "net_out_speed": row.NetOutSpeed,
-					"load1": row.Load1, "temperature": row.Temperature, "gpu_util": row.GPUUtil,
+					"net_in_speed": row.NetInSpeed, "net_out_speed": row.NetOutSpeed, "net_in_transfer": row.NetInTransfer, "net_out_transfer": row.NetOutTransfer,
+					"load1": row.Load1, "load5": row.Load5, "load15": row.Load15, "uptime": row.Uptime, "latency_ms": row.LatencyMs,
+					"temperature": row.Temperature, "gpu_util": row.GPUUtil, "gpu_mem_used": row.GPUMemUsed, "gpu_mem_total": row.GPUMemTotal, "gpu_devices": row.GPUDevices,
 					"process_count": row.ProcessCount, "tcp_established": row.TCPEstablished, "tcp_listen": row.TCPListen, "udp_count": row.UDPCount,
 					"disk_read_speed": row.DiskReadSpeed, "disk_write_speed": row.DiskWriteSpeed, "disk_read_iops": row.DiskReadIOPS, "disk_write_iops": row.DiskWriteIOPS,
 					"samples": row.Samples, "digest": row.Digest,
