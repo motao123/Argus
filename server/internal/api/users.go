@@ -40,6 +40,7 @@ func (s *Server) getUserSecret(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"agent_secret": u.AgentSecret})
+	s.auditLogResult(c, "user.secret_read", fmt.Sprintf("user_id=%d", u.ID), "success", "")
 }
 
 // createUser 创建用户（仅 admin），返回用户专属 Agent 密钥。
@@ -161,10 +162,22 @@ func (s *Server) updateUser(c *gin.Context) {
 		updates["role"] = *req.Role
 	}
 	if len(updates) > 0 {
+		needsStepUp := req.Role != nil || (req.Password != nil && id != p.UserID)
+		if needsStepUp && !s.enforceSensitive2FA(c) {
+			s.auditLogResult(c, "user.update", fmt.Sprintf("user_id=%d", id), "failure", "auth.2fa_required")
+			return
+		}
 		if err := s.DB.Model(&u).Updates(updates).Error; err != nil {
-			fail(c, http.StatusInternalServerError, err.Error())
+			s.auditLogResult(c, "user.update", fmt.Sprintf("user_id=%d", id), "failure", "user.update_failed")
+			fail(c, http.StatusInternalServerError, err.Error(), "user.update_failed")
 			return
 		}
 	}
 	ok(c, gin.H{"ok": true})
+	if req.Role != nil {
+		s.auditLogResult(c, "user.role_update", fmt.Sprintf("user_id=%d role=%s", id, *req.Role), "success", "")
+	}
+	if req.Password != nil && *req.Password != "" {
+		s.auditLogResult(c, "user.password_update", fmt.Sprintf("user_id=%d", id), "success", "")
+	}
 }

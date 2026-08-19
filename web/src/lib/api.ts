@@ -908,6 +908,7 @@ export const api = {
     form.append("offset", String(offset));
     form.append("final", final ? "1" : "0");
     form.append("total_hash", totalHash);
+    form.append("confirm", "RESTORE ENCRYPTED BACKUP");
     return request<{ ok: boolean; written: number; final: boolean; note?: string }>("/api/v1/admin/backup/restore", {
       method: "POST",
       body: form,

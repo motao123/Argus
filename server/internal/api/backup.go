@@ -152,17 +152,25 @@ func parseRestoreOffset(raw string) (int64, error) {
 // 表单字段：upload_id（可选，续传）、offset、final、file
 func (s *Server) backupRestore(c *gin.Context) {
 	p := principalFromContext(c)
-	if !p.IsAdmin {
+	if p == nil || !p.IsAdmin {
 		fail(c, http.StatusForbidden, "admin only")
+		return
+	}
+	failRestore := func(status int, msg, code string) {
+		s.auditLogResult(c, "backup_schedule.restore", "legacy_database_restore", "failure", code)
+		fail(c, status, msg, code)
+	}
+	if c.PostForm("confirm") != encryptedRestoreConfirmation {
+		failRestore(http.StatusBadRequest, "explicit restore confirmation required", "backup.confirmation_required")
 		return
 	}
 	file, err := c.FormFile("file")
 	if err != nil {
-		fail(c, http.StatusBadRequest, "file field required")
+		failRestore(http.StatusBadRequest, "file field required", "backup.file_required")
 		return
 	}
 	if file.Size > 512<<20 {
-		fail(c, http.StatusBadRequest, "file too large (max 512MB)")
+		failRestore(http.StatusBadRequest, "file too large (max 512MB)", "backup.file_size_invalid")
 		return
 	}
 	uploadID := strings.TrimSpace(c.PostForm("upload_id"))
@@ -271,16 +279,34 @@ func (s *Server) backupRestore(c *gin.Context) {
 		}
 	}
 
-	// 原子切换：先备份当前库，再替换
-	if _, err := s.swapDatabase(sess.path); err != nil {
+	entry, auditReady := newAuditEntry(c, "backup_schedule.restore", "legacy_database_restore validated=true", "success", "")
+	if !auditReady || appendAuditToSQLite(sess.path, &entry) != nil {
 		_ = os.Remove(sess.path)
 		delete(restoreState.sessions, uploadID)
-		fail(c, http.StatusInternalServerError, "swap failed: "+err.Error())
+		failRestore(http.StatusInternalServerError, "write staging audit record", "backup.audit_failed")
+		return
+	}
+	var rollbackPath string
+	swap := func() error {
+		var err error
+		rollbackPath, err = s.swapDatabase(sess.path)
+		return err
+	}
+	if s.Backups != nil {
+		err = s.Backups.WithRestoreLock(swap)
+	} else {
+		err = swap()
+	}
+	if err != nil {
+		_ = os.Remove(sess.path)
+		delete(restoreState.sessions, uploadID)
+		failRestore(http.StatusInternalServerError, "swap failed: "+err.Error(), "backup.restore_failed")
 		return
 	}
 	_ = os.Remove(sess.path)
 	delete(restoreState.sessions, uploadID)
-	ok(c, gin.H{"ok": true, "written": sess.written, "final": true, "status": "restart_required", "restart_required": true, "note": "数据库文件已切换；当前进程不会自动重启，请通过进程管理器重启服务"})
+	ok(c, gin.H{"ok": true, "written": sess.written, "final": true, "status": "restart_required", "restart_required": true, "rollback_path": rollbackPath, "note": "数据库文件已切换；服务将退出并由进程管理器重启"})
+	s.scheduleRestart()
 }
 
 // validateSQLiteFile 校验文件是合法 SQLite 库并可通过完整性检查。

@@ -46,7 +46,7 @@ deploy/     docker-compose / systemd / OpenRC 部署样例（见 deploy/README.m
 
 ```bash
 cp deploy/.env.example deploy/.env
-# 修改 deploy/.env 中的 ARGUS_ADMIN_PASS 后启动
+# 设置至少 12 字符的 ARGUS_ADMIN_PASS 和至少 32 字符的 ARGUS_JWT_SECRET 后启动
 cd deploy && docker compose up -d
 # 健康检查：http://localhost:8080/healthz
 # 打开：http://localhost:8080

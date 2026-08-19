@@ -528,8 +528,9 @@ func (s *Server) restoreEncryptedBackup(c *gin.Context) {
 		"rollback_path":    rollbackPath,
 		"status":           "restart_required",
 		"restart_required": true,
-		"note":             "加密备份已校验、解密并切换；请立即通过进程管理器重启 Argus Server",
+		"note":             "加密备份已校验、解密并切换；服务将退出并由进程管理器重启",
 	})
+	s.scheduleRestart()
 }
 
 // restoreInstanceBackup validates and installs a complete encrypted instance archive.
@@ -670,4 +671,5 @@ func (s *Server) restoreInstanceBackup(c *gin.Context) {
 	}
 	s.auditLogResult(c, "backup_schedule.instance_restore", fmt.Sprintf("schedule_id=%d manifest_sha256=%s", id, manifest.ManifestSHA256), "success", "")
 	ok(c, gin.H{"ok": true, "format": manifest.Format, "manifest_version": manifest.Version, "manifest_sha256": manifest.ManifestSHA256, "rollback_path": rollbackDB, "status": "restart_required", "restart_required": true})
+	s.scheduleRestart()
 }

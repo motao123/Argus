@@ -14,7 +14,7 @@ services:
       ARGUS_GEOIP_ENDPOINT: ${ARGUS_GEOIP_ENDPOINT:-}
       ARGUS_NAT_LISTEN: ${ARGUS_NAT_LISTEN:-0.0.0.0:9090}
       ARGUS_TRUSTED_PROXIES: ${ARGUS_TRUSTED_PROXIES:-}
-      ARGUS_JWT_SECRET: ${ARGUS_JWT_SECRET:-}
+      ARGUS_JWT_SECRET: ${ARGUS_JWT_SECRET:?请在 deploy/.env 中设置至少 32 字符的 ARGUS_JWT_SECRET}
     volumes:
       - argus-data:/app/data
     ports:

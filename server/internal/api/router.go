@@ -3,6 +3,7 @@ package api
 
 import (
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,7 @@ type Server struct {
 	NAT       *nat.Proxy
 	Notifier  *notifier.Queue // 通知持久队列（送达记录 + 重试）
 	Backups   *backup.Manager // 定时加密备份管理器
+	Restart   func()          // 恢复成功后由主进程协调有序退出
 
 	// waf 全局 IP 封禁管理器（WAF 限流 / 登录限流 / 手动封禁共用，持久化封禁表）。
 	waf *wafBanManager
@@ -49,6 +51,7 @@ type Server struct {
 
 	// upgradeResumeDelay 控制重启后恢复 pending 升级任务的宽限期（仅测试覆盖）。
 	upgradeResumeDelay time.Duration
+	restartPending     atomic.Bool
 }
 
 // New 构建 gin 引擎并注册全部路由。
@@ -98,10 +101,10 @@ func New(s *Server) *gin.Engine {
 		{
 			// 用户管理（admin）
 			authed.GET("/users", s.listUsers)
-			authed.GET("/users/:id/secret", s.getUserSecret)
-			authed.POST("/users", s.createUser)
+			authed.GET("/users/:id/secret", s.sensitiveAdmin(), s.getUserSecret)
+			authed.POST("/users", s.sensitiveAdmin(), s.createUser)
 			authed.PUT("/users/:id", s.updateUser)
-			authed.DELETE("/users/:id", s.deleteUser)
+			authed.DELETE("/users/:id", s.sensitiveAdmin(), s.deleteUser)
 
 			// PAT 令牌管理（仅 JWT）
 			authed.GET("/tokens", s.listTokens)
@@ -158,7 +161,7 @@ func New(s *Server) *gin.Engine {
 
 			// 备份与数据库工具（admin）
 			authed.GET("/admin/backup", s.backupDownload)
-			authed.POST("/admin/backup/restore", s.backupRestore)
+			authed.POST("/admin/backup/restore", s.sensitiveAdmin(), s.backupRestore)
 			authed.GET("/admin/db/size", s.dbSize)
 			authed.POST("/admin/db/vacuum", s.dbVacuum)
 
@@ -192,17 +195,17 @@ func New(s *Server) *gin.Engine {
 
 			// 插件（admin；插件可执行任意代码并访问网络）
 			authed.GET("/plugins/market", requireAdmin(), s.listPluginMarket)
-			authed.POST("/plugins/market/:name/install", requireAdmin(), s.installPlugin)
+			authed.POST("/plugins/market/:name/install", s.sensitiveAdmin(), s.installPlugin)
 			authed.GET("/plugins", requireAdmin(), s.listPlugins)
-			authed.POST("/plugins/:name/toggle", requireAdmin(), s.togglePlugin)
-			authed.POST("/plugins/:name/approve", requireAdmin(), s.approvePlugin)
-			authed.POST("/plugins/:name/run", requireAdmin(), s.runPluginNow)
-			authed.DELETE("/plugins/:name", requireAdmin(), s.deletePlugin)
+			authed.POST("/plugins/:name/toggle", s.sensitiveAdmin(), s.togglePlugin)
+			authed.POST("/plugins/:name/approve", s.sensitiveAdmin(), s.approvePlugin)
+			authed.POST("/plugins/:name/run", s.sensitiveAdmin(), s.runPluginNow)
+			authed.DELETE("/plugins/:name", s.sensitiveAdmin(), s.deletePlugin)
 			// 插件宿主 API：RPC 调用 / 路由派发 / 配置（admin）
-			authed.POST("/plugins/:name/rpc/:method", requireAdmin(), s.callPluginRPC)
-			authed.Any("/plugins/:name/route/*path", requireAdmin(), s.dispatchPluginRoute)
-			authed.GET("/plugins/:name/config", requireAdmin(), s.getPluginConfig)
-			authed.PUT("/plugins/:name/config", requireAdmin(), s.setPluginConfig)
+			authed.POST("/plugins/:name/rpc/:method", s.sensitiveAdmin(), s.callPluginRPC)
+			authed.Any("/plugins/:name/route/*path", s.sensitiveAdmin(), s.dispatchPluginRoute)
+			authed.GET("/plugins/:name/config", s.sensitiveAdmin(), s.getPluginConfig)
+			authed.PUT("/plugins/:name/config", s.sensitiveAdmin(), s.setPluginConfig)
 
 			// 主题包（admin；仅 CSS 变量/CSS + 受限静态资源，禁止 JS）
 			authed.GET("/themes", requireAdmin(), s.listThemes)
@@ -290,9 +293,9 @@ func New(s *Server) *gin.Engine {
 			authed.POST("/ddns/:id/test", s.testDDNS)
 
 			// OAuth provider 配置（admin）
-			authed.GET("/oauth/providers", s.listOAuthConfigs)
-			authed.POST("/oauth/providers", s.saveOAuthConfig)
-			authed.DELETE("/oauth/providers/:name", s.deleteOAuthConfig)
+			authed.GET("/oauth/providers", s.sensitiveAdmin(), s.listOAuthConfigs)
+			authed.POST("/oauth/providers", s.sensitiveAdmin(), s.saveOAuthConfig)
+			authed.DELETE("/oauth/providers/:name", s.sensitiveAdmin(), s.deleteOAuthConfig)
 
 			// NAT 内网穿透
 			authed.GET("/nats", s.listNAT)

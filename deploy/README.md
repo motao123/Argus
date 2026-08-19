@@ -40,15 +40,16 @@
    ARGUS_DB=/var/lib/argus/argus.db   # 必须位于 /var/lib/argus 下（见下方 systemd 说明）
    ```
 
-   `chmod 600 /etc/argus/argus.env`（`EnvironmentFile=-` 忽略缺失文件，但内容含口令）。
+   `chmod 600 /etc/argus/argus.env`；环境文件缺失时 systemd 应直接报错，禁止静默回退到示例凭据。
 
 ### systemd（推荐）
 
 样例单元见 `deploy/argus-server.service`，关键点：
 
+- `Restart=always`：数据库恢复完成后 Server 正常关闭 HTTP 服务，systemd 将自动拉起新进程；显式 `systemctl stop` 不会触发重启。
 - `ProtectSystem=strict` + `ReadWritePaths=/var/lib/argus`：进程只能写数据目录，
   **因此 `ARGUS_DB` 必须指向 `/var/lib/argus` 下**（默认 `./data/argus.db` 会被拒绝写入）。
-- `EnvironmentFile=-/etc/argus/argus.env`：加载全部 `ARGUS_*` 变量。
+- `EnvironmentFile=/etc/argus/argus.env`：加载全部 `ARGUS_*` 变量；文件缺失会阻止服务启动。
 
 安装步骤：
 

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -63,6 +64,10 @@ func main() {
 	if *dbPath != "" {
 		cfg.DBPath = *dbPath
 	}
+	if err := cfg.ValidateStartup(); err != nil {
+		log.Fatalf("startup configuration: %v", err)
+	}
+	cfg.EnsureJWT()
 
 	// 1. 数据库
 	gdb, err := db.Init(cfg.DBPath, cfg.AdminUser, cfg.AdminPass)
@@ -311,6 +316,8 @@ func main() {
 	if active := themes.ValidateActive(); active != theme.DefaultName {
 		log.Printf("theme manager: active theme %s", active)
 	}
+	var httpServer *http.Server
+	var restartRequested atomic.Bool
 	srv := &api.Server{
 		DB:        gdb,
 		Cfg:       cfg,
@@ -410,10 +417,8 @@ func main() {
 		return html
 	}
 
-	// 容器编排/反向代理探活端点：不访问数据库，不泄露运行数据。
-	router.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	// 容器编排/反向代理探活端点：检查数据库与恢复生命周期状态。
+	router.GET("/healthz", srv.Healthz)
 
 	// 一键安装脚本（哪吒风格）：无认证即可下载，脚本本身不含敏感信息。
 	router.GET("/install.sh", func(c *gin.Context) {
@@ -469,10 +474,15 @@ func main() {
 		agents.Serve(conn)
 	})
 
-	httpServer := &http.Server{
+	httpServer = &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+	srv.Restart = func() {
+		log.Printf("restart requested after database restore")
+		restartRequested.Store(true)
+		_ = httpServer.Close()
 	}
 
 	// 优雅停机
@@ -484,10 +494,13 @@ func main() {
 		_ = httpServer.Close()
 	}()
 
-	log.Printf("Argus server listening on %s (admin: %s / %s)", cfg.Listen, cfg.AdminUser, cfg.AdminPass)
+	log.Printf("Argus server listening on %s (initial admin: %s; password configured via ARGUS_ADMIN_PASS)", cfg.Listen, cfg.AdminUser)
 	log.Printf("agent endpoint: ws://%s/ws/agent", displayAddr(cfg.Listen))
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server: %v", err)
+	}
+	if restartRequested.Load() {
+		log.Println("restart handoff complete")
 	}
 	log.Println("bye")
 }

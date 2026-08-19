@@ -85,15 +85,15 @@ func TestSensitive2FAExec(t *testing.T) {
 	if w := execRequest(e, aliceTok, goodCode, `{"command":"echo hi"}`); w.Code == http.StatusPreconditionRequired {
 		t.Fatal("valid 2fa code should not return 428")
 	}
-	// 关闭 2FA → 无需验证码（无 agent → 非 428）
+	// 未启用 2FA 时，敏感操作必须要求先完成 setup/enable。
 	e.srv.DB.Model(alice).Update("two_fa_enabled", false)
-	if w := execRequest(e, aliceTok, "", `{"command":"echo hi"}`); w.Code == http.StatusPreconditionRequired {
-		t.Fatal("2fa disabled should not require code")
+	if w := execRequest(e, aliceTok, "", `{"command":"echo hi"}`); w.Code != http.StatusPreconditionRequired {
+		t.Fatalf("2fa setup should be required, got %d", w.Code)
 	}
-	// PAT 豁免：启用 2FA 的 PAT 不带码 → 非 428
+	// PAT 不得绕过敏感操作二次验证策略。
 	e.srv.DB.Model(alice).Update("two_fa_enabled", true)
 	pat := e.createPAT(t, alice, []string{ScopeServerExec}, "")
-	if w := execRequest(e, pat, "", `{"command":"echo hi"}`); w.Code == http.StatusPreconditionRequired {
-		t.Fatal("PAT should bypass sensitive 2FA")
+	if w := execRequest(e, pat, "", `{"command":"echo hi"}`); w.Code != http.StatusForbidden {
+		t.Fatalf("PAT should be rejected for sensitive operations, got %d", w.Code)
 	}
 }

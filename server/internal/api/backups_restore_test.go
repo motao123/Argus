@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
@@ -181,6 +182,8 @@ func TestEncryptedRestoreRejectsWrongScheduleKey(t *testing.T) {
 
 func TestEncryptedRestoreSwitchesDatabaseAndKeepsRollback(t *testing.T) {
 	srv, sch, encPath, livePath := newEncryptedRestoreEnv(t)
+	restarted := make(chan struct{}, 1)
+	srv.Restart = func() { restarted <- struct{}{} }
 	recorder := encryptedRestoreRequest(t, srv, sch.ID, encPath, encryptedRestoreConfirmation)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -218,5 +221,17 @@ func TestEncryptedRestoreSwitchesDatabaseAndKeepsRollback(t *testing.T) {
 	}
 	if audit.ResourceType != "backup_schedule" || audit.ResourceID != itoa(sch.ID) {
 		t.Fatalf("restore audit resource=%q/%q", audit.ResourceType, audit.ResourceID)
+	}
+	health := httptest.NewRecorder()
+	healthCtx, _ := gin.CreateTestContext(health)
+	healthCtx.Request = httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	srv.Healthz(healthCtx)
+	if health.Code != http.StatusServiceUnavailable {
+		t.Fatalf("health after restore = %d body=%s", health.Code, health.Body.String())
+	}
+	select {
+	case <-restarted:
+	case <-time.After(time.Second):
+		t.Fatal("restart callback was not scheduled")
 	}
 }

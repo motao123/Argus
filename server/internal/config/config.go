@@ -4,6 +4,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ type Config struct {
 	JWTSecret                string   // JWT 签名密钥（自动生成并持久化）
 	AdminUser                string   // 初始管理员用户名
 	AdminPass                string   // 初始管理员密码
+	DevMode                  bool     // 允许本地开发时使用示例初始密码
 	TrustedProxies           []string // 可信反向代理（CIDR/IP），用于 ClientIP
 	PublicURL                string   // 对外访问根地址，用于 OAuth 回调等绝对 URL（例如 https://argus.example.com）
 	NATReservedHosts         []string // dashboard/API 域名，禁止被 NAT Host 路由覆盖
@@ -31,13 +33,33 @@ type Config struct {
 }
 
 // Load 从环境变量/默认值加载配置。
+func (c *Config) ValidateStartup() error {
+	if c.AdminUser == "" {
+		return fmt.Errorf("ARGUS_ADMIN_USER must not be empty")
+	}
+	if c.DevMode {
+		if c.AdminPass == "" {
+			c.AdminPass = "argus123"
+		}
+		return nil
+	}
+	if len(c.AdminPass) < 12 || c.AdminPass == "argus123" || strings.EqualFold(c.AdminPass, "change-me-before-production") {
+		return fmt.Errorf("ARGUS_ADMIN_PASS must be set to a non-default password of at least 12 characters")
+	}
+	if c.JWTSecret != "" && len(c.JWTSecret) < 32 {
+		return fmt.Errorf("ARGUS_JWT_SECRET must contain at least 32 characters")
+	}
+	return nil
+}
+
 func Load() *Config {
 	c := &Config{
-		Listen:                   getenv("ARGUS_LISTEN", "0.0.0.0:8080"),
+		Listen:                   getenv("ARGUS_LISTEN", "127.0.0.1:8080"),
 		DBPath:                   getenv("ARGUS_DB", "./data/argus.db"),
 		JWTSecret:                os.Getenv("ARGUS_JWT_SECRET"),
 		AdminUser:                getenv("ARGUS_ADMIN_USER", "admin"),
-		AdminPass:                getenv("ARGUS_ADMIN_PASS", "argus123"),
+		AdminPass:                strings.TrimSpace(os.Getenv("ARGUS_ADMIN_PASS")),
+		DevMode:                  getenvBool("ARGUS_DEV_MODE", false),
 		TrustedProxies:           splitCSV(os.Getenv("ARGUS_TRUSTED_PROXIES")),
 		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("ARGUS_PUBLIC_URL")), "/"),
 		NATReservedHosts:         splitCSV(os.Getenv("ARGUS_NAT_RESERVED_HOSTS")),
@@ -50,10 +72,15 @@ func Load() *Config {
 		ThemeMarketIndex:         os.Getenv("ARGUS_THEME_MARKET_INDEX"),
 		PluginMarketTrustedKeys:  os.Getenv("ARGUS_PLUGIN_MARKET_TRUSTED_KEYS"),
 	}
+	return c
+}
+
+// EnsureJWT loads or creates the local JWT secret only after all command-line
+// database-path overrides have been applied.
+func (c *Config) EnsureJWT() {
 	if c.JWTSecret == "" {
 		c.JWTSecret = loadOrGenerateJWT(c.DBPath)
 	}
-	return c
 }
 
 func splitCSV(s string) []string {

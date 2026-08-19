@@ -459,3 +459,15 @@ Argus 当前不是“缺大量基础模块”，而是进入了 **能力收口�
 - Server：`CGO_ENABLED=1 CC=gcc` 使用仓库 `.tools/mingw`，全量测试全部通过；Protocol、Agent 全量测试此前已通过；三模块 build/vet 已通过。
 - Web：TypeScript、i18n 检查、Vite 生产构建和 Vitest 全量通过；Node 25 的无效 `--localstorage-file` 会导致 jsdom storage 失效，已在测试 setup 增加仅针对缺失 Storage 方法的 fallback。最终 Vitest 为 17 个文件、78/78 用例通过；备份页面定向测试 2/2 通过。构建仍有既有的大 bundle 约 2.5 MiB 警告，i18n 保留 23 个既有未使用 key 提示。
 - 完整实例备份：manifest v1、归档安全测试、加密恢复/审计重点测试和前端入口已通过；完整实例恢复仍要求外部进程重启，市场缓存/外部密钥由部署层单独管理。
+
+## 12. 上线阻断项收口（2026-08-19）
+
+按上线风险排序完成以下收口：
+
+1. **P0 - 安全首次启动**：裸二进制默认监听收紧为 `127.0.0.1:8080`。生产模式必须提供至少 12 字符、非示例的 `ARGUS_ADMIN_PASS`；显式 `ARGUS_DEV_MODE=true` 才允许本地示例凭据。启动日志不再输出密码。`ARGUS_JWT_SECRET` 若显式设置，必须至少 32 字符；JWT 自动生成移到命令行 `-d` 最终数据库路径确定之后。Compose 强制管理员密码与 JWT secret，systemd 环境文件缺失会使服务失败而非静默回退。
+2. **P0 - 恢复生命周期**：明文、加密和完整实例恢复成功后均先返回响应，再标记 `restart_pending` 并调用主进程重启协调器。`/healthz` 对 restart pending、数据库 pool 不可用或 SQLite Ping 失败返回 HTTP 503；主进程关闭 HTTP 服务并以退出码 75 退出，供 systemd/Docker 重启。
+3. **P1 - 明文恢复收敛**：分片 `.db` 恢复增加显式确认、失败与成功结构化审计、staging 审计写入、backup restore lock、回滚路径和重启调度，不再绕过加密恢复的安全语义。
+4. **P1 - 高风险追责和二次验证**：敏感 PAT 被明确拒绝；用户密钥读取、管理员用户操作、插件副作用与 OAuth 配置路由要求管理员二次验证。用户更新、2FA setup/enable/disable、OAuth 配置和插件 RPC/route/config/启停/批准/运行/删除已接入结构化成功或关键失败审计，审计 detail 不记录密码、验证码、OAuth secret、Agent secret、插件参数或请求体。
+5. **P2 - 提交卫生**：`.tools/`、根 `node_modules/` 与 `outputs/web-p0-build/` 已加入忽略规则，防止本机 MinGW、依赖与验证产物进入源代码提交。
+
+本轮验证：Server 全量 test/build/vet、Agent/Protocol 全量 test/build/vet、Web 17 个 Vitest 文件共 78 个用例、i18n 检查与 Vite 生产构建均通过。隔离 Argus Server 证实缺失管理员密码时以明确配置错误退出；提供强密码/JWT 后 `/healthz` 返回 200，浏览器首页渲染正常。Docker/Podman 在本机不可用，因此 Compose 和 systemd 的真实编排重启仍是部署环境验证项，不应表述为本机已通过。

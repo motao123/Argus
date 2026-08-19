@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -161,7 +162,8 @@ func (s *Server) listOAuthConfigs(c *gin.Context) {
 	}
 	var cfgs []model.OAuthConfig
 	if err := s.DB.Order("id").Find(&cfgs).Error; err != nil {
-		fail(c, http.StatusInternalServerError, err.Error())
+		s.auditLogResult(c, "oauth.config_list", "providers", "failure", "oauth.config_list_failed")
+		fail(c, http.StatusInternalServerError, err.Error(), "oauth.config_list_failed")
 		return
 	}
 	type oauthView struct {
@@ -181,6 +183,7 @@ func (s *Server) listOAuthConfigs(c *gin.Context) {
 		out = append(out, oauthView{ID: cfg.ID, Name: cfg.Name, ClientID: cfg.ClientID, AuthURL: cfg.AuthURL, TokenURL: cfg.TokenURL, UserInfoURL: cfg.UserInfoURL, UsernameField: cfg.UsernameField, AdminLogins: cfg.AdminLogins, Enabled: cfg.Enabled, ClientSecretConfigured: cfg.ClientSecret != ""})
 	}
 	ok(c, gin.H{"providers": out})
+	s.auditLogResult(c, "oauth.config_list", fmt.Sprintf("providers=%d", len(out)), "success", "")
 }
 
 func (s *Server) saveOAuthConfig(c *gin.Context) {
@@ -253,14 +256,21 @@ func (s *Server) saveOAuthConfig(c *gin.Context) {
 		Enabled:       req.Enabled,
 	}
 	// upsert
+	var saveErr error
 	if existingErr == nil {
 		record.ID = existing.ID
-		s.DB.Save(&record)
+		saveErr = s.DB.Save(&record).Error
 	} else {
-		s.DB.Create(&record)
+		saveErr = s.DB.Create(&record).Error
+	}
+	if saveErr != nil {
+		s.auditLogResult(c, "oauth.config_save", "provider="+req.Name, "failure", "oauth.config_save_failed")
+		fail(c, http.StatusInternalServerError, saveErr.Error(), "oauth.config_save_failed")
+		return
 	}
 	s.reloadOAuth()
 	ok(c, gin.H{"ok": true})
+	s.auditLogResult(c, "oauth.config_save", fmt.Sprintf("provider=%s enabled=%t", req.Name, req.Enabled), "success", "")
 }
 
 func (s *Server) deleteOAuthConfig(c *gin.Context) {
@@ -270,9 +280,14 @@ func (s *Server) deleteOAuthConfig(c *gin.Context) {
 		return
 	}
 	name := c.Param("name")
-	s.DB.Where("name = ?", name).Delete(&model.OAuthConfig{})
+	if err := s.DB.Where("name = ?", name).Delete(&model.OAuthConfig{}).Error; err != nil {
+		s.auditLogResult(c, "oauth.config_delete", "provider="+name, "failure", "oauth.config_delete_failed")
+		fail(c, http.StatusInternalServerError, err.Error(), "oauth.config_delete_failed")
+		return
+	}
 	s.reloadOAuth()
 	ok(c, gin.H{"ok": true})
+	s.auditLogResult(c, "oauth.config_delete", "provider="+name, "success", "")
 }
 
 // oauthConfig 从 DB 读 provider 配置并同步到内存客户端。
